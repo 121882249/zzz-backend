@@ -32,7 +32,7 @@ func TestUserRepository_DeleteUser_AtomicWithAPIKeys(t *testing.T) {
 	userRepo := NewUserRepository(client, integrationDB)
 	apiKeyRepo := NewAPIKeyRepository(client, integrationDB)
 
-	// 已提交的初始数据：1 个用户 + 2 个 active API Key。
+	// 已提交的初始数据：1 个用户 + 自动全局 Key + 2 个普通 active API Key。
 	user := mustCreateUser(t, client, &service.User{})
 	key1 := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, Key: fmt.Sprintf("sk-atomic-a-%d", user.ID)})
 	key2 := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, Key: fmt.Sprintf("sk-atomic-b-%d", user.ID)})
@@ -64,7 +64,7 @@ func TestUserRepository_DeleteUser_AtomicWithAPIKeys(t *testing.T) {
 
 	keys, _, err := apiKeyRepo.ListByUserID(ctx, user.ID, listParams, service.APIKeyListFilters{})
 	require.NoError(t, err, "ListByUserID")
-	require.Len(t, keys, 2, "回滚后 2 个 API Key 必须仍为 active")
+	require.Len(t, keys, 3, "回滚后全局 Key 和 2 个普通 API Key 必须仍为 active")
 
 	var auditCount int
 	require.NoError(t, integrationDB.QueryRowContext(ctx,

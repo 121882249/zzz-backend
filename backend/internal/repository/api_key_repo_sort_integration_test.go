@@ -19,9 +19,10 @@ func (s *APIKeyRepoSuite) TestListByUserID_SortByNameAsc() {
 		SortOrder: "asc",
 	}, service.APIKeyListFilters{})
 	s.Require().NoError(err)
-	s.Require().Len(keys, 2)
-	s.Require().Equal("a-key", keys[0].Name)
-	s.Require().Equal("z-key", keys[1].Name)
+	s.Require().Len(keys, 3)
+	s.Require().Equal("TokenPro", keys[0].Name)
+	s.Require().Equal("a-key", keys[1].Name)
+	s.Require().Equal("z-key", keys[2].Name)
 }
 
 func (s *APIKeyRepoSuite) TestListByUserID_SortByID() {
@@ -36,7 +37,8 @@ func (s *APIKeyRepoSuite) TestListByUserID_SortByID() {
 		SortOrder: "desc",
 	}, service.APIKeyListFilters{})
 	s.Require().NoError(err)
-	s.Require().Len(keys, 2)
+	s.Require().Len(keys, 3)
 	s.Require().Equal(second.ID, keys[0].ID)
 	s.Require().Equal(first.ID, keys[1].ID)
+	s.Require().Equal(service.APIKeyTypeGlobal, keys[2].KeyType)
 }
