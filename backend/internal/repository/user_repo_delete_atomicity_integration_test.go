@@ -36,6 +36,12 @@ func TestUserRepository_DeleteUser_AtomicWithAPIKeys(t *testing.T) {
 	user := mustCreateUser(t, client, &service.User{})
 	key1 := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, Key: fmt.Sprintf("sk-atomic-a-%d", user.ID)})
 	key2 := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, Key: fmt.Sprintf("sk-atomic-b-%d", user.ID)})
+	globalKeyRepo, ok := apiKeyRepo.(interface {
+		GetGlobalByUserID(context.Context, int64) (*service.APIKey, error)
+	})
+	require.True(t, ok, "repository must support global API keys")
+	globalKey, err := globalKeyRepo.GetGlobalByUserID(ctx, user.ID)
+	require.NoError(t, err, "GetGlobalByUserID")
 
 	t.Cleanup(func() {
 		// testEntClient 的写入不会自动回滚，best-effort 清理避免污染共享库。
@@ -53,6 +59,7 @@ func TestUserRepository_DeleteUser_AtomicWithAPIKeys(t *testing.T) {
 
 	require.NoError(t, apiKeyRepo.DeleteWithAudit(opCtx, key1.ID))
 	require.NoError(t, apiKeyRepo.DeleteWithAudit(opCtx, key2.ID))
+	require.NoError(t, apiKeyRepo.DeleteWithAudit(opCtx, globalKey.ID))
 	require.NoError(t, userRepo.Delete(opCtx, user.ID))
 
 	require.NoError(t, tx.Rollback(), "rollback outer tx (模拟 commit 失败/中止)")
@@ -78,6 +85,7 @@ func TestUserRepository_DeleteUser_AtomicWithAPIKeys(t *testing.T) {
 
 	require.NoError(t, apiKeyRepo.DeleteWithAudit(opCtx2, key1.ID))
 	require.NoError(t, apiKeyRepo.DeleteWithAudit(opCtx2, key2.ID))
+	require.NoError(t, apiKeyRepo.DeleteWithAudit(opCtx2, globalKey.ID))
 	require.NoError(t, userRepo.Delete(opCtx2, user.ID))
 
 	require.NoError(t, tx2.Commit(), "commit outer tx")
