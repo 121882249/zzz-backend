@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useAppStore } from '@/stores/app'
 import { getPublicSettings } from '@/api/auth'
+import { checkUpdates } from '@/api/admin/system'
 import type { PublicSettings } from '@/types'
 
 function createDeferred<T>() {
@@ -65,6 +66,17 @@ function createPublicSettings(overrides: Partial<PublicSettings> = {}): PublicSe
 }
 
 // Mock API 模块
+vi.mock('@/i18n', () => ({
+  i18n: {
+    global: {
+      t: (key: string, params?: Record<string, string>) => {
+        if (key !== 'version.upstreamUpdateAvailable') return key
+        return `A Sub2API upstream update is available: current v${params?.current}, latest v${params?.latest}.`
+      }
+    }
+  }
+}))
+
 vi.mock('@/api/admin/system', () => ({
   checkUpdates: vi.fn(),
 }))
@@ -78,7 +90,9 @@ describe('useAppStore', () => {
     setActivePinia(createPinia())
     vi.useFakeTimers()
     localStorage.clear()
+    sessionStorage.clear()
     vi.mocked(getPublicSettings).mockReset()
+    vi.mocked(checkUpdates).mockReset()
     // 清除 window.__APP_CONFIG__
     delete (window as any).__APP_CONFIG__
   })
@@ -86,6 +100,7 @@ describe('useAppStore', () => {
   afterEach(() => {
     vi.useRealTimers()
     localStorage.clear()
+    sessionStorage.clear()
   })
 
   // --- Toast 消息管理 ---
@@ -474,6 +489,45 @@ describe('useAppStore', () => {
       expect((window as any).__APP_CONFIG__.table_page_size_options).toEqual([20, 100, 1000])
       expect(localStorage.getItem('table-page-size')).toBeNull()
       expect(localStorage.getItem('table-page-size-source')).toBeNull()
+    })
+  })
+
+  describe('底层版本更新提醒', () => {
+    it('每个新版本在当前会话显示一次常驻提醒', async () => {
+      vi.mocked(checkUpdates).mockResolvedValue({
+        current_version: 'TokenPro-R31',
+        current_upstream_version: '0.2.2',
+        latest_version: '0.2.3',
+        has_update: true,
+        cached: false,
+        build_type: 'release'
+      })
+      const store = useAppStore()
+
+      await store.fetchVersion(true)
+      await store.fetchVersion(true)
+
+      expect(store.currentUpstreamVersion).toBe('0.2.2')
+      expect(store.toasts).toHaveLength(1)
+      expect(store.toasts[0]).toMatchObject({ type: 'warning', duration: undefined })
+      expect(store.toasts[0].message).toContain('0.2.2')
+      expect(store.toasts[0].message).toContain('0.2.3')
+    })
+
+    it('底层版本已是最新时不提醒', async () => {
+      vi.mocked(checkUpdates).mockResolvedValue({
+        current_version: 'TokenPro-R31',
+        current_upstream_version: '0.2.2',
+        latest_version: '0.2.2',
+        has_update: false,
+        cached: false,
+        build_type: 'release'
+      })
+      const store = useAppStore()
+
+      await store.fetchVersion(true)
+
+      expect(store.toasts).toHaveLength(0)
     })
   })
 })

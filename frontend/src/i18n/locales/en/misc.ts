@@ -23,6 +23,7 @@ export default {
     latestVersion: 'Latest Version',
     upToDate: "You're running the latest version.",
     updateAvailable: 'A new version is available!',
+    upstreamUpdateAvailable: 'A Sub2API upstream update is available: current v{current}, latest v{latest}. Please schedule an upgrade.',
     releaseNotes: 'Release Notes',
     noReleaseNotes: 'No release notes',
     viewUpdate: 'View Update',

@@ -382,6 +382,3 @@ code, pre, kbd { font-family: var(--font-geist-mono), "SFMono-Regular", Consolas
   .connection-summary > div:first-child { border-top: 0; }
   .guide-pagination { grid-template-columns: 1fr; }
 }
-
-
-

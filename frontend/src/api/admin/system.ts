@@ -13,6 +13,7 @@ export interface ReleaseInfo {
 
 export interface VersionInfo {
   current_version: string
+  current_upstream_version?: string
   latest_version: string
   has_update: boolean
   release_info?: ReleaseInfo

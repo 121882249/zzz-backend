@@ -23,6 +23,7 @@ export default {
     latestVersion: '最新版本',
     upToDate: '已是最新版本',
     updateAvailable: '有新版本可用！',
+    upstreamUpdateAvailable: '检测到 Sub2API 底层版本更新：当前 v{current}，最新 v{latest}。请安排合并升级。',
     releaseNotes: '更新日志',
     noReleaseNotes: '暂无更新日志',
     viewUpdate: '查看更新',
