@@ -82,12 +82,16 @@ func APIKeyFromService(k *service.APIKey) *APIKey {
 	if k == nil {
 		return nil
 	}
+	keyType := k.KeyType
+	if keyType == "" {
+		keyType = service.APIKeyTypeGroup
+	}
 	out := &APIKey{
 		ID:                 k.ID,
 		UserID:             k.UserID,
 		Key:                k.Key,
 		Name:               k.Name,
-		KeyType:            k.KeyType,
+		KeyType:            keyType,
 		GroupID:            k.GroupID,
 		Status:             k.Status,
 		IPWhitelist:        k.IPWhitelist,

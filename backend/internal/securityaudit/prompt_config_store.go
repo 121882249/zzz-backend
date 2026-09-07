@@ -354,7 +354,7 @@ func (m *ConfigManager) buildNextStorage(current storageConfig, req UpdateConfig
 		QueueCapacity: req.QueueCapacity, Scanners: append([]string(nil), req.Scanners...),
 		AllGroups: req.AllGroups, GroupIDs: append([]int64(nil), req.GroupIDs...),
 		MonitorUserEmails: append([]string(nil), req.MonitorUserEmails...),
-		ConfigVersion: current.ConfigVersion, UpdatedBy: actorID,
+		ConfigVersion:     current.ConfigVersion, UpdatedBy: actorID,
 		Endpoints: make([]StorageEndpoint, 0, len(req.Endpoints)),
 	}
 	for _, endpoint := range req.Endpoints {
