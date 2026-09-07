@@ -14,7 +14,8 @@ func TestAPIKeyScopeUsesExplicitType(t *testing.T) {
 		t.Fatal("group key named TokenPro must remain group-scoped")
 	}
 
-	legacy := &APIKey{Name: "legacy", GroupID: ptrInt64(42)}
+	legacyGroupID := int64(42)
+	legacy := &APIKey{Name: "legacy", GroupID: &legacyGroupID}
 	if legacy.IsGlobal() || !legacy.IsGroupScoped() {
 		t.Fatal("missing key_type must preserve legacy group behavior")
 	}
@@ -26,4 +27,3 @@ func TestAPIKeyScopeNilReceiver(t *testing.T) {
 		t.Fatal("nil receiver should not be global and should preserve legacy behavior")
 	}
 }
-
