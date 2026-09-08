@@ -493,6 +493,39 @@ describe('useAppStore', () => {
   })
 
   describe('底层版本更新提醒', () => {
+    it('缓存过期后会重新检查并发现新版本', async () => {
+      vi.mocked(checkUpdates)
+        .mockResolvedValueOnce({
+          current_version: 'TokenPro-R31',
+          current_upstream_version: '0.2.2',
+          latest_version: '0.2.2',
+          has_update: false,
+          cached: false,
+          build_type: 'release'
+        })
+        .mockResolvedValueOnce({
+          current_version: 'TokenPro-R31',
+          current_upstream_version: '0.2.2',
+          latest_version: '0.2.3',
+          has_update: true,
+          cached: false,
+          build_type: 'release'
+        })
+      const store = useAppStore()
+
+      await store.fetchVersion(false)
+      vi.advanceTimersByTime(9 * 60 * 1000)
+      await store.fetchVersion(false)
+      expect(checkUpdates).toHaveBeenCalledTimes(1)
+
+      vi.advanceTimersByTime(61 * 1000)
+      await store.fetchVersion(false)
+
+      expect(checkUpdates).toHaveBeenCalledTimes(2)
+      expect(store.latestVersion).toBe('0.2.3')
+      expect(store.toasts).toHaveLength(1)
+    })
+
     it('每个新版本在当前会话显示一次常驻提醒', async () => {
       vi.mocked(checkUpdates).mockResolvedValue({
         current_version: 'TokenPro-R31',

@@ -654,6 +654,7 @@ import Icon from '@/components/icons/Icon.vue'
 const GITHUB_REPO = 'Wei-Shaw/sub2api'
 // Docker Hub image published by CI (tags carry no "v" prefix, e.g. weishaw/sub2api:0.1.146)
 const DOCKER_IMAGE = 'weishaw/sub2api'
+const VERSION_POLL_INTERVAL_MS = 60 * 1000
 
 const { t } = useI18n()
 
@@ -668,6 +669,7 @@ const isAdmin = computed(() => authStore.isAdmin)
 
 const dropdownOpen = ref(false)
 const dropdownRef = ref<HTMLElement | null>(null)
+let versionPollTimer: ReturnType<typeof setInterval> | null = null
 
 // Use store's cached version state
 const loading = computed(() => appStore.versionLoading)
@@ -915,13 +917,21 @@ function handleClickOutside(event: MouseEvent) {
 
 onMounted(() => {
   if (isAdmin.value) {
-    // Use cached version if available, otherwise fetch
+    // Poll cheaply in the browser; the store only contacts the server after
+    // its 10-minute cache expires, so releases that happen in an open session
+    // still produce a notification without hammering the update endpoint.
     appStore.fetchVersion(false)
+    versionPollTimer = setInterval(() => {
+      if (document.visibilityState === 'visible' && isAdmin.value) {
+        appStore.fetchVersion(false)
+      }
+    }, VERSION_POLL_INTERVAL_MS)
   }
   document.addEventListener('click', handleClickOutside)
 })
 
 onBeforeUnmount(() => {
+  if (versionPollTimer) clearInterval(versionPollTimer)
   document.removeEventListener('click', handleClickOutside)
 })
 </script>

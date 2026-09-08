@@ -14,6 +14,8 @@ import {
 } from '@/api/admin/system'
 import { getPublicSettings as fetchPublicSettingsAPI } from '@/api/auth'
 
+const VERSION_CACHE_TTL_MS = 10 * 60 * 1000
+
 export const useAppStore = defineStore('app', () => {
   // ==================== State ====================
 
@@ -44,6 +46,7 @@ export const useAppStore = defineStore('app', () => {
   const hasUpdate = ref<boolean>(false)
   const buildType = ref<string>('source')
   const releaseInfo = ref<ReleaseInfo | null>(null)
+  let versionLastCheckedAt = 0
 
   // Auto-incrementing ID for toasts
   let toastIdCounter = 0
@@ -233,6 +236,7 @@ export const useAppStore = defineStore('app', () => {
     loading.value = false
     loadingCount.value = 0
     toasts.value = []
+    versionLastCheckedAt = 0
   }
 
   // ==================== Version Management ====================
@@ -243,7 +247,11 @@ export const useAppStore = defineStore('app', () => {
    */
   async function fetchVersion(force = false): Promise<VersionInfo | null> {
     // Return cached data if available and not forcing refresh
-    if (versionLoaded.value && !force) {
+    if (
+      versionLoaded.value &&
+      !force &&
+      Date.now() - versionLastCheckedAt < VERSION_CACHE_TTL_MS
+    ) {
       return {
         current_version: currentVersion.value,
         current_upstream_version: currentUpstreamVersion.value,
@@ -270,6 +278,7 @@ export const useAppStore = defineStore('app', () => {
       buildType.value = data.build_type || 'source'
       releaseInfo.value = data.release_info || null
       versionLoaded.value = true
+      versionLastCheckedAt = Date.now()
       if (data.has_update && data.latest_version) {
         const notificationKey = `tokenpro:upstream-update:${data.latest_version}`
         let alreadyNotified = false
@@ -304,6 +313,7 @@ export const useAppStore = defineStore('app', () => {
   function clearVersionCache(): void {
     versionLoaded.value = false
     hasUpdate.value = false
+    versionLastCheckedAt = 0
   }
 
   // ==================== Public Settings Management ====================
