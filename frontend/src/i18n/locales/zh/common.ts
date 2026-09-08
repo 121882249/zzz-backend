@@ -218,6 +218,12 @@ export default {
 
   // Auth
   auth: {
+    cosmic: {
+      kicker: 'TOKENPRO INTELLIGENCE NETWORK',
+      titleLineOne: '一个入口，连接',
+      titleHighlight: '无界智能',
+      description: '用一个 TokenPro 密钥调用多种领先模型，在统一、稳定的智能网络中继续你的工作。'
+    },
     welcomeBack: '欢迎回来',
     signInToAccount: '登录您的账户以继续',
     signIn: '登录',

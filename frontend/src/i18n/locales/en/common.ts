@@ -218,6 +218,12 @@ export default {
 
   // Auth
   auth: {
+    cosmic: {
+      kicker: 'TOKENPRO INTELLIGENCE NETWORK',
+      titleLineOne: 'One gateway to',
+      titleHighlight: 'boundless intelligence',
+      description: 'Use one TokenPro key to access leading models through a unified and reliable intelligence network.'
+    },
     welcomeBack: 'Welcome Back',
     signInToAccount: 'Sign in to your account to continue',
     signIn: 'Sign In',

@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { mount, RouterLinkStub } from '@vue/test-utils'
+import { flushPromises, mount, RouterLinkStub } from '@vue/test-utils'
 
 import HomeView from '../HomeView.vue'
 
-const { appStore, authStore } = vi.hoisted(() => ({
+const { appStore, authStore, getModelPlaza } = vi.hoisted(() => ({
   appStore: {
     cachedPublicSettings: {} as Record<string, unknown>,
     siteName: 'Fallback site',
@@ -18,6 +18,7 @@ const { appStore, authStore } = vi.hoisted(() => ({
     user: null as { email?: string } | null,
     checkAuth: vi.fn(),
   },
+  getModelPlaza: vi.fn(),
 }))
 
 vi.mock('@/stores', () => ({
@@ -28,6 +29,8 @@ vi.mock('@/stores', () => ({
 vi.mock('@/stores/app', () => ({
   useAppStore: () => appStore,
 }))
+
+vi.mock('@/api/modelPlaza', () => ({ getModelPlaza }))
 
 vi.mock('vue-i18n', async (importOriginal) => {
   const actual = await importOriginal<typeof import('vue-i18n')>()
@@ -56,13 +59,13 @@ function mountHome(settings: Record<string, unknown> = {}) {
 }
 
 function compactDestination(wrapper: ReturnType<typeof mountHome>) {
-  return wrapper.get('[data-testid="compact-home"]').findComponent(RouterLinkStub).props('to')
+  return linkDestination(wrapper, 'compact-primary-action')
 }
 
-function modelPlazaDestination(wrapper: ReturnType<typeof mountHome>) {
+function linkDestination(wrapper: ReturnType<typeof mountHome>, testId: string) {
   return wrapper
     .findAllComponents(RouterLinkStub)
-    .find((link) => link.props('to') === '/model-plaza')
+    .find((link) => link.attributes('data-testid') === testId)
     ?.props('to')
 }
 
@@ -73,6 +76,8 @@ describe('HomeView compact mode', () => {
     authStore.user = null
     authStore.checkAuth.mockClear()
     appStore.fetchPublicSettings.mockClear()
+    getModelPlaza.mockReset()
+    getModelPlaza.mockResolvedValue({ description: '', groups: [] })
     localStorage.clear()
     vi.spyOn(window, 'matchMedia').mockReturnValue({ matches: false } as MediaQueryList)
   })
@@ -100,7 +105,7 @@ describe('HomeView compact mode', () => {
   it('treats whitespace-only custom content as empty and selects compact mode', () => {
     const wrapper = mountHome({ compact_home_enabled: true, home_content: ' \n\t ' })
 
-    expect(wrapper.get('[data-testid="compact-home"]').text()).toContain('Test site')
+    expect(wrapper.get('[data-testid="compact-home"]').text()).toContain('TokenPro')
   })
 
   it.each([undefined, false])('selects the default home when compact mode is %s', (enabled) => {
@@ -111,8 +116,8 @@ describe('HomeView compact mode', () => {
     expect(wrapper.find('.terminal-container').exists()).toBe(true)
   })
 
-  it('links unauthenticated visitors to login', () => {
-    expect(compactDestination(mountHome({ compact_home_enabled: true }))).toBe('/login')
+  it('links unauthenticated visitors to registration from the primary action', () => {
+    expect(compactDestination(mountHome({ compact_home_enabled: true }))).toBe('/register')
   })
 
   it('links authenticated users to their dashboard', () => {
@@ -131,54 +136,48 @@ describe('HomeView compact mode', () => {
     expect(appStore.fetchPublicSettings).not.toHaveBeenCalled()
   })
 
-  it('shows the model plaza link to anonymous visitors when public access is enabled', () => {
-    const wrapper = mountHome({
-      compact_home_enabled: true,
-      model_plaza_enabled: true,
-      model_plaza_require_auth: false,
-    })
-
-    expect(modelPlazaDestination(wrapper)).toBe('/model-plaza')
-  })
-
-  it('hides the model plaza link from anonymous visitors when sign-in is required', () => {
-    const wrapper = mountHome({
-      compact_home_enabled: true,
-      model_plaza_enabled: true,
-      model_plaza_require_auth: true,
-    })
-
-    expect(modelPlazaDestination(wrapper)).toBeUndefined()
-  })
-
-  it('shows the model plaza link to authenticated visitors when sign-in is required', () => {
-    authStore.isAuthenticated = true
-
-    const wrapper = mountHome({
-      compact_home_enabled: true,
-      model_plaza_enabled: true,
-      model_plaza_require_auth: true,
-    })
-
-    expect(modelPlazaDestination(wrapper)).toBe('/model-plaza')
-  })
-
-  it('shows the model plaza link in the default home header', () => {
+  it('keeps product, pricing, docs, community and model-plaza links out of the header', () => {
     const wrapper = mountHome({
       model_plaza_enabled: true,
       model_plaza_require_auth: false,
+      doc_url: 'https://docs.example.com',
     })
 
-    expect(modelPlazaDestination(wrapper)).toBe('/model-plaza')
+    const destinations = wrapper.findAllComponents(RouterLinkStub).map((link) => link.props('to'))
+    expect(destinations).not.toContain('/model-plaza')
+    expect(wrapper.find('a[href="https://docs.example.com"]').exists()).toBe(false)
   })
 
-  it('hides the model plaza link when the feature is disabled', () => {
-    const wrapper = mountHome({
-      compact_home_enabled: true,
-      model_plaza_enabled: false,
-      model_plaza_require_auth: false,
+  it('shows login and registration together for anonymous visitors', () => {
+    const wrapper = mountHome()
+    expect(linkDestination(wrapper, 'header-login')).toBe('/login')
+    expect(linkDestination(wrapper, 'header-register')).toBe('/register')
+    expect(linkDestination(wrapper, 'hero-primary-action')).toBe('/register')
+  })
+
+  it('deduplicates the live model catalog and exposes future model families', async () => {
+    getModelPlaza.mockResolvedValue({
+      description: '',
+      groups: [
+        { models: [{ name: 'gpt-5.6-sol' }, { name: 'DeepSeek V4' }, { name: 'Mistral Large' }] },
+        { models: [{ name: 'deepseek v4' }, { name: 'Qwen 4' }] },
+      ],
     })
 
-    expect(modelPlazaDestination(wrapper)).toBeUndefined()
+    const wrapper = mountHome({ model_plaza_enabled: true })
+    await flushPromises()
+
+    expect(getModelPlaza).toHaveBeenCalledOnce()
+    expect(wrapper.text()).toContain('DeepSeek V4')
+    expect(wrapper.text()).toContain('Mistral Large')
+    expect(wrapper.text()).toContain('Qwen 4')
+    expect(wrapper.findAll('.constellation-model--discovered')).toHaveLength(3)
+  })
+
+  it('does not request an authenticated-only model catalog for anonymous visitors', async () => {
+    mountHome({ model_plaza_enabled: true, model_plaza_require_auth: true })
+    await flushPromises()
+
+    expect(getModelPlaza).not.toHaveBeenCalled()
   })
 })
