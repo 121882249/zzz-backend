@@ -5,6 +5,7 @@
 ## 1. TokenPro 全局 API Key
 
 - API Key 使用独立 `key_type` 区分 `global` 与普通 `group` 类型，不依赖名称判断。
+- 系统全局 `TokenPro` Key 不可删除；用户可通过重置功能轮换 Key 值，重置保留原记录 ID 并强制 `group_id` 为空。
 - 全局 Key 的 `group_id` 为空；普通 Key 继续固定绑定原分组。
 - 注册及存量用户补齐全局 Key 的服务逻辑和幂等数据库迁移。
 - 每个请求根据真实模型独立解析可用分组和账号，不把结果回写到 Key。

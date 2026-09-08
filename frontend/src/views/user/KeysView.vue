@@ -135,7 +135,14 @@
 
           <template #cell-group="{ row }">
             <div class="group/dropdown relative">
+              <span
+                v-if="row.key_type === 'global'"
+                class="inline-flex items-center rounded-full bg-primary-50 px-2.5 py-1 text-xs font-medium text-primary-700 dark:bg-primary-900/25 dark:text-primary-300"
+              >
+                {{ t('keys.globalRouting') }}
+              </span>
               <button
+                v-else
                 :ref="(el) => setGroupButtonRef(row.id, el)"
                 @click="openGroupSelector(row)"
                 class="-mx-2 -my-1 flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1 transition-all duration-200 hover:bg-gray-100 dark:hover:bg-dark-700"
@@ -412,11 +419,21 @@
               </button>
               <!-- Delete Button -->
               <button
+                v-if="row.key_type !== 'global'"
                 @click="confirmDelete(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
               >
                 <Icon name="trash" size="sm" />
                 <span class="text-xs">{{ t('common.delete') }}</span>
+              </button>
+              <!-- The system global key is immutable but its credential can be rotated. -->
+              <button
+                v-else
+                @click="confirmRegenerate(row)"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-orange-50 hover:text-orange-600 dark:hover:bg-orange-900/20 dark:hover:text-orange-400"
+              >
+                <Icon name="refresh" size="sm" />
+                <span class="text-xs">{{ t('keys.regenerateKey') }}</span>
               </button>
             </div>
           </template>
@@ -964,6 +981,18 @@
       @cancel="showDeleteDialog = false"
     />
 
+    <!-- Global TokenPro Key Regeneration Confirmation Dialog -->
+    <ConfirmDialog
+      :show="showRegenerateDialog"
+      :title="t('keys.regenerateKeyTitle')"
+      :message="t('keys.regenerateKeyConfirmMessage')"
+      :confirm-text="t('keys.regenerateKey')"
+      :cancel-text="t('common.cancel')"
+      :danger="true"
+      @confirm="handleRegenerate"
+      @cancel="showRegenerateDialog = false"
+    />
+
     <!-- Reset Quota Confirmation Dialog -->
     <ConfirmDialog
       :show="showResetQuotaDialog"
@@ -1297,6 +1326,7 @@ const filterGroupId = ref<string | number>('')
 const showCreateModal = ref(false)
 const showEditModal = ref(false)
 const showDeleteDialog = ref(false)
+const showRegenerateDialog = ref(false)
 const showResetQuotaDialog = ref(false)
 const showResetRateLimitDialog = ref(false)
 const showUseKeyModal = ref(false)
@@ -1657,13 +1687,23 @@ const closeGroupSelector = (event: MouseEvent) => {
 }
 
 const confirmDelete = (key: ApiKey) => {
+  if (key.key_type === 'global') return
   selectedKey.value = key
   showDeleteDialog.value = true
 }
 
+const confirmRegenerate = (key: ApiKey) => {
+  if (key.key_type !== 'global') return
+  selectedKey.value = key
+  showRegenerateDialog.value = true
+}
+
 const handleSubmit = async () => {
   // Validate group_id is required
-  if (formData.value.group_id === null) {
+  if (
+    formData.value.group_id === null &&
+    (!showEditModal.value || selectedKey.value?.key_type !== 'global')
+  ) {
     appStore.showError(t('keys.groupRequired'))
     return
   }
@@ -1720,7 +1760,6 @@ const handleSubmit = async () => {
     if (showEditModal.value && selectedKey.value) {
       const updates: UpdateApiKeyRequest = {
         name: formData.value.name,
-        group_id: formData.value.group_id,
         ip_whitelist: ipWhitelist,
         ip_blacklist: ipBlacklist,
         quota: quota,
@@ -1728,6 +1767,9 @@ const handleSubmit = async () => {
         rate_limit_5h: rateLimitData.rate_limit_5h,
         rate_limit_1d: rateLimitData.rate_limit_1d,
         rate_limit_7d: rateLimitData.rate_limit_7d,
+      }
+      if (selectedKey.value.key_type !== 'global') {
+        updates.group_id = formData.value.group_id
       }
       if (shouldSubmitEditStatus(selectedKey.value, formData.value.status)) {
         updates.status = formData.value.status
@@ -1779,6 +1821,22 @@ const handleDelete = async () => {
   } catch (error: any) {
     // 优先使用后端返回的错误消息，提供更具体的错误信息给用户
     const errorMsg = error?.message || t('keys.failedToDelete')
+    appStore.showError(errorMsg)
+  }
+}
+
+const handleRegenerate = async () => {
+  if (!selectedKey.value || selectedKey.value.key_type !== 'global') return
+
+  try {
+    const regenerated = await keysAPI.regenerate(selectedKey.value.id)
+    const index = apiKeys.value.findIndex((key) => key.id === regenerated.id)
+    if (index >= 0) apiKeys.value[index] = regenerated
+    selectedKey.value = regenerated
+    showRegenerateDialog.value = false
+    appStore.showSuccess(t('keys.regenerateKeySuccess'))
+  } catch (error: any) {
+    const errorMsg = error.response?.data?.detail || error?.message || t('keys.failedToRegenerateKey')
     appStore.showError(errorMsg)
   }
 }

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/stretchr/testify/require"
 )
@@ -31,6 +32,7 @@ type apiKeyRepoStub struct {
 	updateErr              error   // Update 的错误返回值
 	deletedIDs             []int64 // 记录已删除的 API Key ID 列表
 	updatedKeys            []APIKey
+	updateFields           []APIKeyUpdateFields
 	allowListByUserID      bool
 	listByUserIDKeys       []APIKey
 	listByUserIDErr        error
@@ -82,10 +84,11 @@ func (s *apiKeyRepoStub) GetByKeyForAuth(ctx context.Context, key string) (*APIK
 	panic("unexpected GetByKeyForAuth call")
 }
 
-func (s *apiKeyRepoStub) Update(ctx context.Context, key *APIKey, _ APIKeyUpdateFields) error {
+func (s *apiKeyRepoStub) Update(ctx context.Context, key *APIKey, fields APIKeyUpdateFields) error {
 	if key != nil {
 		s.updatedKeys = append(s.updatedKeys, *key)
 	}
+	s.updateFields = append(s.updateFields, fields)
 	return s.updateErr
 }
 
@@ -333,6 +336,54 @@ func TestApiKeyService_Delete_Success(t *testing.T) {
 	require.Equal(t, []string{svc.authCacheKey("k")}, cache.deleteAuthKeys)
 	_, exists := svc.lastUsedTouchL1.Load(int64(42))
 	require.False(t, exists, "delete should clear touch debounce cache")
+}
+
+func TestAPIKeyService_Delete_GlobalKeyForbidden(t *testing.T) {
+	repo := &apiKeyRepoStub{
+		apiKey: &APIKey{ID: 42, UserID: 7, Key: "sk-global", KeyType: APIKeyTypeGlobal},
+	}
+	cache := &apiKeyCacheStub{}
+	svc := &APIKeyService{apiKeyRepo: repo, cache: cache}
+
+	err := svc.Delete(context.Background(), 42, 7)
+	require.ErrorIs(t, err, ErrGlobalAPIKeyDeleteForbidden)
+	require.Empty(t, repo.deletedIDs)
+	require.Empty(t, cache.deleteAuthKeys)
+}
+
+func TestAPIKeyService_RegenerateGlobalKey_Success(t *testing.T) {
+	legacyGroupID := int64(99)
+	repo := &apiKeyRepoStub{
+		apiKey: &APIKey{
+			ID: 42, UserID: 7, Key: "sk-old", Name: "TokenPro",
+			KeyType: APIKeyTypeGlobal, GroupID: &legacyGroupID,
+		},
+	}
+	cache := &apiKeyCacheStub{}
+	svc := &APIKeyService{
+		apiKeyRepo: repo,
+		cache:      cache,
+		cfg:        &config.Config{Default: config.DefaultConfig{APIKeyPrefix: "tp-"}},
+	}
+
+	regenerated, err := svc.RegenerateGlobalKey(context.Background(), 42, 7)
+	require.NoError(t, err)
+	require.NotEqual(t, "sk-old", regenerated.Key)
+	require.True(t, strings.HasPrefix(regenerated.Key, "tp-"))
+	require.Nil(t, regenerated.GroupID)
+	require.Equal(t, []APIKeyUpdateFields{{Key: true, GroupID: true}}, repo.updateFields)
+	require.Len(t, cache.deleteAuthKeys, 2)
+}
+
+func TestAPIKeyService_RegenerateGlobalKey_RejectsOrdinaryKey(t *testing.T) {
+	repo := &apiKeyRepoStub{
+		apiKey: &APIKey{ID: 42, UserID: 7, Key: "sk-group", KeyType: APIKeyTypeGroup},
+	}
+	svc := &APIKeyService{apiKeyRepo: repo, cfg: &config.Config{}}
+
+	_, err := svc.RegenerateGlobalKey(context.Background(), 42, 7)
+	require.ErrorIs(t, err, ErrGlobalAPIKeyRequired)
+	require.Empty(t, repo.updatedKeys)
 }
 
 // TestApiKeyService_Delete_NotFound 测试删除不存在的 API Key 时返回正确的错误。

@@ -725,6 +725,7 @@ export interface ApiKey {
   user_id: number
   key: string
   name: string
+  key_type: 'group' | 'global'
   group_id: number | null
   status: 'active' | 'inactive' | 'quota_exhausted' | 'expired'
   ip_whitelist: string[]
