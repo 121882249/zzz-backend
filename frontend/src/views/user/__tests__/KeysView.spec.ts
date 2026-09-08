@@ -45,6 +45,10 @@ const messages: Record<string, string> = {
   'keys.created': 'Created',
   'keys.expiresAt': 'Expires',
   'keys.group': 'Group',
+  'keys.globalManagedBadge': 'TokenPro automation only',
+  'keys.globalManagedKey': 'Managed automatically by TokenPro',
+  'keys.globalManagedKeyHint':
+    'Do not copy, configure, or use it for direct API calls. Use “Reset Key” for maintenance.',
   'keys.id': 'ID',
   'keys.currentConcurrency': 'Current Concurrency',
   'keys.lastUsedAt': 'Last Used',
@@ -176,6 +180,9 @@ const DataTableStub = {
           <slot name="cell-id" :value="row.id" :row="row" />
         </div>
         <slot name="cell-name" :value="row.name" :row="row" />
+        <div data-test="key-value">
+          <slot name="cell-key" :value="row.key" :row="row" />
+        </div>
         <div data-test="current-concurrency">
           <slot name="cell-current_concurrency" :value="row.current_concurrency" :row="row" />
         </div>
@@ -427,6 +434,13 @@ describe('user KeysView column settings', () => {
 
     expect(actions).toContain('Reset Key')
     expect(actions).not.toContain('Delete')
+    expect(actions).not.toContain('Use Key')
+    expect(actions).not.toContain('Import to CCS')
+    expect(actions).not.toContain('Edit')
+    expect(actions).not.toContain('Disable')
+    expect(actions).not.toContain('Enable')
+    expect(wrapper.text()).toContain('TokenPro automation only')
+    expect(wrapper.text()).toContain('Managed automatically by TokenPro')
   })
 
   it('keeps delete for an ordinary key even when it is named TokenPro', async () => {

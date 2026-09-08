@@ -38,6 +38,7 @@ var (
 	// ErrAPIKeyQuotaExhausted = infraerrors.TooManyRequests("API_KEY_QUOTA_EXHAUSTED", "api key quota exhausted")
 	ErrAPIKeyQuotaExhausted        = infraerrors.TooManyRequests("API_KEY_QUOTA_EXHAUSTED", "api key 额度已用完")
 	ErrGlobalAPIKeyGroupImmutable  = infraerrors.BadRequest("GLOBAL_API_KEY_GROUP_IMMUTABLE", "global API key cannot be bound to a group")
+	ErrGlobalAPIKeyImmutable       = infraerrors.Forbidden("GLOBAL_API_KEY_IMMUTABLE", "TokenPro global API key can only be reset")
 	ErrGlobalAPIKeyDeleteForbidden = infraerrors.Forbidden("GLOBAL_API_KEY_DELETE_FORBIDDEN", "TokenPro global API key cannot be deleted")
 	ErrGlobalAPIKeyRequired        = infraerrors.BadRequest("GLOBAL_API_KEY_REQUIRED", "only the TokenPro global API key can be regenerated")
 
@@ -816,6 +817,9 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req 
 	// 验证所有权
 	if apiKey.UserID != userID {
 		return nil, ErrInsufficientPerms
+	}
+	if apiKey.IsGlobal() {
+		return nil, ErrGlobalAPIKeyImmutable
 	}
 
 	// 验证 IP 白名单格式

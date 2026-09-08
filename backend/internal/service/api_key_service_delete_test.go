@@ -351,6 +351,18 @@ func TestAPIKeyService_Delete_GlobalKeyForbidden(t *testing.T) {
 	require.Empty(t, cache.deleteAuthKeys)
 }
 
+func TestAPIKeyService_Update_GlobalKeyForbidden(t *testing.T) {
+	repo := &apiKeyRepoStub{
+		apiKey: &APIKey{ID: 42, UserID: 7, Key: "sk-global", KeyType: APIKeyTypeGlobal},
+	}
+	svc := &APIKeyService{apiKeyRepo: repo}
+	name := "renamed"
+
+	_, err := svc.Update(context.Background(), 42, 7, UpdateAPIKeyRequest{Name: &name})
+	require.ErrorIs(t, err, ErrGlobalAPIKeyImmutable)
+	require.Empty(t, repo.updatedKeys)
+}
+
 func TestAPIKeyService_RegenerateGlobalKey_Success(t *testing.T) {
 	legacyGroupID := int64(99)
 	repo := &apiKeyRepoStub{

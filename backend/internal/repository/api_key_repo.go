@@ -493,7 +493,8 @@ func (r *apiKeyRepository) ListByUserID(ctx context.Context, userID int64, param
 	keysQuery := q.
 		WithGroup().
 		Offset(params.Offset()).
-		Limit(params.Limit())
+		Limit(params.Limit()).
+		Order(apiKeyGlobalLastOrder)
 	for _, order := range apiKeyListOrder(params) {
 		keysQuery = keysQuery.Order(order)
 	}
@@ -512,6 +513,17 @@ func (r *apiKeyRepository) ListByUserID(ctx context.Context, userID int64, param
 	}
 
 	return outKeys, paginationResultFromTotal(int64(total), params), nil
+}
+
+// apiKeyGlobalLastOrder keeps the system-managed TokenPro key after ordinary
+// group keys regardless of the user-selected sort. Applying this before
+// OFFSET/LIMIT makes the placement stable across pagination, not just within
+// the currently rendered page.
+func apiKeyGlobalLastOrder(s *entsql.Selector) {
+	s.OrderExpr(entsql.Expr(
+		"CASE WHEN "+s.C(apikey.FieldKeyType)+" = ? THEN 1 ELSE 0 END ASC",
+		service.APIKeyTypeGlobal,
+	))
 }
 
 func (r *apiKeyRepository) ListAllByUserID(ctx context.Context, userID int64, filters service.APIKeyListFilters) ([]service.APIKey, error) {

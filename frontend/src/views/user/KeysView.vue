@@ -95,7 +95,15 @@
           </template>
 
           <template #cell-key="{ value, row }">
-            <div class="flex items-center gap-2">
+            <div v-if="row.key_type === 'global'" class="flex flex-col gap-0.5">
+              <span class="text-sm font-medium text-primary-700 dark:text-primary-300">
+                {{ t('keys.globalManagedKey') }}
+              </span>
+              <span class="max-w-xs text-xs text-gray-500 dark:text-dark-400">
+                {{ t('keys.globalManagedKeyHint') }}
+              </span>
+            </div>
+            <div v-else class="flex items-center gap-2">
               <code class="code text-xs">
                 {{ maskApiKey(value) }}
               </code>
@@ -121,8 +129,14 @@
           </template>
 
           <template #cell-name="{ value, row }">
-            <div class="flex items-center gap-1.5">
+            <div class="flex flex-wrap items-center gap-1.5">
               <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
+              <span
+                v-if="row.key_type === 'global'"
+                class="inline-flex items-center rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700 dark:bg-primary-900/25 dark:text-primary-300"
+              >
+                {{ t('keys.globalManagedBadge') }}
+              </span>
               <Icon
                 v-if="row.ip_whitelist?.length > 0 || row.ip_blacklist?.length > 0"
                 name="shield"
@@ -380,6 +394,7 @@
             <div class="flex items-center gap-1">
               <!-- Use Key Button -->
               <button
+                v-if="row.key_type !== 'global'"
                 @click="openUseKeyModal(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-900/20 dark:hover:text-green-400"
               >
@@ -388,7 +403,7 @@
               </button>
               <!-- Import to CC Switch Button -->
               <button
-                v-if="!publicSettings?.hide_ccs_import_button"
+                v-if="row.key_type !== 'global' && !publicSettings?.hide_ccs_import_button"
                 @click="importToCcswitch(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/20 dark:hover:text-blue-400"
               >
@@ -397,6 +412,7 @@
               </button>
               <!-- Toggle Status Button -->
               <button
+                v-if="row.key_type !== 'global'"
                 @click="toggleKeyStatus(row)"
                 :class="[
                   'flex flex-col items-center gap-0.5 rounded-lg p-1.5 transition-colors',
@@ -411,6 +427,7 @@
               </button>
               <!-- Edit Button -->
               <button
+                v-if="row.key_type !== 'global'"
                 @click="editKey(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
               >
