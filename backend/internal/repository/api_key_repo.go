@@ -521,8 +521,7 @@ func (r *apiKeyRepository) ListByUserID(ctx context.Context, userID int64, param
 // the currently rendered page.
 func apiKeyGlobalLastOrder(s *entsql.Selector) {
 	s.OrderExpr(entsql.Expr(
-		"CASE WHEN "+s.C(apikey.FieldKeyType)+" = ? THEN 1 ELSE 0 END ASC",
-		service.APIKeyTypeGlobal,
+		"CASE WHEN " + s.C(apikey.FieldKeyType) + " = 'global' THEN 1 ELSE 0 END ASC",
 	))
 }
 
