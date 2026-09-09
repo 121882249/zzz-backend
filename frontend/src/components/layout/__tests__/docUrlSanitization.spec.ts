@@ -10,6 +10,14 @@ const homeViewSource = readFileSync(resolve(dir, '../../../views/HomeView.vue'),
 const keyUsageViewSource = readFileSync(resolve(dir, '../../../views/KeyUsageView.vue'), 'utf8')
 
 describe('doc_url sanitization', () => {
+  it('places the desktop download entry before Docs and routes it to /home', () => {
+    const downloadIndex = headerSource.indexOf("to=\"/home\"")
+    const docsIndex = headerSource.indexOf('<!-- Docs Link -->')
+    expect(downloadIndex).toBeGreaterThan(-1)
+    expect(downloadIndex).toBeLessThan(docsIndex)
+    expect(headerSource).toContain("t('nav.downloadApp')")
+  })
+
   it('AppHeader imports sanitizeUrl', () => {
     expect(headerSource).toContain("import { sanitizeUrl } from '@/utils/url'")
   })

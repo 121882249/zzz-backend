@@ -202,15 +202,15 @@ const downloadPlatforms: DownloadPlatform[] = [
 ]
 const downloadBuilds: Record<DownloadPlatformKey, DownloadBuild[]> = {
   macos: [
-    { id: 'macos-arm64', labelKey: 'home.cosmic.buildAppleSilicon', architecture: 'arm64', url: '' },
-    { id: 'macos-x64', labelKey: 'home.cosmic.buildIntel', architecture: 'x86_64', url: '' },
+    { id: 'macos-arm64', labelKey: 'home.cosmic.buildAppleSilicon', architecture: 'arm64', url: '/downloads/latest/TokenPro-macOS-arm64.dmg' },
+    { id: 'macos-x64', labelKey: 'home.cosmic.buildIntel', architecture: 'x86_64', url: '/downloads/latest/TokenPro-macOS-x64.dmg' },
   ],
   windows: [
-    { id: 'windows-x64', labelKey: 'home.cosmic.buildX64', architecture: 'x86_64', url: '' },
+    { id: 'windows-x64', labelKey: 'home.cosmic.buildX64', architecture: 'x86_64', url: '/downloads/latest/TokenPro-Windows-x64.exe' },
     { id: 'windows-arm64', labelKey: 'home.cosmic.buildArm64', architecture: 'arm64', url: '' },
   ],
   linux: [
-    { id: 'linux-x64', labelKey: 'home.cosmic.buildX64', architecture: 'x86_64', url: '' },
+    { id: 'linux-x64', labelKey: 'home.cosmic.buildX64', architecture: 'x86_64', url: '/downloads/latest/TokenPro-Linux-x64.deb' },
     { id: 'linux-arm64', labelKey: 'home.cosmic.buildArm64', architecture: 'arm64', url: '' },
   ],
 }

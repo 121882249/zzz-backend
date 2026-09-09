@@ -150,7 +150,7 @@ describe('HomeView compact mode', () => {
     expect(linkDestination(wrapper, 'hero-primary-action')).toBe('/register')
   })
 
-  it('reserves a clean device-aware desktop download dock', async () => {
+  it('links supported desktop builds from the device-aware download dock', async () => {
     const wrapper = mountHome()
 
     expect(wrapper.get('[data-testid="download-dock"]').exists()).toBe(true)
@@ -159,7 +159,10 @@ describe('HomeView compact mode', () => {
     expect(wrapper.get('[data-testid="download-builds"]').exists()).toBe(true)
     expect(wrapper.findAll('.download-build-card')).toHaveLength(2)
     expect(wrapper.findAll('.download-build-action')).toHaveLength(2)
-    expect(wrapper.findAll('.download-build-action').every((button) => button.attributes('disabled') !== undefined)).toBe(true)
+    const downloads = wrapper.findAll('a.download-build-action')
+    expect(downloads).toHaveLength(2)
+    expect(downloads[0].attributes('href')).toBe('/downloads/latest/TokenPro-macOS-arm64.dmg')
+    expect(downloads[1].attributes('href')).toBe('/downloads/latest/TokenPro-macOS-x64.dmg')
   })
 
   it('switches the visible build slots with the selected platform', async () => {
@@ -170,6 +173,8 @@ describe('HomeView compact mode', () => {
     expect(wrapper.get('[data-testid="download-platform-windows"]').attributes('aria-pressed')).toBe('true')
     expect(wrapper.get('[data-testid="download-builds"]').text()).toContain('home.cosmic.buildX64')
     expect(wrapper.get('[data-testid="download-builds"]').text()).toContain('home.cosmic.buildArm64')
+    expect(wrapper.find('a[href="/downloads/latest/TokenPro-Windows-x64.exe"]').exists()).toBe(true)
+    expect(wrapper.findAll('button.download-build-action')).toHaveLength(1)
   })
 
   it('shows an expandable model family beyond the four representative providers', () => {
