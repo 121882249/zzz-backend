@@ -16,8 +16,7 @@ export default {
     goToDashboard: 'Go to Dashboard',
     cosmic: {
       kicker: 'ONE API · MORE INTELLIGENCE',
-      titleLineOne: 'One key to access the world’s',
-      titleLineTwo: 'leading',
+      titleLineOne: 'One-click access to the world’s',
       titleHighlight: 'AI models',
       description: 'Use GPT, Claude, Gemini, Grok and more through one stable API. Built for high concurrency, low latency and production-grade reliability.',
       stability: 'High concurrency · 99.9% availability',
@@ -29,7 +28,20 @@ export default {
       modelConstellation: 'Model constellation',
       modelConstellationDescription: 'Connect to leading AI models through an ecosystem that keeps expanding',
       connectedModels: '{count} available models connected',
-      moreModels: 'More models on the way'
+      moreModels: 'More models on the way',
+      moreModelFamily: 'More models',
+      downloadEyebrow: 'TOKENPRO DESKTOP',
+      downloadTitle: 'Client downloads',
+      platformsAriaLabel: 'Available desktop platforms',
+      downloadVersionsLabel: '{platform} builds',
+      downloadAction: 'Download',
+      buildAppleSilicon: 'Apple silicon',
+      buildIntel: 'Intel build',
+      buildX64: 'x64 build',
+      buildArm64: 'ARM64 build',
+      platformMacos: 'macOS',
+      platformWindows: 'Windows',
+      platformLinux: 'Linux'
     },
     // User-focused value proposition
     heroSubtitle: 'One Key, All AI Models',

@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount, RouterLinkStub } from '@vue/test-utils'
+import { mount, RouterLinkStub } from '@vue/test-utils'
 
 import HomeView from '../HomeView.vue'
 
-const { appStore, authStore, getModelPlaza } = vi.hoisted(() => ({
+const { appStore, authStore } = vi.hoisted(() => ({
   appStore: {
     cachedPublicSettings: {} as Record<string, unknown>,
     siteName: 'Fallback site',
@@ -18,7 +18,6 @@ const { appStore, authStore, getModelPlaza } = vi.hoisted(() => ({
     user: null as { email?: string } | null,
     checkAuth: vi.fn(),
   },
-  getModelPlaza: vi.fn(),
 }))
 
 vi.mock('@/stores', () => ({
@@ -29,8 +28,6 @@ vi.mock('@/stores', () => ({
 vi.mock('@/stores/app', () => ({
   useAppStore: () => appStore,
 }))
-
-vi.mock('@/api/modelPlaza', () => ({ getModelPlaza }))
 
 vi.mock('vue-i18n', async (importOriginal) => {
   const actual = await importOriginal<typeof import('vue-i18n')>()
@@ -76,8 +73,6 @@ describe('HomeView compact mode', () => {
     authStore.user = null
     authStore.checkAuth.mockClear()
     appStore.fetchPublicSettings.mockClear()
-    getModelPlaza.mockReset()
-    getModelPlaza.mockResolvedValue({ description: '', groups: [] })
     localStorage.clear()
     vi.spyOn(window, 'matchMedia').mockReturnValue({ matches: false } as MediaQueryList)
   })
@@ -155,29 +150,39 @@ describe('HomeView compact mode', () => {
     expect(linkDestination(wrapper, 'hero-primary-action')).toBe('/register')
   })
 
-  it('deduplicates the live model catalog and exposes future model families', async () => {
-    getModelPlaza.mockResolvedValue({
-      description: '',
-      groups: [
-        { models: [{ name: 'gpt-5.6-sol' }, { name: 'DeepSeek V4' }, { name: 'Mistral Large' }] },
-        { models: [{ name: 'deepseek v4' }, { name: 'Qwen 4' }] },
-      ],
-    })
+  it('reserves a clean device-aware desktop download dock', async () => {
+    const wrapper = mountHome()
 
-    const wrapper = mountHome({ model_plaza_enabled: true })
-    await flushPromises()
-
-    expect(getModelPlaza).toHaveBeenCalledOnce()
-    expect(wrapper.text()).toContain('DeepSeek V4')
-    expect(wrapper.text()).toContain('Mistral Large')
-    expect(wrapper.text()).toContain('Qwen 4')
-    expect(wrapper.findAll('.constellation-model--discovered')).toHaveLength(3)
+    expect(wrapper.get('[data-testid="download-dock"]').exists()).toBe(true)
+    expect(wrapper.findAll('.download-platform')).toHaveLength(3)
+    await wrapper.get('[data-testid="download-platform-macos"]').trigger('click')
+    expect(wrapper.get('[data-testid="download-builds"]').exists()).toBe(true)
+    expect(wrapper.findAll('.download-build-card')).toHaveLength(2)
+    expect(wrapper.findAll('.download-build-action')).toHaveLength(2)
+    expect(wrapper.findAll('.download-build-action').every((button) => button.attributes('disabled') !== undefined)).toBe(true)
   })
 
-  it('does not request an authenticated-only model catalog for anonymous visitors', async () => {
-    mountHome({ model_plaza_enabled: true, model_plaza_require_auth: true })
-    await flushPromises()
+  it('switches the visible build slots with the selected platform', async () => {
+    const wrapper = mountHome()
 
-    expect(getModelPlaza).not.toHaveBeenCalled()
+    await wrapper.get('[data-testid="download-platform-windows"]').trigger('click')
+
+    expect(wrapper.get('[data-testid="download-platform-windows"]').attributes('aria-pressed')).toBe('true')
+    expect(wrapper.get('[data-testid="download-builds"]').text()).toContain('home.cosmic.buildX64')
+    expect(wrapper.get('[data-testid="download-builds"]').text()).toContain('home.cosmic.buildArm64')
+  })
+
+  it('shows an expandable model family beyond the four representative providers', () => {
+    const wrapper = mountHome()
+
+    expect(wrapper.get('[data-testid="hero-more-models"]').text()).toContain('home.cosmic.moreModelFamily')
+    expect(wrapper.findAll('.floating-model')).toHaveLength(5)
+  })
+
+  it('keeps the model family inside the hero instead of repeating a second model section', () => {
+    const wrapper = mountHome()
+
+    expect(wrapper.find('.model-constellation').exists()).toBe(false)
+    expect(wrapper.findAll('.floating-model')).toHaveLength(5)
   })
 })

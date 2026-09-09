@@ -145,6 +145,7 @@ export default {
     adminCompliance: '部署与运营合规承诺',
     loginAgreementPrompt: {
       checkboxPrefix: '我已阅读并同意',
+      documentLinksLabel: '合规文件：',
       documentSeparator: '、',
       noticeTitle: '继续登录前需要先同意最新条款。',
       noticeDescription: '未同意前，账号密码输入和快捷登录会保持禁用。',

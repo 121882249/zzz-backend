@@ -16,8 +16,7 @@ export default {
     goToDashboard: '进入控制台',
     cosmic: {
       kicker: 'ONE API · MORE INTELLIGENCE',
-      titleLineOne: '一个密钥，接入全球',
-      titleLineTwo: '顶尖',
+      titleLineOne: '一键接入全球',
       titleHighlight: 'AI 模型',
       description: '通过统一、稳定的 API，同时使用 GPT、Claude、Gemini、Grok 等多款前沿模型。高并发、低延迟、企业级稳定性，让 AI 能力触手可及。',
       stability: '高并发 · 99.9% 可用性',
@@ -29,7 +28,20 @@ export default {
       modelConstellation: '模型星图',
       modelConstellationDescription: '连接全球领先的 AI 模型，持续扩展智能生态',
       connectedModels: '当前已接入 {count} 个可用模型',
-      moreModels: '更多模型持续接入'
+      moreModels: '更多模型持续接入',
+      moreModelFamily: '更多模型',
+      downloadEyebrow: 'TOKENPRO DESKTOP',
+      downloadTitle: '客户端下载中心',
+      platformsAriaLabel: '可选客户端平台',
+      downloadVersionsLabel: '{platform} 版本',
+      downloadAction: '下载',
+      buildAppleSilicon: 'Apple 芯片版',
+      buildIntel: 'Intel 芯片版',
+      buildX64: 'x64 版本',
+      buildArm64: 'ARM64 版本',
+      platformMacos: 'macOS',
+      platformWindows: 'Windows',
+      platformLinux: 'Linux'
     },
     // 新增：面向用户的价值主张
     heroSubtitle: '一个密钥，畅用多个 AI 模型',
