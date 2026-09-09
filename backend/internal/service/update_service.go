@@ -33,7 +33,7 @@ const (
 	githubRepo     = "Wei-Shaw/sub2api"
 	// TokenPro releases keep a short operator-facing revision name while this
 	// value records the upstream Sub2API release already merged into the build.
-	tokenProUpstreamVersion = "0.2.2"
+	tokenProUpstreamVersion = "0.2.4"
 
 	// Security: allowed download domains for updates
 	allowedDownloadHost = "github.com"
