@@ -456,6 +456,53 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 	})
 }
 
+// CreateDesktopTicket creates a short-lived one-time browser handoff ticket.
+// POST /api/v1/auth/desktop-ticket
+func (h *AuthHandler) CreateDesktopTicket(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	user, err := h.userService.GetByID(c.Request.Context(), subject.UserID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	ticket, expiresIn, err := h.authService.GenerateDesktopTicket(c.Request.Context(), user)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"ticket": ticket, "expires_in": expiresIn})
+}
+
+type desktopTicketExchangeRequest struct {
+	Ticket string `json:"ticket" binding:"required"`
+}
+
+// ExchangeDesktopTicket consumes a desktop handoff ticket and creates a new
+// browser session whose binding is derived from the browser request.
+// POST /api/v1/auth/desktop-exchange
+func (h *AuthHandler) ExchangeDesktopTicket(c *gin.Context) {
+	var req desktopTicketExchangeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request")
+		return
+	}
+	user, err := h.authService.ConsumeDesktopTicket(c.Request.Context(), strings.TrimSpace(req.Ticket))
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if err := h.ensureBackendModeAllowsUser(c.Request.Context(), user); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	h.authService.RecordSuccessfulLogin(c.Request.Context(), user.ID)
+	h.respondWithTokenPair(c, user)
+}
+
 // ValidatePromoCodeRequest 验证优惠码请求
 type ValidatePromoCodeRequest struct {
 	Code string `json:"code" binding:"required"`

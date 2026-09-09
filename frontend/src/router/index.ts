@@ -80,6 +80,15 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/auth/desktop',
+    name: 'DesktopAuth',
+    component: () => import('@/views/auth/DesktopAuthView.vue'),
+    meta: {
+      requiresAuth: false,
+      title: 'TokenPro Desktop Login'
+    }
+  },
+  {
     path: '/auth/linuxdo/callback',
     name: 'LinuxDoOAuthCallback',
     component: () => import('@/views/auth/LinuxDoCallbackView.vue'),
@@ -774,6 +783,7 @@ const navigationLoading = useNavigationLoadingState()
 let routePrefetch: ReturnType<typeof useRoutePrefetch> | null = null
 const BACKEND_MODE_ALLOWED_PATHS = ['/home', '/login', '/key-usage', '/setup', '/payment/result', '/payment/airwallex', '/legal']
 const BACKEND_MODE_CALLBACK_PATHS = [
+  '/auth/desktop',
   '/auth/callback',
   '/auth/linuxdo/callback',
   '/auth/dingtalk/callback',

@@ -167,6 +167,11 @@ export async function login2FA(request: TotpLogin2FARequest): Promise<AuthRespon
   return data
 }
 
+export async function exchangeDesktopTicket(ticket: string): Promise<AuthResponse> {
+  const { data } = await apiClient.post<AuthResponse>('/auth/desktop-exchange', { ticket })
+  return data
+}
+
 /**
  * User registration
  * @param userData - Registration data (username, email, password)
@@ -681,6 +686,7 @@ export async function exchangePendingOAuthCompletion(
 export const authAPI = {
   login,
   login2FA,
+  exchangeDesktopTicket,
   isTotp2FARequired,
   register,
   getCurrentUser,

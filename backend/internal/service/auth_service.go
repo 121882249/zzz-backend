@@ -36,6 +36,8 @@ var (
 	ErrRefreshTokenInvalid          = infraerrors.Unauthorized("REFRESH_TOKEN_INVALID", "invalid refresh token")
 	ErrRefreshTokenExpired          = infraerrors.Unauthorized("REFRESH_TOKEN_EXPIRED", "refresh token has expired")
 	ErrRefreshTokenReused           = infraerrors.Unauthorized("REFRESH_TOKEN_REUSED", "refresh token has been reused")
+	ErrDesktopTicketInvalid         = infraerrors.Unauthorized("DESKTOP_TICKET_INVALID", "invalid or already used desktop login ticket")
+	ErrDesktopTicketExpired         = infraerrors.Unauthorized("DESKTOP_TICKET_EXPIRED", "desktop login ticket has expired")
 	ErrEmailVerifyRequired          = infraerrors.BadRequest("EMAIL_VERIFY_REQUIRED", "email verification is required")
 	ErrEmailSuffixNotAllowed        = infraerrors.BadRequest("EMAIL_SUFFIX_NOT_ALLOWED", "email suffix is not allowed")
 	ErrEmailDomainRegistrationLimit = infraerrors.BadRequest(
@@ -55,6 +57,11 @@ const maxTokenLength = 8192
 
 // refreshTokenPrefix is the prefix for refresh tokens to distinguish them from access tokens.
 const refreshTokenPrefix = "rt_"
+
+const (
+	desktopTicketPrefix = "dt_"
+	desktopTicketTTL    = 60 * time.Second
+)
 
 // JWTClaims JWT载荷数据
 type JWTClaims struct {
@@ -1682,6 +1689,65 @@ type TokenPair struct {
 type TokenPairWithUser struct {
 	TokenPair
 	UserRole string
+}
+
+// GenerateDesktopTicket creates a short-lived, one-time credential that lets
+// the desktop client hand an authenticated session to the system browser.
+// Only the hash is stored; the raw ticket is returned once to the client.
+func (s *AuthService) GenerateDesktopTicket(ctx context.Context, user *User) (string, int, error) {
+	if s.refreshTokenCache == nil || user == nil || !user.IsActive() {
+		return "", 0, ErrServiceUnavailable
+	}
+	random, err := randomHexString(32)
+	if err != nil {
+		return "", 0, fmt.Errorf("generate desktop ticket: %w", err)
+	}
+	ticket := desktopTicketPrefix + random
+	now := time.Now()
+	data := &RefreshTokenData{
+		UserID:       user.ID,
+		TokenVersion: resolvedTokenVersion(user),
+		FamilyID:     "desktop-browser",
+		CreatedAt:    now,
+		ExpiresAt:    now.Add(desktopTicketTTL),
+	}
+	if err := s.refreshTokenCache.StoreRefreshToken(ctx, hashToken(ticket), data, desktopTicketTTL); err != nil {
+		return "", 0, fmt.Errorf("store desktop ticket: %w", err)
+	}
+	return ticket, int(desktopTicketTTL.Seconds()), nil
+}
+
+// ConsumeDesktopTicket atomically invalidates the ticket before issuing a
+// browser-bound token pair. A failed replay cannot create another session.
+func (s *AuthService) ConsumeDesktopTicket(ctx context.Context, ticket string) (*User, error) {
+	if s.refreshTokenCache == nil || !strings.HasPrefix(ticket, desktopTicketPrefix) || len(ticket) != len(desktopTicketPrefix)+64 {
+		return nil, ErrDesktopTicketInvalid
+	}
+	hash := hashToken(ticket)
+	var data *RefreshTokenData
+	var err error
+	if consumer, ok := s.refreshTokenCache.(RefreshTokenConsumer); ok {
+		data, err = consumer.ConsumeRefreshToken(ctx, hash)
+	} else {
+		data, err = s.refreshTokenCache.GetRefreshToken(ctx, hash)
+		if err == nil {
+			err = s.refreshTokenCache.DeleteRefreshToken(ctx, hash)
+		}
+	}
+	if err != nil || data == nil || data.FamilyID != "desktop-browser" {
+		return nil, ErrDesktopTicketInvalid
+	}
+	if time.Now().After(data.ExpiresAt) {
+		return nil, ErrDesktopTicketExpired
+	}
+	user, err := s.userRepo.GetByID(ctx, data.UserID)
+	if err != nil {
+		return nil, ErrDesktopTicketInvalid
+	}
+	if !user.IsActive() || resolvedTokenVersion(user) != data.TokenVersion {
+		return nil, ErrDesktopTicketInvalid
+	}
+	return user, nil
 }
 
 // GenerateTokenPair 生成Access Token和Refresh Token对

@@ -72,3 +72,9 @@ type RefreshTokenCache interface {
 	// 用于验证Token家族关系
 	IsTokenInFamily(ctx context.Context, familyID string, tokenHash string) (bool, error)
 }
+
+// RefreshTokenConsumer is an optional capability implemented by production
+// caches that can read and delete a credential in one atomic operation.
+type RefreshTokenConsumer interface {
+	ConsumeRefreshToken(ctx context.Context, tokenHash string) (*RefreshTokenData, error)
+}
