@@ -37,7 +37,7 @@ export default {
       downloadAction: '下载',
       buildAppleSilicon: 'Apple 芯片版',
       buildIntel: 'Intel 芯片版',
-      buildX64: 'x64 版本',
+      buildX64: '通用版本',
       buildArm64: 'ARM64 版本',
       platformMacos: 'macOS',
       platformWindows: 'Windows',

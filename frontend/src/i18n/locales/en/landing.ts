@@ -37,7 +37,7 @@ export default {
       downloadAction: 'Download',
       buildAppleSilicon: 'Apple silicon',
       buildIntel: 'Intel build',
-      buildX64: 'x64 build',
+      buildX64: 'Universal build',
       buildArm64: 'ARM64 build',
       platformMacos: 'macOS',
       platformWindows: 'Windows',
