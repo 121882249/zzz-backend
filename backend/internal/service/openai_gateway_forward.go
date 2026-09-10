@@ -72,6 +72,19 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	if legacyIngressChanged {
 		body = legacyIngressBody
 	}
+	// TokenPro only exposes the Codex image tool to OpenAI-backed models.
+	// Apply this by selected upstream platform, not by the optional desktop
+	// image-model header, so Grok and newly added non-OpenAI models cannot
+	// inherit either the hosted image_generation tool or the image_gen
+	// namespace advertised by Codex.
+	strippedBody, imageToolsStripped, stripErr := stripImageGenerationToolsForAccount(account, body)
+	if stripErr != nil {
+		return nil, fmt.Errorf("strip image tools from non-OpenAI model: %w", stripErr)
+	}
+	if imageToolsStripped {
+		body = strippedBody
+		logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Stripped image tools from non-OpenAI platform=%s model=%s", account.Platform, gjson.GetBytes(body, "model").String())
+	}
 	// 在分流到 passthrough / Codex transform / 原生 ChatCompletions 之前统一修正
 	// 显式为 null 的工具 Schema type，否则 upstream 的 400 会被归一成可重试的 502，
 	// 同一份坏定义在账号池里反复重放。
@@ -163,16 +176,6 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	// （Responses 客户端 × Anthropic 上游），转成 Anthropic 请求走原生端点。
 	// 不能落到下面的 raw-CC 分支——其 URL 构造会把 anthropic base 当 CC base 用。
 	if account.IsAnthropicProtocol() {
-		if !responsesLite && preferredImageModel != "" {
-			strippedBody, changed, stripErr := stripOpenAIImageGenerationToolsFromRawPayload(body)
-			if stripErr != nil {
-				return nil, fmt.Errorf("strip TokenPro image tools from Anthropic model: %w", stripErr)
-			}
-			if changed {
-				body = strippedBody
-				logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Stripped TokenPro image tools from native Anthropic model=%s", reqModel)
-			}
-		}
 		return s.forwardResponsesViaNativeAnthropic(ctx, c, account, body, reqModel)
 	}
 	if account.IsOpenAIApiKey() {
@@ -194,16 +197,6 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 
 	if shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
-		if !responsesLite && preferredImageModel != "" {
-			strippedBody, changed, stripErr := stripOpenAIImageGenerationToolsFromRawPayload(body)
-			if stripErr != nil {
-				return nil, fmt.Errorf("strip TokenPro image tools from non-OpenAI model: %w", stripErr)
-			}
-			if changed {
-				body = strippedBody
-				logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Stripped TokenPro image tools from chat fallback model=%s", reqModel)
-			}
-		}
 		return s.forwardResponsesViaRawChatCompletions(ctx, c, account, body)
 	}
 	if account.IsOpenAI() && (account.IsOpenAIApiKey() || account.IsOpenAIOAuthLike()) {

@@ -6,7 +6,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -32,51 +31,37 @@ func TestApplyTokenProPreferredImageModelOverridesCodexImagesDefault(t *testing.
 	require.Equal(t, "gpt-image-2.5-sunburst", jsonStringAt(t, rewritten, "model"))
 }
 
-func TestTokenProAnthropicImageBridgeProducesClientExecutedTool(t *testing.T) {
+func TestTokenProNonOpenAIAccountStripsImageToolsWithoutDesktopHeader(t *testing.T) {
 	body := []byte(`{
 		"model":"claude-sonnet-5",
 		"stream":true,
 		"input":"draw a nebula",
-		"tools":[{"type":"image_generation","model":"gpt-image-2"}],
+		"tools":[
+			{"type":"image_generation","model":"gpt-image-2"},
+			{"type":"namespace","name":"image_gen","tools":[{"type":"function","name":"imagegen","parameters":{"type":"object"}}]},
+			{"type":"function","name":"shell","parameters":{"type":"object"}}
+		],
 		"tool_choice":{"type":"image_generation"}
 	}`)
 
-	bridged, changed, err := applyTokenProCodexClientImageToolBridge(body, "gpt-image-2.5-sunburst")
-	require.NoError(t, err)
-	require.True(t, changed)
-	require.Contains(t, jsonStringAt(t, bridged, "instructions"), codexClientImageBridgeMarker)
-
-	adapted, mapping, err := adaptResponsesClientToolsForAnthropic(bridged)
-	require.NoError(t, err)
-	require.Equal(t, apicompat.ResponsesNamespaceName{Namespace: "image_gen", Name: "imagegen"}, mapping.NamespaceTools["image_gen__imagegen"])
-
-	var request apicompat.ResponsesRequest
-	require.NoError(t, json.Unmarshal(adapted, &request))
-	anthropicRequest, err := apicompat.ResponsesToAnthropicRequest(&request)
-	require.NoError(t, err)
-	require.Len(t, anthropicRequest.Tools, 1)
-	require.Equal(t, "image_gen__imagegen", anthropicRequest.Tools[0].Name)
-	require.Empty(t, anthropicRequest.Tools[0].Type)
-	require.NotEmpty(t, anthropicRequest.Tools[0].InputSchema)
-	require.JSONEq(t, `{"type":"auto"}`, string(anthropicRequest.ToolChoice))
-}
-
-func TestTokenProAnthropicImageBridgeKeepsExistingNamespaceSingle(t *testing.T) {
-	body := []byte(`{
-		"model":"claude-sonnet-5",
-		"input":"draw",
-		"tools":[{"type":"namespace","name":"image_gen","tools":[{"type":"function","name":"imagegen","parameters":{"type":"object"}}]}]
-	}`)
-
-	bridged, changed, err := applyTokenProCodexClientImageToolBridge(body, "gpt-image-2.5-sunburst")
+	stripped, changed, err := stripImageGenerationToolsForAccount(&Account{Platform: PlatformAnthropic}, body)
 	require.NoError(t, err)
 	require.True(t, changed)
 	var request map[string]any
-	require.NoError(t, json.Unmarshal(bridged, &request))
+	require.NoError(t, json.Unmarshal(stripped, &request))
 	tools, ok := request["tools"].([]any)
 	require.True(t, ok)
 	require.Len(t, tools, 1)
-	require.True(t, hasCodexImageGenerationClientTool(request))
+	require.Equal(t, "shell", tools[0].(map[string]any)["name"])
+	require.NotContains(t, request, "tool_choice")
+}
+
+func TestTokenProOpenAIAccountKeepsImageTools(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.6-sol","tools":[{"type":"image_generation","model":"gpt-image-2"}]}`)
+	kept, changed, err := stripImageGenerationToolsForAccount(&Account{Platform: PlatformOpenAI}, body)
+	require.NoError(t, err)
+	require.False(t, changed)
+	require.Equal(t, body, kept)
 }
 
 func TestImageModelChosenInCodexOverridesFallbackAndForcesImageTool(t *testing.T) {
