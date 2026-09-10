@@ -36,6 +36,10 @@ func (s *GatewayService) ForwardAsResponses(
 	parsed *ParsedRequest,
 ) (*ForwardResult, error) {
 	startTime := time.Now()
+	preferredImageModel := consumeTokenProPreferredImageModel(c)
+	if preferredImageModel != "" {
+		c.Set(tokenProImageDisplayContextKey, true)
+	}
 
 	normalizedBody, normalized, err := normalizeOpenAIResponsesLegacyIngress(body)
 	if err != nil {
@@ -43,6 +47,18 @@ func (s *GatewayService) ForwardAsResponses(
 	}
 	if normalized {
 		body = normalizedBody
+	}
+	if preferredImageModel != "" {
+		bridgedBody, changed, bridgeErr := applyTokenProCodexClientImageToolBridge(body, preferredImageModel)
+		if bridgeErr != nil {
+			return nil, fmt.Errorf("prepare TokenPro Responses image tool bridge: %w", bridgeErr)
+		}
+		if changed {
+			body = bridgedBody
+			logger.L().Debug("gateway forward_as_responses: added TokenPro client image tool bridge",
+				zap.String("image_model", preferredImageModel),
+			)
+		}
 	}
 
 	// 1. Lower Codex client-side tools to function tools understood by Anthropic.
