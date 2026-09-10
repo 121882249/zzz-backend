@@ -163,7 +163,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	// （Responses 客户端 × Anthropic 上游），转成 Anthropic 请求走原生端点。
 	// 不能落到下面的 raw-CC 分支——其 URL 构造会把 anthropic base 当 CC base 用。
 	if account.IsAnthropicProtocol() {
-		if isCodexCLI && !responsesLite && preferredImageModel != "" {
+		// The private TokenPro image-model header is itself the authoritative
+		// signal. Reverse proxies may replace the User-Agent, so do not make the
+		// client-executed image bridge depend on Codex identity detection here.
+		if !responsesLite && preferredImageModel != "" {
 			bridgedBody, changed, bridgeErr := applyTokenProCodexClientImageToolBridge(body, preferredImageModel)
 			if bridgeErr != nil {
 				return nil, fmt.Errorf("prepare TokenPro Anthropic image tool bridge: %w", bridgeErr)
@@ -194,7 +197,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 
 	if shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
-		if isCodexCLI && !responsesLite && preferredImageModel != "" {
+		if !responsesLite && preferredImageModel != "" {
 			bridgedBody, changed, bridgeErr := applyTokenProCodexClientImageToolBridge(body, preferredImageModel)
 			if bridgeErr != nil {
 				return nil, fmt.Errorf("prepare TokenPro client image tool bridge: %w", bridgeErr)
