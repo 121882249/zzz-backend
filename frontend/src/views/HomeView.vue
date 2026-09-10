@@ -63,7 +63,10 @@
           <span class="download-symbol" aria-hidden="true"><Icon name="download" size="lg" /></span>
           <div>
             <p class="download-eyebrow">{{ t('home.cosmic.downloadEyebrow') }}</p>
-            <h2 id="download-dock-title">{{ t('home.cosmic.downloadTitle') }}</h2>
+            <div class="download-title-row">
+              <h2 id="download-dock-title">{{ t('home.cosmic.downloadTitle') }}</h2>
+              <span class="download-version">{{ desktopVersion }}</span>
+            </div>
           </div>
         </div>
         <div class="download-platforms" :aria-label="t('home.cosmic.platformsAriaLabel')">
@@ -84,12 +87,11 @@
           <span class="download-builds-title">
             {{ t('home.cosmic.downloadVersionsLabel', { platform: selectedDownloadPlatformLabel }) }}
           </span>
-          <div class="download-build-list">
+          <div :class="['download-build-list', { 'download-build-list--single': selectedDownloadBuilds.length === 1 }]">
             <article v-for="build in selectedDownloadBuilds" :key="build.id" class="download-build-card">
               <span class="download-build-icon" aria-hidden="true"><Icon name="cpu" size="sm" /></span>
               <span class="download-build-copy">
                 <strong>{{ t(build.labelKey) }}</strong>
-                <small>{{ build.architecture }}</small>
               </span>
               <a
                 v-if="build.url"
@@ -192,7 +194,6 @@ type DownloadPlatform = {
 type DownloadBuild = {
   id: string
   labelKey: 'home.cosmic.buildAppleSilicon' | 'home.cosmic.buildIntel' | 'home.cosmic.buildX64' | 'home.cosmic.buildArm64'
-  architecture: 'arm64' | 'x86_64'
   url: string
 }
 const downloadPlatforms: DownloadPlatform[] = [
@@ -202,18 +203,17 @@ const downloadPlatforms: DownloadPlatform[] = [
 ]
 const downloadBuilds: Record<DownloadPlatformKey, DownloadBuild[]> = {
   macos: [
-    { id: 'macos-arm64', labelKey: 'home.cosmic.buildAppleSilicon', architecture: 'arm64', url: '/downloads/latest/TokenPro-macOS-arm64.dmg' },
-    { id: 'macos-x64', labelKey: 'home.cosmic.buildIntel', architecture: 'x86_64', url: '/downloads/latest/TokenPro-macOS-x64.dmg' },
+    { id: 'macos-arm64', labelKey: 'home.cosmic.buildAppleSilicon', url: '/downloads/latest/TokenPro-macOS-arm64.dmg' },
+    { id: 'macos-x64', labelKey: 'home.cosmic.buildIntel', url: '/downloads/latest/TokenPro-macOS-x64.dmg' },
   ],
   windows: [
-    { id: 'windows-x64', labelKey: 'home.cosmic.buildX64', architecture: 'x86_64', url: '/downloads/latest/TokenPro-Windows-x64.exe' },
-    { id: 'windows-arm64', labelKey: 'home.cosmic.buildArm64', architecture: 'arm64', url: '' },
+    { id: 'windows-x64', labelKey: 'home.cosmic.buildX64', url: '/downloads/latest/TokenPro-Windows-x64.exe' },
   ],
   linux: [
-    { id: 'linux-x64', labelKey: 'home.cosmic.buildX64', architecture: 'x86_64', url: '/downloads/latest/TokenPro-Linux-x64.deb' },
-    { id: 'linux-arm64', labelKey: 'home.cosmic.buildArm64', architecture: 'arm64', url: '' },
+    { id: 'linux-x64', labelKey: 'home.cosmic.buildX64', url: '/downloads/latest/TokenPro-Linux-x64.deb' },
   ],
 }
+const desktopVersion = ref('v1.2.11')
 const selectedDownloadPlatform = ref<DownloadPlatformKey | null>(null)
 const selectedDownloadPlatformLabel = computed(() => {
   const platform = downloadPlatforms.find((item) => item.key === selectedDownloadPlatform.value)
@@ -253,9 +253,21 @@ function detectDownloadPlatform() {
 
   selectedDownloadPlatform.value = detected
 }
+async function loadDesktopVersion() {
+  try {
+    const response = await fetch('/downloads/latest/release.json', { cache: 'no-store' })
+    if (!response.ok) return
+    const release = await response.json() as { tag_name?: string }
+    const version = release.tag_name?.trim()
+    if (version) desktopVersion.value = version.startsWith('v') ? version : `v${version}`
+  } catch {
+    // Keep the bundled version visible when the update manifest is temporarily unavailable.
+  }
+}
 onMounted(async () => {
   initTheme()
   detectDownloadPlatform()
+  void loadDesktopVersion()
   authStore.checkAuth()
   if (!appStore.publicSettingsLoaded) await appStore.fetchPublicSettings()
 })
@@ -274,10 +286,10 @@ onMounted(async () => {
 .cosmic-backdrop{height:min(980px,94vh)}
 .download-dock{display:grid;grid-template-columns:minmax(230px,1fr) auto;align-items:center;gap:18px;width:min(720px,calc(100% - 32px));min-height:82px;margin:8px 0 0 16px;padding:16px 18px;border:1px solid rgba(91,205,255,.36);border-radius:18px;background:linear-gradient(110deg,rgba(4,16,45,.78),rgba(11,19,60,.6));box-shadow:0 18px 54px rgba(0,0,0,.24),inset 0 1px 0 rgba(255,255,255,.12);backdrop-filter:blur(18px)}
 .download-intro{display:flex;min-width:0;align-items:center;gap:12px}.download-symbol{display:grid;width:44px;height:44px;flex:0 0 44px;place-items:center;border:1px solid rgba(91,220,255,.48);border-radius:13px;color:#7ce8ff;background:radial-gradient(circle at 30% 20%,rgba(89,217,255,.25),rgba(73,64,199,.24))}.download-eyebrow{margin:0 0 2px;color:#82b7ff;font-size:8px;font-weight:700;letter-spacing:.22em}.download-intro h2{margin:0;color:#f7faff;font-size:17px;letter-spacing:-.02em}.download-platforms{display:flex;gap:6px}.download-platform{display:inline-flex;min-height:38px;align-items:center;gap:6px;padding:0 10px;border:1px solid rgba(105,137,200,.28);border-radius:11px;color:#92a2c3;background:rgba(2,9,28,.54);font-size:11px;font-weight:650;cursor:pointer;transition:160ms ease}.download-platform:hover{border-color:rgba(83,205,255,.5);color:#e8f8ff}.download-platform--active{border-color:rgba(80,224,255,.74);color:#f4fcff;background:linear-gradient(120deg,rgba(30,145,218,.3),rgba(92,70,215,.28));box-shadow:0 0 24px rgba(50,130,255,.16)}
-.download-builds{display:grid;grid-column:1/-1;grid-template-columns:112px minmax(0,1fr);align-items:center;gap:12px;padding-top:12px;border-top:1px solid rgba(91,130,194,.2)}.download-builds-title{color:#91a4c9;font-size:10px;font-weight:650}.download-build-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.download-build-card{display:flex;min-width:0;align-items:center;gap:8px;padding:7px 8px;border:1px solid rgba(92,130,197,.24);border-radius:11px;background:rgba(2,9,28,.44)}.download-build-icon{display:grid;width:28px;height:28px;flex:0 0 28px;place-items:center;border-radius:8px;color:#7fdff7;background:rgba(48,125,214,.15)}.download-build-copy{display:flex;min-width:0;flex:1;flex-direction:column}.download-build-copy strong{overflow:hidden;color:#e8f1ff;font-size:11px;text-overflow:ellipsis;white-space:nowrap}.download-build-copy small{margin-top:1px;color:#7182a7;font:9px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace}.download-build-action{display:inline-flex;min-height:28px;align-items:center;gap:4px;padding:0 8px;border:1px solid rgba(78,199,255,.36);border-radius:8px;color:#8ddff2;background:rgba(26,98,177,.18);font-size:10px;font-weight:650}.download-build-action:disabled{color:#667593;border-color:rgba(104,128,178,.2);background:rgba(6,14,33,.5);cursor:not-allowed}.floating-model--more-family{top:176px;left:49%;width:104px;min-height:66px;color:#b8eaff;border-color:rgba(143,107,255,.66);background:linear-gradient(145deg,rgba(14,30,73,.8),rgba(55,29,112,.7))}.floating-model--more-family svg{color:#a99bff}
+.download-title-row{display:flex;align-items:baseline;gap:10px}.download-version{color:#78dfff;font-size:11px;font-weight:700;letter-spacing:.04em}.download-builds{display:grid;grid-column:1/-1;grid-template-columns:112px minmax(0,1fr);align-items:center;gap:12px;padding-top:12px;border-top:1px solid rgba(91,130,194,.2)}.download-builds-title{color:#91a4c9;font-size:10px;font-weight:650}.download-build-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.download-build-list--single .download-build-card{grid-column:2}.download-build-card{display:flex;min-width:0;align-items:center;gap:8px;padding:7px 8px;border:1px solid rgba(92,130,197,.24);border-radius:11px;background:rgba(2,9,28,.44)}.download-build-icon{display:grid;width:28px;height:28px;flex:0 0 28px;place-items:center;border-radius:8px;color:#7fdff7;background:rgba(48,125,214,.15)}.download-build-copy{display:flex;min-width:0;flex:1;flex-direction:column}.download-build-copy strong{overflow:hidden;color:#e8f1ff;font-size:11px;text-overflow:ellipsis;white-space:nowrap}.download-build-action{display:inline-flex;min-height:28px;align-items:center;gap:4px;padding:0 8px;border:1px solid rgba(78,199,255,.36);border-radius:8px;color:#8ddff2;background:rgba(26,98,177,.18);font-size:10px;font-weight:650}.download-build-action:disabled{color:#667593;border-color:rgba(104,128,178,.2);background:rgba(6,14,33,.5);cursor:not-allowed}.floating-model--more-family{top:176px;left:49%;width:104px;min-height:66px;color:#b8eaff;border-color:rgba(143,107,255,.66);background:linear-gradient(145deg,rgba(14,30,73,.8),rgba(55,29,112,.7))}.floating-model--more-family svg{color:#a99bff}
 @media(max-width:1120px){.hero-shell{padding-top:32px}}
 @media(min-width:721px) and (max-width:1120px){.hero-shell{position:relative;display:block;min-height:450px;padding-top:12px;padding-bottom:20px}.hero-copy{position:relative;z-index:7;height:430px;max-width:49%}.hero-title{font-size:clamp(34px,4.3vw,42px)}.hero-description{max-width:96%;font-size:14px}.benefit-row{margin-top:auto}.benefit-item{gap:8px;padding:0 10px}.benefit-item strong{font-size:12px}.benefit-item small{font-size:9px}.hero-visual{position:absolute;top:0;right:0;width:49%;min-height:442px}.floating-model{width:72px;min-height:72px;border-radius:15px}.floating-model img{width:24px;height:24px}.floating-model--gpt{top:10px;left:38%}.floating-model--claude{top:6px;right:8%}.floating-model--gemini{top:100px;right:4%}.floating-model--grok{top:120px;left:34%}.floating-model--more-family{top:70px;left:48%;width:90px;min-height:58px}.terminal-container{right:0;bottom:12px;width:100%}.terminal-content{grid-template-columns:minmax(0,1fr) 96px;padding:16px}.terminal-content pre{font-size:9px}.terminal-meta{padding-left:12px;font-size:10px}}
-@media(max-width:720px){.download-dock{grid-template-columns:1fr;width:calc(100% - 30px);margin:8px 15px 0;padding:17px;gap:16px}.download-symbol{width:44px;height:44px;flex-basis:44px}.download-platforms{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}.download-platform{justify-content:center;padding:0 8px}.download-builds{grid-template-columns:1fr;gap:10px}.download-build-list{grid-template-columns:1fr}.hero-shell{padding-top:30px}.hero-copy{display:block;height:auto}.benefit-row{margin-top:44px}.hero-visual{min-height:520px}.floating-model--more-family{top:175px;left:50%;width:96px;min-height:56px;transform:translateX(-50%)}}
+@media(max-width:720px){.download-dock{grid-template-columns:1fr;width:calc(100% - 30px);margin:8px 15px 0;padding:17px;gap:16px}.download-symbol{width:44px;height:44px;flex-basis:44px}.download-platforms{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}.download-platform{justify-content:center;padding:0 8px}.download-builds{grid-template-columns:1fr;gap:10px}.download-build-list{grid-template-columns:1fr}.download-build-list--single .download-build-card{grid-column:auto}.hero-shell{padding-top:30px}.hero-copy{display:block;height:auto}.benefit-row{margin-top:44px}.hero-visual{min-height:520px}.floating-model--more-family{top:175px;left:50%;width:96px;min-height:56px;transform:translateX(-50%)}}
 @media(max-width:720px){.hero-title{font-size:clamp(29px,9.2vw,38px)}}
 @media(min-width:721px){
   .cosmic-home{display:grid;height:100svh;min-height:620px;grid-template-rows:76px minmax(0,1fr) 34px}
