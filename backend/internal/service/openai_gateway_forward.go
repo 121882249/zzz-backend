@@ -23,6 +23,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	preferredImageModel := strings.TrimSpace(c.GetHeader(tokenProImageModelHeader))
 	// This is TokenPro routing metadata, not an upstream OpenAI header.
 	c.Request.Header.Del(tokenProImageModelHeader)
+	if preferredImageModel != "" {
+		c.Set(tokenProImageDisplayContextKey, true)
+	}
 	ClearActualOpenAIUpstreamEndpoint(c)
 	if shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
 		SetActualOpenAIUpstreamEndpoint(c, "/v1/chat/completions")
