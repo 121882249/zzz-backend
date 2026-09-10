@@ -1343,7 +1343,10 @@ func normalizeOpenAIResponsesImageOnlyModel(reqBody map[string]any) bool {
 	}
 
 	if toolMap, ok := tools[imageToolIndex].(map[string]any); ok {
-		if strings.TrimSpace(firstNonEmptyString(toolMap["model"])) == "" {
+		// An image model explicitly chosen from Codex's model picker is the
+		// per-request source of truth. It must override the desktop fallback
+		// header and Codex's built-in gpt-image-2 default.
+		if strings.TrimSpace(firstNonEmptyString(toolMap["model"])) != imageModel {
 			toolMap["model"] = imageModel
 			modified = true
 		}
@@ -1375,8 +1378,10 @@ func normalizeOpenAIResponsesImageOnlyModel(reqBody map[string]any) bool {
 		modified = true
 	}
 
-	if _, ok := reqBody["tool_choice"]; !ok {
-		reqBody["tool_choice"] = map[string]any{"type": "image_generation"}
+	wantedToolChoice := map[string]any{"type": "image_generation"}
+	currentToolChoice, _ := reqBody["tool_choice"].(map[string]any)
+	if strings.TrimSpace(firstNonEmptyString(currentToolChoice["type"])) != "image_generation" {
+		reqBody["tool_choice"] = wantedToolChoice
 		modified = true
 	}
 	mainModel := openAIImagesResponsesMainModelValue()
