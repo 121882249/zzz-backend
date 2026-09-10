@@ -41,10 +41,10 @@ func TestTokenProAnthropicImageBridgeProducesClientExecutedTool(t *testing.T) {
 		"tool_choice":{"type":"image_generation"}
 	}`)
 
-	bridged, changed, err := applyTokenProAnthropicImageToolBridge(body, "gpt-image-2.5-sunburst")
+	bridged, changed, err := applyTokenProCodexClientImageToolBridge(body, "gpt-image-2.5-sunburst")
 	require.NoError(t, err)
 	require.True(t, changed)
-	require.Contains(t, jsonStringAt(t, bridged, "instructions"), codexAnthropicImageBridgeMarker)
+	require.Contains(t, jsonStringAt(t, bridged, "instructions"), codexClientImageBridgeMarker)
 
 	adapted, mapping, err := adaptResponsesClientToolsForAnthropic(bridged)
 	require.NoError(t, err)
@@ -68,7 +68,7 @@ func TestTokenProAnthropicImageBridgeKeepsExistingNamespaceSingle(t *testing.T) 
 		"tools":[{"type":"namespace","name":"image_gen","tools":[{"type":"function","name":"imagegen","parameters":{"type":"object"}}]}]
 	}`)
 
-	bridged, changed, err := applyTokenProAnthropicImageToolBridge(body, "gpt-image-2.5-sunburst")
+	bridged, changed, err := applyTokenProCodexClientImageToolBridge(body, "gpt-image-2.5-sunburst")
 	require.NoError(t, err)
 	require.True(t, changed)
 	var request map[string]any

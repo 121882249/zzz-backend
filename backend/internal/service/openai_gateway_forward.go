@@ -90,6 +90,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 	}
 	responsesLite := account.IsOpenAI() && isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader))
+	isCodexCLI := openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator")) || (s.cfg != nil && s.cfg.Gateway.ForceCodexCLI)
 	if responsesLite {
 		liteBody, changed, liteErr := normalizeOpenAIResponsesLitePayloadForAccount(body, account)
 		if liteErr != nil {
@@ -162,9 +163,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	// （Responses 客户端 × Anthropic 上游），转成 Anthropic 请求走原生端点。
 	// 不能落到下面的 raw-CC 分支——其 URL 构造会把 anthropic base 当 CC base 用。
 	if account.IsAnthropicProtocol() {
-		isCodexClient := openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator")) || (s.cfg != nil && s.cfg.Gateway.ForceCodexCLI)
-		if isCodexClient && !responsesLite && preferredImageModel != "" {
-			bridgedBody, changed, bridgeErr := applyTokenProAnthropicImageToolBridge(body, preferredImageModel)
+		if isCodexCLI && !responsesLite && preferredImageModel != "" {
+			bridgedBody, changed, bridgeErr := applyTokenProCodexClientImageToolBridge(body, preferredImageModel)
 			if bridgeErr != nil {
 				return nil, fmt.Errorf("prepare TokenPro Anthropic image tool bridge: %w", bridgeErr)
 			}
@@ -194,6 +194,16 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 
 	if shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
+		if isCodexCLI && !responsesLite && preferredImageModel != "" {
+			bridgedBody, changed, bridgeErr := applyTokenProCodexClientImageToolBridge(body, preferredImageModel)
+			if bridgeErr != nil {
+				return nil, fmt.Errorf("prepare TokenPro client image tool bridge: %w", bridgeErr)
+			}
+			if changed {
+				body = bridgedBody
+				logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Added TokenPro client image tool bridge for chat fallback model=%s image_model=%s", reqModel, preferredImageModel)
+			}
+		}
 		return s.forwardResponsesViaRawChatCompletions(ctx, c, account, body)
 	}
 	if account.IsOpenAI() && (account.IsOpenAIApiKey() || account.IsOpenAIOAuthLike()) {
@@ -224,7 +234,6 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	compatMessagesBridge := isOpenAICompatMessagesBridgeBody(body)
 	setOpenAICompatMessagesBridgeContext(c, compatMessagesBridge)
 
-	isCodexCLI := openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator")) || (s.cfg != nil && s.cfg.Gateway.ForceCodexCLI)
 	codexImageGenerationExplicitToolPolicy := codexImageGenerationExplicitToolPolicyAllow
 	if isCodexCLI {
 		codexImageGenerationExplicitToolPolicy = account.CodexImageGenerationExplicitToolPolicy()

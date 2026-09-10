@@ -139,8 +139,8 @@ const tokenProImageModelHeader = "X-TokenPro-Image-Model"
 const (
 	codexImageGenerationBridgeMarker = "<sub2api-codex-image-generation>"
 	codexImageGenerationBridgeText   = codexImageGenerationBridgeMarker + "\nWhen the user asks for raster image generation or editing, use the OpenAI Responses native `image_generation` tool attached to this request. The local Codex client may not expose an `image_gen` namespace, but that does not mean image generation is unavailable. Do not ask the user to switch to CLI fallback solely because `image_gen` is absent.\n</sub2api-codex-image-generation>"
-	codexAnthropicImageBridgeMarker  = "<tokenpro-codex-anthropic-image-generation>"
-	codexAnthropicImageBridgeText    = codexAnthropicImageBridgeMarker + "\nWhen the user asks to generate or edit a raster image, call the available `image_gen__imagegen` function tool. It executes the image model selected in TokenPro Desktop. Do not claim image generation is unavailable and do not switch the conversational model to an image-only model.\n</tokenpro-codex-anthropic-image-generation>"
+	codexClientImageBridgeMarker     = "<tokenpro-codex-client-image-generation>"
+	codexClientImageBridgeText       = codexClientImageBridgeMarker + "\nWhen the user asks to generate or edit a raster image, call the available `image_gen__imagegen` function tool. It executes the image model selected in TokenPro Desktop. Do not claim image generation is unavailable and do not switch the conversational model to an image-only model.\n</tokenpro-codex-client-image-generation>"
 	codexSparkImageUnsupportedMarker = "<sub2api-codex-spark-image-unsupported>"
 	codexSparkImageUnsupportedText   = codexSparkImageUnsupportedMarker + "\nThe current model is gpt-5.3-codex-spark, which does not support image generation, image editing, image input, the `image_generation` tool, or Codex `image_gen`/`$imagegen` workflows. If the user asks for image generation or image editing, clearly explain this model limitation and ask them to switch to a non-Spark Codex model such as gpt-5.3-codex or gpt-5.4. Do not claim that the local environment merely lacks image_gen tooling, and do not suggest CLI fallback as the primary fix while the model remains Spark.\n</sub2api-codex-spark-image-unsupported>"
 )
@@ -738,11 +738,11 @@ func hasCodexImageGenerationClientTool(reqBody map[string]any) bool {
 	return false
 }
 
-// applyTokenProAnthropicImageToolBridge exposes Codex's client-executed image
-// tool to Claude models. Native Anthropic upstreams cannot execute the hosted
-// OpenAI image_generation tool, so this path declares a namespace function that
-// is flattened for Anthropic and restored for the Codex client on the response.
-func applyTokenProAnthropicImageToolBridge(body []byte, preferred string) ([]byte, bool, error) {
+// applyTokenProCodexClientImageToolBridge exposes Codex's client-executed image
+// tool to Claude and other function-only upstreams. These upstreams cannot
+// execute the hosted OpenAI image_generation tool, so this path declares a
+// namespace function that is flattened upstream and restored for Codex.
+func applyTokenProCodexClientImageToolBridge(body []byte, preferred string) ([]byte, bool, error) {
 	if !IsGPTImageGenerationModel(preferred) || len(body) == 0 {
 		return body, false, nil
 	}
@@ -750,7 +750,7 @@ func applyTokenProAnthropicImageToolBridge(body []byte, preferred string) ([]byt
 	if err := json.Unmarshal(body, &reqBody); err != nil {
 		return body, false, err
 	}
-	modified := stripHostedImageGenerationToolsForAnthropic(reqBody)
+	modified := stripHostedImageGenerationToolsForFunctionOnlyUpstream(reqBody)
 	if !hasCodexImageGenerationClientTool(reqBody) {
 		tool := map[string]any{
 			"type":        "namespace",
@@ -779,12 +779,12 @@ func applyTokenProAnthropicImageToolBridge(body []byte, preferred string) ([]byt
 		modified = true
 	}
 	existing, _ := reqBody["instructions"].(string)
-	if !strings.Contains(existing, codexAnthropicImageBridgeMarker) {
+	if !strings.Contains(existing, codexClientImageBridgeMarker) {
 		existing = strings.TrimRight(existing, " \t\r\n")
 		if strings.TrimSpace(existing) == "" {
-			reqBody["instructions"] = codexAnthropicImageBridgeText
+			reqBody["instructions"] = codexClientImageBridgeText
 		} else {
-			reqBody["instructions"] = existing + "\n\n" + codexAnthropicImageBridgeText
+			reqBody["instructions"] = existing + "\n\n" + codexClientImageBridgeText
 		}
 		modified = true
 	}
@@ -798,7 +798,7 @@ func applyTokenProAnthropicImageToolBridge(body []byte, preferred string) ([]byt
 	return rebuilt, true, nil
 }
 
-func stripHostedImageGenerationToolsForAnthropic(reqBody map[string]any) bool {
+func stripHostedImageGenerationToolsForFunctionOnlyUpstream(reqBody map[string]any) bool {
 	if len(reqBody) == 0 {
 		return false
 	}
