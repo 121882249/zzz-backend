@@ -6,6 +6,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -57,4 +58,15 @@ func TestNormalizeTokenProCodexImageDisplayPayloadRequiresTokenProSelection(t *t
 	updated, changed := normalizeTokenProCodexImageDisplayPayload(c, payload)
 	require.False(t, changed)
 	require.Equal(t, payload, updated)
+}
+
+func TestConsumeTokenProPreferredImageModelSurvivesFailover(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Request.Header.Set(tokenProImageModelHeader, "gpt-image-2.5-sunburst")
+
+	require.Equal(t, "gpt-image-2.5-sunburst", consumeTokenProPreferredImageModel(c))
+	require.Empty(t, c.Request.Header.Get(tokenProImageModelHeader))
+	require.Equal(t, "gpt-image-2.5-sunburst", consumeTokenProPreferredImageModel(c))
 }

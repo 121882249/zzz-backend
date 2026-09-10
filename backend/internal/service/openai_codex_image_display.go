@@ -20,10 +20,32 @@ import (
 
 const (
 	tokenProImageDisplayContextKey = "tokenpro_codex_image_display"
+	tokenProImageModelContextKey   = "tokenpro_preferred_image_model"
 	// Chromium refuses very long data URLs. Keep enough headroom below its
 	// practical 2 MB boundary for the SSE and JSON framing around the image.
 	tokenProCodexImageResultMaxChars = 1_750_000
 )
+
+// consumeTokenProPreferredImageModel removes TokenPro-only routing metadata
+// from the upstream headers while retaining the selection across account
+// failover attempts that reuse the same Gin context.
+func consumeTokenProPreferredImageModel(c *gin.Context) string {
+	if c == nil {
+		return ""
+	}
+	preferred := strings.TrimSpace(c.GetHeader(tokenProImageModelHeader))
+	c.Request.Header.Del(tokenProImageModelHeader)
+	if preferred != "" {
+		c.Set(tokenProImageModelContextKey, preferred)
+		return preferred
+	}
+	stored, exists := c.Get(tokenProImageModelContextKey)
+	if !exists {
+		return ""
+	}
+	preferred, _ = stored.(string)
+	return strings.TrimSpace(preferred)
+}
 
 // normalizeTokenProCodexImageDisplayPayload makes oversized generated images
 // displayable in Codex. The upstream image is preserved whenever it already

@@ -20,9 +20,7 @@ import (
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
 	beginUpstreamResponseModelObservation(c)
-	preferredImageModel := strings.TrimSpace(c.GetHeader(tokenProImageModelHeader))
-	// This is TokenPro routing metadata, not an upstream OpenAI header.
-	c.Request.Header.Del(tokenProImageModelHeader)
+	preferredImageModel := consumeTokenProPreferredImageModel(c)
 	if preferredImageModel != "" {
 		c.Set(tokenProImageDisplayContextKey, true)
 	}
