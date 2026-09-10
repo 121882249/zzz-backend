@@ -162,6 +162,17 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	// （Responses 客户端 × Anthropic 上游），转成 Anthropic 请求走原生端点。
 	// 不能落到下面的 raw-CC 分支——其 URL 构造会把 anthropic base 当 CC base 用。
 	if account.IsAnthropicProtocol() {
+		isCodexClient := openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator")) || (s.cfg != nil && s.cfg.Gateway.ForceCodexCLI)
+		if isCodexClient && !responsesLite && preferredImageModel != "" {
+			bridgedBody, changed, bridgeErr := applyTokenProAnthropicImageToolBridge(body, preferredImageModel)
+			if bridgeErr != nil {
+				return nil, fmt.Errorf("prepare TokenPro Anthropic image tool bridge: %w", bridgeErr)
+			}
+			if changed {
+				body = bridgedBody
+				logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Added TokenPro client image tool bridge for native Anthropic model=%s image_model=%s", reqModel, preferredImageModel)
+			}
+		}
 		return s.forwardResponsesViaNativeAnthropic(ctx, c, account, body, reqModel)
 	}
 	if account.IsOpenAIApiKey() {

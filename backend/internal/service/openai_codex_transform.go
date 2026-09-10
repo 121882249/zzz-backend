@@ -139,6 +139,8 @@ const tokenProImageModelHeader = "X-TokenPro-Image-Model"
 const (
 	codexImageGenerationBridgeMarker = "<sub2api-codex-image-generation>"
 	codexImageGenerationBridgeText   = codexImageGenerationBridgeMarker + "\nWhen the user asks for raster image generation or editing, use the OpenAI Responses native `image_generation` tool attached to this request. The local Codex client may not expose an `image_gen` namespace, but that does not mean image generation is unavailable. Do not ask the user to switch to CLI fallback solely because `image_gen` is absent.\n</sub2api-codex-image-generation>"
+	codexAnthropicImageBridgeMarker  = "<tokenpro-codex-anthropic-image-generation>"
+	codexAnthropicImageBridgeText    = codexAnthropicImageBridgeMarker + "\nWhen the user asks to generate or edit a raster image, call the available `image_gen__imagegen` function tool. It executes the image model selected in TokenPro Desktop. Do not claim image generation is unavailable and do not switch the conversational model to an image-only model.\n</tokenpro-codex-anthropic-image-generation>"
 	codexSparkImageUnsupportedMarker = "<sub2api-codex-spark-image-unsupported>"
 	codexSparkImageUnsupportedText   = codexSparkImageUnsupportedMarker + "\nThe current model is gpt-5.3-codex-spark, which does not support image generation, image editing, image input, the `image_generation` tool, or Codex `image_gen`/`$imagegen` workflows. If the user asks for image generation or image editing, clearly explain this model limitation and ask them to switch to a non-Spark Codex model such as gpt-5.3-codex or gpt-5.4. Do not claim that the local environment merely lacks image_gen tooling, and do not suggest CLI fallback as the primary fix while the model remains Spark.\n</sub2api-codex-spark-image-unsupported>"
 )
@@ -698,6 +700,141 @@ func hasOpenAIImageGenerationTool(reqBody map[string]any) bool {
 func hasCodexImageGenerationFunctionTool(reqBody map[string]any) bool {
 	return len(reqBody) > 0 &&
 		codexToolsContainFunctionName(reqBody["tools"], codexImageGenerationFunctionToolName)
+}
+
+func hasCodexImageGenerationClientTool(reqBody map[string]any) bool {
+	if len(reqBody) == 0 {
+		return false
+	}
+	if hasCodexImageGenerationFunctionTool(reqBody) {
+		return true
+	}
+	containsNamespace := func(rawTools any) bool {
+		tools, ok := rawTools.([]any)
+		if !ok {
+			return false
+		}
+		for _, rawTool := range tools {
+			tool, ok := rawTool.(map[string]any)
+			if ok && isImageGenNamespaceToolMap(tool) {
+				return true
+			}
+		}
+		return false
+	}
+	if containsNamespace(reqBody["tools"]) {
+		return true
+	}
+	input, _ := reqBody["input"].([]any)
+	for _, rawItem := range input {
+		item, ok := rawItem.(map[string]any)
+		if !ok || strings.TrimSpace(firstNonEmptyString(item["type"])) != "additional_tools" {
+			continue
+		}
+		if containsNamespace(item["tools"]) {
+			return true
+		}
+	}
+	return false
+}
+
+// applyTokenProAnthropicImageToolBridge exposes Codex's client-executed image
+// tool to Claude models. Native Anthropic upstreams cannot execute the hosted
+// OpenAI image_generation tool, so this path declares a namespace function that
+// is flattened for Anthropic and restored for the Codex client on the response.
+func applyTokenProAnthropicImageToolBridge(body []byte, preferred string) ([]byte, bool, error) {
+	if !IsGPTImageGenerationModel(preferred) || len(body) == 0 {
+		return body, false, nil
+	}
+	var reqBody map[string]any
+	if err := json.Unmarshal(body, &reqBody); err != nil {
+		return body, false, err
+	}
+	modified := stripHostedImageGenerationToolsForAnthropic(reqBody)
+	if !hasCodexImageGenerationClientTool(reqBody) {
+		tool := map[string]any{
+			"type":        "namespace",
+			"name":        "image_gen",
+			"description": "Generate or edit raster images with the model selected in TokenPro Desktop.",
+			"tools": []any{map[string]any{
+				"type":        "function",
+				"name":        "imagegen",
+				"description": "Generate a new image or edit referenced images from a prompt.",
+				"parameters": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"prompt": map[string]any{"type": "string"},
+						"referenced_image_paths": map[string]any{
+							"type": "array", "items": map[string]any{"type": "string"},
+						},
+						"num_last_images_to_include": map[string]any{"type": "integer", "minimum": 0, "maximum": 5},
+					},
+					"required":             []any{"prompt"},
+					"additionalProperties": false,
+				},
+			}},
+		}
+		tools, _ := reqBody["tools"].([]any)
+		reqBody["tools"] = append(tools, tool)
+		modified = true
+	}
+	existing, _ := reqBody["instructions"].(string)
+	if !strings.Contains(existing, codexAnthropicImageBridgeMarker) {
+		existing = strings.TrimRight(existing, " \t\r\n")
+		if strings.TrimSpace(existing) == "" {
+			reqBody["instructions"] = codexAnthropicImageBridgeText
+		} else {
+			reqBody["instructions"] = existing + "\n\n" + codexAnthropicImageBridgeText
+		}
+		modified = true
+	}
+	if !modified {
+		return body, false, nil
+	}
+	rebuilt, err := json.Marshal(reqBody)
+	if err != nil {
+		return body, false, err
+	}
+	return rebuilt, true, nil
+}
+
+func stripHostedImageGenerationToolsForAnthropic(reqBody map[string]any) bool {
+	if len(reqBody) == 0 {
+		return false
+	}
+	strip := func(container map[string]any, key string) bool {
+		tools, ok := container[key].([]any)
+		if !ok {
+			return false
+		}
+		filtered := make([]any, 0, len(tools))
+		changed := false
+		for _, rawTool := range tools {
+			tool, ok := rawTool.(map[string]any)
+			if ok && isOpenAIImageGenerationType(firstNonEmptyString(tool["type"])) {
+				changed = true
+				continue
+			}
+			filtered = append(filtered, rawTool)
+		}
+		if changed {
+			container[key] = filtered
+		}
+		return changed
+	}
+	modified := strip(reqBody, "tools")
+	input, _ := reqBody["input"].([]any)
+	for _, rawItem := range input {
+		item, ok := rawItem.(map[string]any)
+		if ok && strings.TrimSpace(firstNonEmptyString(item["type"])) == "additional_tools" && strip(item, "tools") {
+			modified = true
+		}
+	}
+	if choice, ok := reqBody["tool_choice"].(map[string]any); ok && isOpenAIImageGenerationType(firstNonEmptyString(choice["type"])) {
+		reqBody["tool_choice"] = "auto"
+		modified = true
+	}
+	return modified
 }
 
 func toolsContainImageGeneration(rawTools any) bool {
