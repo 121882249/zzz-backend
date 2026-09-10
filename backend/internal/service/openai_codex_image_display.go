@@ -22,7 +22,7 @@ const (
 	tokenProImageDisplayContextKey = "tokenpro_codex_image_display"
 	tokenProImageModelContextKey   = "tokenpro_preferred_image_model"
 	// Chromium refuses very long data URLs. Keep enough headroom below its
-	// practical 2 MB boundary for the SSE and JSON framing around the image.
+	// practical 2 MB boundary for the data URL Codex builds from this Base64.
 	tokenProCodexImageResultMaxChars = 1_750_000
 )
 
@@ -124,12 +124,15 @@ func buildTokenProCodexImageDisplayResult(result string) (string, bool) {
 		if err := jpeg.Encode(&output, current, &jpeg.Options{Quality: quality}); err != nil {
 			return "", false
 		}
-		uri := "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(output.Bytes())
-		if len(uri) <= tokenProCodexImageResultMaxChars {
-			return uri, true
+		encodedResult := base64.StdEncoding.EncodeToString(output.Bytes())
+		if len(encodedResult) <= tokenProCodexImageResultMaxChars {
+			// Responses image_generation_call.result is raw Base64. Returning a
+			// data: URI here makes Codex treat the prefix as image bytes and reject
+			// the next turn with "Invalid image in your last message".
+			return encodedResult, true
 		}
 
-		ratio := math.Sqrt(float64(tokenProCodexImageResultMaxChars)/float64(len(uri))) * 0.90
+		ratio := math.Sqrt(float64(tokenProCodexImageResultMaxChars)/float64(len(encodedResult))) * 0.90
 		if ratio >= 1 {
 			ratio = 0.88
 		}

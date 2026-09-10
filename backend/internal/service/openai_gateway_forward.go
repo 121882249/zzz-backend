@@ -163,17 +163,14 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	// （Responses 客户端 × Anthropic 上游），转成 Anthropic 请求走原生端点。
 	// 不能落到下面的 raw-CC 分支——其 URL 构造会把 anthropic base 当 CC base 用。
 	if account.IsAnthropicProtocol() {
-		// The private TokenPro image-model header is itself the authoritative
-		// signal. Reverse proxies may replace the User-Agent, so do not make the
-		// client-executed image bridge depend on Codex identity detection here.
 		if !responsesLite && preferredImageModel != "" {
-			bridgedBody, changed, bridgeErr := applyTokenProCodexClientImageToolBridge(body, preferredImageModel)
-			if bridgeErr != nil {
-				return nil, fmt.Errorf("prepare TokenPro Anthropic image tool bridge: %w", bridgeErr)
+			strippedBody, changed, stripErr := stripOpenAIImageGenerationToolsFromRawPayload(body)
+			if stripErr != nil {
+				return nil, fmt.Errorf("strip TokenPro image tools from Anthropic model: %w", stripErr)
 			}
 			if changed {
-				body = bridgedBody
-				logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Added TokenPro client image tool bridge for native Anthropic model=%s image_model=%s", reqModel, preferredImageModel)
+				body = strippedBody
+				logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Stripped TokenPro image tools from native Anthropic model=%s", reqModel)
 			}
 		}
 		return s.forwardResponsesViaNativeAnthropic(ctx, c, account, body, reqModel)
@@ -198,13 +195,13 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 
 	if shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
 		if !responsesLite && preferredImageModel != "" {
-			bridgedBody, changed, bridgeErr := applyTokenProCodexClientImageToolBridge(body, preferredImageModel)
-			if bridgeErr != nil {
-				return nil, fmt.Errorf("prepare TokenPro client image tool bridge: %w", bridgeErr)
+			strippedBody, changed, stripErr := stripOpenAIImageGenerationToolsFromRawPayload(body)
+			if stripErr != nil {
+				return nil, fmt.Errorf("strip TokenPro image tools from non-OpenAI model: %w", stripErr)
 			}
 			if changed {
-				body = bridgedBody
-				logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Added TokenPro client image tool bridge for chat fallback model=%s image_model=%s", reqModel, preferredImageModel)
+				body = strippedBody
+				logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Stripped TokenPro image tools from chat fallback model=%s", reqModel)
 			}
 		}
 		return s.forwardResponsesViaRawChatCompletions(ctx, c, account, body)
@@ -366,6 +363,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		s.isCodexImageGenerationBridgeEnabled(ctx, account, apiKey)
 	var imageIntent bool
 	canonicalImageIntent := resolveOpenAIImageIntentHint(c, reqModel, canonicalImageIntentBody, IsImageGenerationIntent)
+	if codexImageGenerationBridgeEnabled || canonicalImageIntent {
+		c.Set(tokenProImageDisplayContextKey, true)
+	}
 	if isCodexCLI && codexImageGenerationExplicitToolPolicy == codexImageGenerationExplicitToolPolicyStrip {
 		decoded, decodeErr := ensureReqBody()
 		if decodeErr != nil {

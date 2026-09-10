@@ -49,14 +49,14 @@ func (s *GatewayService) ForwardAsResponses(
 		body = normalizedBody
 	}
 	if preferredImageModel != "" {
-		bridgedBody, changed, bridgeErr := applyTokenProCodexClientImageToolBridge(body, preferredImageModel)
-		if bridgeErr != nil {
-			return nil, fmt.Errorf("prepare TokenPro Responses image tool bridge: %w", bridgeErr)
+		strippedBody, changed, stripErr := stripOpenAIImageGenerationToolsFromRawPayload(body)
+		if stripErr != nil {
+			return nil, fmt.Errorf("strip TokenPro image tools from non-OpenAI Responses model: %w", stripErr)
 		}
 		if changed {
-			body = bridgedBody
-			logger.L().Debug("gateway forward_as_responses: added TokenPro client image tool bridge",
-				zap.String("image_model", preferredImageModel),
+			body = strippedBody
+			logger.L().Debug("gateway forward_as_responses: stripped TokenPro image tools from non-OpenAI model",
+				zap.String("model", strings.TrimSpace(gjson.GetBytes(body, "model").String())),
 			)
 		}
 	}

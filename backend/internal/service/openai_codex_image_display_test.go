@@ -38,11 +38,11 @@ func TestNormalizeTokenProCodexImageDisplayPayloadCompressesOversizedImage(t *te
 	updated, changed := normalizeTokenProCodexImageDisplayPayload(c, payload)
 	require.True(t, changed)
 	result := gjson.GetBytes(updated, "item.result").String()
-	require.True(t, strings.HasPrefix(result, "data:image/jpeg;base64,"))
+	require.False(t, strings.HasPrefix(result, "data:"))
 	require.LessOrEqual(t, len(result), tokenProCodexImageResultMaxChars)
 	require.Equal(t, "jpeg", gjson.GetBytes(updated, "item.output_format").String())
 
-	raw, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(result, "data:image/jpeg;base64,"))
+	raw, err := base64.StdEncoding.DecodeString(result)
 	require.NoError(t, err)
 	decoded, format, err := image.Decode(bytes.NewReader(raw))
 	require.NoError(t, err)
