@@ -73,7 +73,8 @@ func TestTokenProAnthropicImageBridgeKeepsExistingNamespaceSingle(t *testing.T) 
 	require.True(t, changed)
 	var request map[string]any
 	require.NoError(t, json.Unmarshal(bridged, &request))
-	tools := request["tools"].([]any)
+	tools, ok := request["tools"].([]any)
+	require.True(t, ok)
 	require.Len(t, tools, 1)
 	require.True(t, hasCodexImageGenerationClientTool(request))
 }
@@ -90,9 +91,14 @@ func TestImageModelChosenInCodexOverridesFallbackAndForcesImageTool(t *testing.T
 
 	require.True(t, normalizeOpenAIResponsesImageOnlyModel(req))
 	require.Equal(t, openAIImagesResponsesMainModelValue(), req["model"])
-	tools := req["tools"].([]any)
-	require.Equal(t, "gpt-image-2.5-sunburst", tools[0].(map[string]any)["model"])
-	require.Equal(t, "image_generation", req["tool_choice"].(map[string]any)["type"])
+	tools, ok := req["tools"].([]any)
+	require.True(t, ok)
+	tool, ok := tools[0].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "gpt-image-2.5-sunburst", tool["model"])
+	toolChoice, ok := req["tool_choice"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "image_generation", toolChoice["type"])
 }
 
 func jsonStringAt(t *testing.T, body []byte, key string) string {

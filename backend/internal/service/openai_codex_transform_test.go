@@ -1058,7 +1058,10 @@ func TestApplyPreferredOpenAIResponsesImageModel(t *testing.T) {
 	}
 
 	require.True(t, applyPreferredOpenAIResponsesImageModel(reqBody, "gpt-image-2.5-sunburst"))
-	tool := reqBody["tools"].([]any)[0].(map[string]any)
+	tools, ok := reqBody["tools"].([]any)
+	require.True(t, ok)
+	tool, ok := tools[0].(map[string]any)
+	require.True(t, ok)
 	require.Equal(t, "gpt-image-2.5-sunburst", tool["model"])
 	require.False(t, applyPreferredOpenAIResponsesImageModel(reqBody, "gpt-image-2.5-sunburst"))
 	require.False(t, applyPreferredOpenAIResponsesImageModel(reqBody, "gpt-5.6-sol"))
