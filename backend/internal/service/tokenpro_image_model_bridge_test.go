@@ -52,7 +52,9 @@ func TestTokenProNonOpenAIAccountStripsImageToolsWithoutDesktopHeader(t *testing
 	tools, ok := request["tools"].([]any)
 	require.True(t, ok)
 	require.Len(t, tools, 1)
-	require.Equal(t, "shell", tools[0].(map[string]any)["name"])
+	remainingTool, ok := tools[0].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "shell", remainingTool["name"])
 	require.NotContains(t, request, "tool_choice")
 }
 
