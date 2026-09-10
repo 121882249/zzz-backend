@@ -1048,6 +1048,22 @@ func TestCodexImageGenerationBridge_PreservesClientImageFunctionTools(t *testing
 	}
 }
 
+func TestApplyPreferredOpenAIResponsesImageModel(t *testing.T) {
+	reqBody := map[string]any{
+		"model": "gpt-5.6-sol",
+		"tools": []any{map[string]any{
+			"type":          "image_generation",
+			"output_format": "png",
+		}},
+	}
+
+	require.True(t, applyPreferredOpenAIResponsesImageModel(reqBody, "gpt-image-2.5-sunburst"))
+	tool := reqBody["tools"].([]any)[0].(map[string]any)
+	require.Equal(t, "gpt-image-2.5-sunburst", tool["model"])
+	require.False(t, applyPreferredOpenAIResponsesImageModel(reqBody, "gpt-image-2.5-sunburst"))
+	require.False(t, applyPreferredOpenAIResponsesImageModel(reqBody, "gpt-5.6-sol"))
+}
+
 func TestApplyCodexImageGenerationBridgeInstructions_AppendsBridgeOnce(t *testing.T) {
 	reqBody := map[string]any{
 		"model":        "gpt-5.4",

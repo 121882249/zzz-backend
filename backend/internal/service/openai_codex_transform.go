@@ -134,6 +134,8 @@ func trimOpenAIResponsesKnownCallIDPrefix(id string) string {
 
 const codexImageGenerationFunctionToolName = "image_gen.imagegen"
 
+const tokenProImageModelHeader = "X-TokenPro-Image-Model"
+
 const (
 	codexImageGenerationBridgeMarker = "<sub2api-codex-image-generation>"
 	codexImageGenerationBridgeText   = codexImageGenerationBridgeMarker + "\nWhen the user asks for raster image generation or editing, use the OpenAI Responses native `image_generation` tool attached to this request. The local Codex client may not expose an `image_gen` namespace, but that does not mean image generation is unavailable. Do not ask the user to switch to CLI fallback solely because `image_gen` is absent.\n</sub2api-codex-image-generation>"
@@ -935,6 +937,30 @@ func normalizeOpenAIResponsesImageGenerationTools(reqBody map[string]any) bool {
 		}
 	}
 	return modified
+}
+
+// applyPreferredOpenAIResponsesImageModel binds TokenPro Desktop's separate
+// image-model choice to the hosted image_generation tool. The conversational
+// model remains the Responses driver, so Codex never has to switch to an
+// image-only model in its model menu.
+func applyPreferredOpenAIResponsesImageModel(reqBody map[string]any, preferred string) bool {
+	preferred = strings.TrimSpace(preferred)
+	if len(reqBody) == 0 || !IsGPTImageGenerationModel(preferred) {
+		return false
+	}
+	tools, _ := reqBody["tools"].([]any)
+	for _, rawTool := range tools {
+		toolMap, ok := rawTool.(map[string]any)
+		if !ok || strings.TrimSpace(firstNonEmptyString(toolMap["type"])) != "image_generation" {
+			continue
+		}
+		if strings.TrimSpace(firstNonEmptyString(toolMap["model"])) == preferred {
+			return false
+		}
+		toolMap["model"] = preferred
+		return true
+	}
+	return false
 }
 
 func normalizeOpenAIResponseFormatSchemas(reqBody map[string]any) bool {
