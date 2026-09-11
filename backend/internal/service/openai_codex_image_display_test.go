@@ -51,6 +51,32 @@ func TestNormalizeTokenProCodexImageDisplayPayloadCompressesOversizedImage(t *te
 	require.NotZero(t, decoded.Bounds().Dy())
 }
 
+func TestNormalizeTokenProCodexImageDisplayPayloadStripsSmallDataURL(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Set(tokenProImageDisplayContextKey, true)
+
+	encoded := base64.StdEncoding.EncodeToString([]byte("small image payload"))
+	payload := []byte(`{"type":"response.output_item.done","item":{"type":"image_generation_call","status":"completed","result":"data:image/jpeg;base64,` + encoded + `"}}`)
+	updated, changed := normalizeTokenProCodexImageDisplayPayload(c, payload)
+	require.True(t, changed)
+	require.Equal(t, encoded, gjson.GetBytes(updated, "item.result").String())
+	require.Equal(t, "jpeg", gjson.GetBytes(updated, "item.output_format").String())
+}
+
+func TestNormalizeTokenProCodexImageDisplayPayloadStripsDataURLInCompletedResponse(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Set(tokenProImageDisplayContextKey, true)
+
+	encoded := base64.StdEncoding.EncodeToString([]byte("small png payload"))
+	payload := []byte(`{"type":"response.completed","response":{"output":[{"type":"image_generation_call","status":"completed","result":"data:image/png;base64,` + encoded + `"}]}}`)
+	updated, changed := normalizeTokenProCodexImageDisplayPayload(c, payload)
+	require.True(t, changed)
+	require.Equal(t, encoded, gjson.GetBytes(updated, "response.output.0.result").String())
+	require.Equal(t, "png", gjson.GetBytes(updated, "response.output.0.output_format").String())
+}
+
 func TestNormalizeTokenProCodexImageDisplayPayloadRequiresTokenProSelection(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())

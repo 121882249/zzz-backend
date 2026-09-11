@@ -79,20 +79,32 @@ func normalizeTokenProCodexImageDisplayPayload(c *gin.Context, data []byte) ([]b
 	changed := false
 	for _, path := range paths {
 		result := gjson.GetBytes(updated, path+".result").String()
-		if result == "" || len(result) <= tokenProCodexImageResultMaxChars {
+		if result == "" {
 			continue
 		}
-		displayResult, ok := buildTokenProCodexImageDisplayResult(result)
-		if !ok {
+
+		displayResult, outputFormat, normalized := normalizeTokenProCodexImageResult(result)
+		if len(displayResult) > tokenProCodexImageResultMaxChars {
+			var ok bool
+			displayResult, ok = buildTokenProCodexImageDisplayResult(displayResult)
+			if !ok {
+				continue
+			}
+			outputFormat = "jpeg"
+			normalized = true
+		}
+		if !normalized {
 			continue
 		}
 		next, err := sjson.SetBytes(updated, path+".result", displayResult)
 		if err != nil {
 			continue
 		}
-		next, err = sjson.SetBytes(next, path+".output_format", "jpeg")
-		if err != nil {
-			continue
+		if outputFormat != "" {
+			next, err = sjson.SetBytes(next, path+".output_format", outputFormat)
+			if err != nil {
+				continue
+			}
 		}
 		updated = next
 		changed = true
@@ -100,11 +112,33 @@ func normalizeTokenProCodexImageDisplayPayload(c *gin.Context, data []byte) ([]b
 	return updated, changed
 }
 
-func buildTokenProCodexImageDisplayResult(result string) (string, bool) {
-	encoded := strings.TrimSpace(result)
-	if comma := strings.IndexByte(encoded, ','); strings.HasPrefix(encoded, "data:image/") && comma >= 0 {
-		encoded = encoded[comma+1:]
+// normalizeTokenProCodexImageResult strips data-URL framing from otherwise
+// valid Responses image output. Codex decodes image_generation_call.result as
+// raw Base64; including "data:image/...;base64," makes even a small image render
+// as a broken attachment and poisons the next turn's image input.
+func normalizeTokenProCodexImageResult(result string) (encoded, outputFormat string, changed bool) {
+	trimmed := strings.TrimSpace(result)
+	comma := strings.IndexByte(trimmed, ',')
+	if comma < 0 {
+		return trimmed, "", trimmed != result
 	}
+	prefix := strings.ToLower(trimmed[:comma])
+	if !strings.HasPrefix(prefix, "data:image/") || !strings.Contains(prefix, ";base64") {
+		return trimmed, "", trimmed != result
+	}
+
+	format := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(prefix, "data:image/"), ";base64"))
+	if semicolon := strings.IndexByte(format, ';'); semicolon >= 0 {
+		format = format[:semicolon]
+	}
+	if format == "jpg" {
+		format = "jpeg"
+	}
+	return strings.TrimSpace(trimmed[comma+1:]), format, true
+}
+
+func buildTokenProCodexImageDisplayResult(result string) (string, bool) {
+	encoded, _, _ := normalizeTokenProCodexImageResult(result)
 	raw, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
 		return "", false
