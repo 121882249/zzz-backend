@@ -2,10 +2,6 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import {
-  API_BASE,
-  API_KEY,
-  BRAND,
-  OPENAI_BASE,
   guides,
   navItems,
   type GuideKey,
@@ -32,12 +28,6 @@ const filteredItems = computed(() => {
   if (!needle) return navItems
   return navItems.filter((item) => item.label.toLowerCase().includes(needle))
 })
-const apiAddress = computed(() => (
-  guideKey.value === 'claude-desktop'
-    ? API_BASE
-    : OPENAI_BASE
-))
-
 async function copy(value: string) {
   await navigator.clipboard.writeText(value)
   copiedValue.value = value
@@ -128,13 +118,15 @@ onUnmounted(() => {
             <p>{{ guide.description }}</p>
             <div class="guide-tags"><span v-for="tag in guide.tags" :key="tag">{{ tag }}</span></div>
           </div>
-          <span class="updated">最后验证：2026-08-12</span>
+          <span class="updated">最后验证：2026-09-11</span>
         </div>
 
         <section class="connection-summary">
-          <div><small>服务商</small><strong>{{ BRAND }}</strong></div>
-          <div><small>API 地址</small><code>{{ apiAddress }}</code></div>
-          <div><small>API Key</small><code>{{ API_KEY }}</code></div>
+          <div v-for="item in guide.summary" :key="item.label">
+            <small>{{ item.label }}</small>
+            <code v-if="item.code">{{ item.value }}</code>
+            <strong v-else>{{ item.value }}</strong>
+          </div>
         </section>
 
         <div class="document-body">
@@ -142,6 +134,12 @@ onUnmounted(() => {
             <div class="section-label"><span>{{ String(sectionIndex + 1).padStart(2, '0') }}</span><i /></div>
             <h2>{{ section.title }}</h2>
             <p v-if="section.intro">{{ section.intro }}</p>
+
+            <div v-if="section.links" class="official-links">
+              <a v-for="link in section.links" :key="link.href" :href="link.href" target="_blank" rel="noopener noreferrer">
+                <span><strong>{{ link.label }}</strong><small>{{ link.meta }}</small></span><b>↗</b>
+              </a>
+            </div>
 
             <div
               v-if="section.fields"

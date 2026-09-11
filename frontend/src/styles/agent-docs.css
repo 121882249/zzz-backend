@@ -116,6 +116,13 @@ code, pre, kbd { font-family: var(--font-geist-mono), "SFMono-Regular", Consolas
 .section-label i { height: 1px; width: 30px; background: #d8dbe3; }
 .docs-section h2 { margin: 0 0 12px; color: #172039; font-size: 25px; letter-spacing: -.025em; }
 .docs-section > p { margin: 0 0 22px; color: var(--muted); font-size: 13px; line-height: 1.75; }
+.official-links { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 16px 0 20px; }
+.official-links a { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-height: 64px; padding: 13px 15px; border: 1px solid #deddfd; border-radius: 10px; background: linear-gradient(145deg, #fff, #f8f8ff); transition: border-color .16s ease, transform .16s ease, box-shadow .16s ease; }
+.official-links a:hover { border-color: #aaa5ff; transform: translateY(-1px); box-shadow: 0 7px 18px rgba(82, 72, 210, .08); }
+.official-links a > span { display: grid; gap: 5px; min-width: 0; }
+.official-links strong { color: #3d4560; font-size: 11px; }
+.official-links small { overflow: hidden; color: #8a92a6; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.official-links b { flex: 0 0 auto; color: var(--violet); font-size: 13px; }
 .notice { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 18px; padding: 14px 16px; border: 1px solid #e6e5ff; border-radius: 10px; background: #faf9ff; }
 .notice-icon { display: grid; place-items: center; width: 25px; height: 25px; flex: 0 0 auto; color: var(--violet); background: #eae9ff; border-radius: 7px; }
 .notice div { display: grid; gap: 4px; }
@@ -381,4 +388,5 @@ code, pre, kbd { font-family: var(--font-geist-mono), "SFMono-Regular", Consolas
   .connection-summary > div { border-left: 0; border-top: 1px solid var(--line); }
   .connection-summary > div:first-child { border-top: 0; }
   .guide-pagination { grid-template-columns: 1fr; }
+  .official-links { grid-template-columns: 1fr; }
 }

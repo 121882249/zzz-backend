@@ -7,6 +7,7 @@ export type GuideSection = {
   intro?: string;
   steps?: string[];
   fields?: string[][];
+  links?: { label: string; href: string; meta: string }[];
   code?: { label: string; value: string }[];
   note?: string;
   warning?: string;
@@ -18,130 +19,135 @@ export type Guide = {
   title: string;
   description: string;
   tags: string[];
+  summary: { label: string; value: string; code?: boolean }[];
   sections: GuideSection[];
 };
 
-export const BRAND = "TokenPro";
-export const API_BASE = "https://tokenpro.work";
-export const OPENAI_BASE = API_BASE + "/v1";
-export const API_KEY = "<你的 TokenPro API Key>";
-export const GPT_MODEL = "<控制台中的 GPT 模型 ID>";
-export const CLAUDE_MODEL = "<控制台中的 Claude 模型 ID>";
+export const TOKENPRO_VERSION = "v1.2.45+";
 
 export const navItems: { key: GuideKey; label: string; meta: string }[] = [
   { key: "codex-desktop", label: "Codex 客户端", meta: "桌面端" },
   { key: "claude-desktop", label: "Claude 客户端", meta: "桌面端" },
 ];
 
-const codexConfig = "model_provider = \"tokenpro\"\n"
-  + "model = \"" + GPT_MODEL + "\"\n"
-  + "model_reasoning_effort = \"high\"\n\n"
-  + "[model_providers.tokenpro]\n"
-  + "name = \"TokenPro\"\n"
-  + "base_url = \"" + OPENAI_BASE + "\"\n"
-  + "env_key = \"TOKENPRO_API_KEY\"\n"
-  + "wire_api = \"responses\"";
+const sharedDownloads = [
+  { label: "下载 TokenPro", href: "https://tokenpro.work/#download-dock-title", meta: "macOS · Windows · Linux" },
+];
 
 export const guides: Record<GuideKey, Guide> = {
   "codex-desktop": {
     label: "Codex 客户端",
     eyebrow: "CODEX DESKTOP",
-    title: "TokenPro 接入 Codex 客户端",
-    description: "在 macOS 或 Windows 的 Codex 桌面版中配置 TokenPro Responses API。已安装 Codex 的用户可直接从“配置 TokenPro”开始。",
-    tags: ["macOS", "Windows", "Responses API"],
+    title: "用 TokenPro 打开 Codex 客户端",
+    description: "无需手工修改配置文件，也无需复制 API Key。TokenPro 会读取你的可用分组、备份原配置、写入模型目录，并打开 Codex。",
+    tags: ["自动配置", "多模型", "独立生图"],
+    summary: [
+      { label: "配置方式", value: "TokenPro 一键接入" },
+      { label: "接口协议", value: "Responses API" },
+      { label: "TokenPro 版本", value: TOKENPRO_VERSION, code: true },
+    ],
     sections: [
       {
-        title: "下载安装 Codex",
-        intro: "只从 OpenAI 官方下载页或系统官方应用商店获取安装包，并核对发布者信息。",
+        title: "准备两个客户端",
+        intro: "先安装 TokenPro 和 OpenAI 官方桌面客户端。若系统以 ChatGPT 桌面应用提供 Codex，TokenPro 也会自动识别。安装后请至少打开官方客户端一次。",
+        links: [
+          ...sharedDownloads,
+          { label: "OpenAI 官方客户端", href: "https://developers.openai.com/codex/app", meta: "Codex / ChatGPT Desktop" },
+        ],
         fields: [
-          ["系统", "建议安装方式"],
-          ["macOS Apple Silicon", "OpenAI 官方 Codex.dmg"],
-          ["macOS Intel", "OpenAI 官方 x64 安装包"],
-          ["Windows", "Microsoft Store 官方页面"],
-          ["Linux", "请使用 Codex 命令行版本"],
+          ["系统", "TokenPro 安装包"],
+          ["macOS Apple 芯片", "macOS arm64 .dmg"],
+          ["macOS Intel", "macOS x64 .dmg"],
+          ["Windows", "Windows x64 .exe"],
+          ["Linux", "Linux x64 .deb"],
         ],
-        warning: "不要因为系统出现安全警告就直接忽略。先确认下载域名、代码签名和发布者均为官方来源。",
+        warning: "只使用 TokenPro 官网和 OpenAI 官方入口下载。不要安装第三方重新打包的客户端。",
       },
       {
-        title: "备份并配置 TokenPro",
-        intro: "Codex Desktop 与 Codex CLI 共用 ~/.codex/config.toml。先备份，再把下面内容合并到现有配置。",
-        code: [
-          { label: "macOS / Linux · 备份", value: "mkdir -p ~/.codex\ncp ~/.codex/config.toml ~/.codex/config.toml.backup 2>/dev/null || true" },
-          { label: "~/.codex/config.toml · 合并以下配置", value: codexConfig },
-          { label: "Windows PowerShell · 备份", value: "New-Item -ItemType Directory -Force -Path \"$HOME\\.codex\" | Out-Null\nif (Test-Path \"$HOME\\.codex\\config.toml\") {\n  Copy-Item \"$HOME\\.codex\\config.toml\" \"$HOME\\.codex\\config.toml.backup\"\n}" },
-        ],
-        note: "不要用整段脚本覆盖配置文件，否则可能丢失已有 MCP、权限和模型设置。",
-      },
-      {
-        title: "设置 API Key",
-        code: [
-          { label: "macOS · 当前终端", value: "export TOKENPRO_API_KEY=\"" + API_KEY + "\"" },
-          { label: "Linux · 当前终端", value: "export TOKENPRO_API_KEY=\"" + API_KEY + "\"" },
-          { label: "Windows PowerShell · 用户环境变量", value: "[Environment]::SetEnvironmentVariable(\n  \"TOKENPRO_API_KEY\",\n  \"" + API_KEY + "\",\n  \"User\"\n)" },
-        ],
-        note: "如需长期生效，请把变量保存到你实际使用的安全环境配置或密钥管理工具，而不是复制进项目仓库。",
-      },
-      {
-        title: "重启、验证与恢复",
+        title: "登录并更新 TokenPro",
         steps: [
-          "完全退出 Codex 客户端，再重新打开，确保新进程读取到环境变量。",
-          "新建一个小型测试任务，在 TokenPro 控制台确认模型为 " + GPT_MODEL + "、协议为 Responses。",
-          "出现 401 时，检查变量名是否与 config.toml 中 env_key 一致。",
-          "需要切回原配置时，用 config.toml.backup 恢复并重新启动 Codex。",
+          "打开 TokenPro，使用你的 TokenPro 邮箱和密码登录。",
+          "查看右上角版本状态：显示“已是最新”时无需操作；显示黄色“发现更新”时点击即可在线更新。",
+          "更新过程中等待进度条完成，TokenPro 会校验更新包并自动重启，不需要重新下载安装。",
+          "点击钱包区域的“刷新”，确认余额与订阅信息已经同步。",
         ],
+        note: "TokenPro 使用账户的全局 Key 自动接入 Codex，密钥保存在当前系统用户的私有配置目录中。",
+      },
+      {
+        title: "选择模型并打开 Codex",
+        steps: [
+          "在 TokenPro 首页找到“Codex 客户端”，点击“模型选择”，再选择“选择模型”。",
+          "模型按分组显示：订阅分组优先，余额分组按 GPT、Claude、Grok、Gemini 和其他厂商排列；同厂商模型保持在一起。",
+          "首次使用或没有历史选择时，默认选中排序第一分组的第一个模型；你可以自由增加或取消其他模型。",
+          "生图组独立显示在第一个余额 GPT 分组正下方，可不选、单选或多选；只选择生图模型时也可以直接生图。",
+          "点击“应用并打开 Codex”。TokenPro 会自动备份并写入配置，然后启动或唤醒 Codex。",
+        ],
+        note: "Codex 至少选择 1 个模型。OpenAI LLM 可以调用已选生图工具；Claude、Gemini、Grok 等非 OpenAI LLM 不会调用该工具，避免额外图片费用。独立生图模型不依赖 LLM。",
+      },
+      {
+        title: "日常切换与恢复官方配置",
+        steps: [
+          "需要增加、减少或更换模型时，回到 TokenPro 的“模型选择”重新勾选并应用。",
+          "点击“打开应用”只会唤醒正在运行的 Codex，不会为了切换窗口而强制终止当前任务。",
+          "需要回到 OpenAI 官方配置时，打开“模型选择”，点击“恢复官方配置”。TokenPro 会恢复接入前保存的配置并重新打开 Codex。",
+          "遇到 401 或模型列表未刷新时，先在 TokenPro 退出后重新登录，再重新应用模型。",
+        ],
+        warning: "不要在 TokenPro 已接入期间手工覆盖 ~/.codex/config.toml；这可能删除原有 MCP、权限或项目设置。",
       },
     ],
   },
   "claude-desktop": {
     label: "Claude 客户端",
     eyebrow: "CLAUDE DESKTOP",
-    title: "TokenPro 接入 Claude 客户端",
-    description: "Claude Desktop 本身不提供通用自定义供应商表单，可借助 CC Switch 管理 TokenPro 接入地址、密钥与恢复切换。",
-    tags: ["macOS", "Windows", "CC Switch"],
+    title: "用 TokenPro 打开 Claude 客户端",
+    description: "最新版 TokenPro 已内置 Claude 本地安全桥接，不再需要 CC Switch。选择模型后，TokenPro 会配置独立的第三方账户并打开 Claude。",
+    tags: ["无需 CC Switch", "本地桥接", "自动路由"],
+    summary: [
+      { label: "配置方式", value: "TokenPro 本地安全桥接" },
+      { label: "本地监听", value: "127.0.0.1:23179", code: true },
+      { label: "TokenPro 版本", value: TOKENPRO_VERSION, code: true },
+    ],
     sections: [
       {
-        title: "安装 Claude Desktop",
-        steps: [
-          "从 Claude 官方网站下载与你系统对应的桌面客户端。",
-          "安装后先正常打开一次，确认应用可以运行。",
-          "Windows 的 Claude Workspace 可能要求启用 Virtual Machine Platform。",
+        title: "准备两个客户端",
+        intro: "先安装 TokenPro 和 Anthropic 官方 Claude Desktop，并各自打开一次。Claude Desktop 当前支持 macOS、Windows 和 Linux；请按官方页面选择与你系统匹配的版本。",
+        links: [
+          ...sharedDownloads,
+          { label: "Claude 官方下载", href: "https://claude.com/download", meta: "macOS · Windows · Linux" },
+          { label: "Claude 官方安装说明", href: "https://support.claude.com/en/articles/10065433-install-claude-desktop", meta: "系统要求与安装步骤" },
         ],
-        warning: "下载与安装时核对官方域名和签名。第三方下载站提供的重新打包版本不建议使用。",
+        warning: "不再安装或配置 CC Switch。旧教程中的 Anthropic Base URL、API Key 和默认模型表单已不适用于当前 TokenPro 客户端。",
       },
       {
-        title: "安装 CC Switch",
-        intro: "建议使用当前稳定版。macOS 可使用 Homebrew，其他系统从 CC Switch 官方 Releases 下载。",
-        code: [{ label: "macOS", value: "brew install --cask cc-switch" }],
-        fields: [
-          ["系统", "安装包"],
-          ["macOS", ".dmg / .zip"],
-          ["Windows", ".msi / Portable .zip"],
-          ["Linux", ".deb / .rpm / .AppImage"],
+        title: "登录并更新 TokenPro",
+        steps: [
+          "打开 TokenPro，使用你的 TokenPro 邮箱和密码登录。",
+          "确认右上角显示“已是最新”；若显示黄色更新提示，点击后等待进度完成并让程序自动重启。",
+          "点击钱包区域的“刷新”，确认余额、订阅数量、订阅余额和到期时间已经同步。",
         ],
+        note: "Claude 只会获得随机生成的本机桥接凭据，不会直接读取你的 TokenPro 全局 Key。桥接只监听 127.0.0.1，不向局域网开放。",
       },
       {
-        title: "添加 TokenPro 供应商",
-        intro: "在 CC Switch 的 Claude Desktop 标签页新增自定义供应商，然后填写以下内容。",
-        fields: [
-          ["字段", "填写值"],
-          ["供应商名称", BRAND],
-          ["Anthropic Base URL", API_BASE],
-          ["API Key", API_KEY],
-          ["默认模型", CLAUDE_MODEL],
-        ],
+        title: "选择模型并打开 Claude",
         steps: [
-          "保存自定义供应商并在主页启用 TokenPro。",
-          "如果 Claude Desktop 已打开，完全退出后重新启动。",
-          "发送测试消息，并在 TokenPro 控制台检查 /v1/messages 请求。",
+          "在 TokenPro 首页找到“Claude 客户端”，点击“模型选择”，再选择“选择模型”。",
+          "Claude 的分组顺序为：订阅分组、Claude、GPT、Grok、Gemini、其他；同厂商模型集中排列，不会散落。",
+          "首次使用或没有历史选择时，默认选中排序第一分组的第一个模型；至少选择 1 个 LLM，也可以同时选择多个。",
+          "Claude 客户端不会显示生图模型；这些模型只在 Codex 的独立生图组中提供。",
+          "点击“应用并打开 Claude”。TokenPro 会启动本地桥接、写入独立的第三方配置，并打开 Claude。",
         ],
+        note: "多个模型共用一把 TokenPro 全局 Key；本地桥接会根据当前模型自动选择对应分组，无需手工切换 Key。",
       },
       {
-        title: "常见问题与恢复",
+        title: "检查连接与恢复官方配置",
         steps: [
-          "Windows 提示 Virtual Machine Platform unavailable：运行 optionalfeatures，启用“虚拟机平台”后重启电脑。",
-          "切换无效：确认 CC Switch 当前启用的是 TokenPro，并完全重启 Claude Desktop。",
-          "需要恢复官方订阅时，在 CC Switch 切回官方供应商或停用自定义配置。",
+          "Claude 打开后，账户位置应显示你的 TokenPro 用户账户；新建对话并发送一个简短测试请求。",
+          "如果仍出现 Sign In 页面，请完全退出 Claude，再从 TokenPro 点击“打开应用”；必要时重新选择模型并应用。",
+          "如果提示本地桥接无法启动，先退出所有 Claude 窗口，确认 23179 端口未被其他程序占用，再重试。",
+          "退出 TokenPro 打开的 Claude 后，本地桥接会停止并取消仍在进行的上游请求，避免遗留请求持续消耗。",
+          "需要恢复 Anthropic 官方账户时，打开“模型选择”，点击“恢复官方配置”。",
         ],
+        warning: "不要直接从系统启动器复制或修改 TokenPro 的 Claude-3p 配置目录；始终通过 TokenPro 选择模型、打开应用或恢复官方配置。",
       },
     ],
   },
