@@ -4,12 +4,16 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 )
+
+const tokenProGroupIDHeader = "X-TokenPro-Group-Id"
 
 // ResolveGlobalKeyForRoute resolves a global key before route-level platform
 // dispatch. The regular handlers repeat this request-scoped resolution after
@@ -58,14 +62,31 @@ func resolveGlobalAPIKeyForModel(
 	userID int64,
 	model string,
 ) (*service.APIKey, error) {
+	rawGroupID := strings.TrimSpace(c.GetHeader(tokenProGroupIDHeader))
+	// This is an internal routing hint, not an upstream provider header.
+	// Consume it once so downstream adapters can never forward it.
+	c.Request.Header.Del(tokenProGroupIDHeader)
 	if apiKey == nil || !apiKey.IsGlobal() {
+		return apiKey, nil
+	}
+	// Route-level dispatch and the concrete handler may both resolve a global
+	// key. Reuse the already validated request-scoped group on the second pass.
+	if apiKey.Group != nil && apiKey.GroupID != nil {
 		return apiKey, nil
 	}
 	if gatewayService == nil {
 		return nil, service.ErrNoAvailableAccounts
 	}
-	resolved, err := gatewayService.ResolveGlobalGroupForModelWithUser(
-		c.Request.Context(), apiKey.User, userID, "", model, nil,
+	var preferredGroupID *int64
+	if rawGroupID != "" {
+		parsed, parseErr := strconv.ParseInt(rawGroupID, 10, 64)
+		if parseErr != nil || parsed <= 0 {
+			return nil, service.ErrNoAvailableAccounts
+		}
+		preferredGroupID = &parsed
+	}
+	resolved, err := gatewayService.ResolveGlobalGroupForModelWithUserAndGroup(
+		c.Request.Context(), apiKey.User, userID, "", model, preferredGroupID, nil,
 	)
 	if err != nil {
 		return nil, err

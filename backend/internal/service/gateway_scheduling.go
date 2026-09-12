@@ -50,6 +50,14 @@ func (s *GatewayService) ResolveGlobalGroupForModelWithSubscription(ctx context.
 // ResolveGlobalGroupForModelWithUser also applies the authenticated user's
 // group permissions without reloading the user on every request.
 func (s *GatewayService) ResolveGlobalGroupForModelWithUser(ctx context.Context, user *User, userID int64, sessionHash, requestedModel string, excludedIDs map[int64]struct{}) (*GlobalGroupResolution, error) {
+	return s.ResolveGlobalGroupForModelWithUserAndGroup(ctx, user, userID, sessionHash, requestedModel, nil, excludedIDs)
+}
+
+// ResolveGlobalGroupForModelWithUserAndGroup resolves a global key while
+// honoring an optional client-selected group. The group hint is never trusted:
+// the same user visibility, subscription, model allowlist and account
+// schedulability checks are applied before it becomes request-scoped.
+func (s *GatewayService) ResolveGlobalGroupForModelWithUserAndGroup(ctx context.Context, user *User, userID int64, sessionHash, requestedModel string, preferredGroupID *int64, excludedIDs map[int64]struct{}) (*GlobalGroupResolution, error) {
 	if s == nil || s.groupRepo == nil {
 		return nil, ErrNoAvailableAccounts
 	}
@@ -60,10 +68,18 @@ func (s *GatewayService) ResolveGlobalGroupForModelWithUser(ctx context.Context,
 
 	for i := range groups {
 		group := &groups[i]
+		if preferredGroupID != nil && group.ID != *preferredGroupID {
+			continue
+		}
 		if !group.IsActive() {
 			continue
 		}
 		if user != nil && !user.CanBindGroup(group.ID, group.IsExclusive) {
+			continue
+		}
+		// GroupModelAllowlist runs before a global key has a request-scoped
+		// group, so global routing must enforce the same admission rule here.
+		if group.ModelAllowlistEnabled() && !group.ModelAllowlist.Allows(requestedModel) {
 			continue
 		}
 		var subscription *UserSubscription
