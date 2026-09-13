@@ -118,7 +118,7 @@ onUnmounted(() => {
             <p>{{ guide.description }}</p>
             <div class="guide-tags"><span v-for="tag in guide.tags" :key="tag">{{ tag }}</span></div>
           </div>
-          <span class="updated">最后验证：2026-09-11</span>
+          <span class="updated">最后验证：2026-09-13</span>
         </div>
 
         <section class="connection-summary">
@@ -159,11 +159,49 @@ onUnmounted(() => {
               </div>
             </div>
 
+            <ul v-if="section.checklist" class="guide-checklist">
+              <li v-for="item in section.checklist" :key="item"><span>✓</span>{{ item }}</li>
+            </ul>
+
             <ol v-if="section.steps" class="agent-steps">
               <li v-for="(step, stepIndex) in section.steps" :key="step">
                 <b>{{ stepIndex + 1 }}</b><span>{{ step }}</span>
               </li>
             </ol>
+
+            <figure v-if="section.visual" class="guide-visual">
+              <div class="visual-toolbar"><i /><i /><i /><strong>{{ section.visual.title }}</strong></div>
+              <div class="visual-screen" :class="`visual-${section.visual.screen}`">
+                <template v-if="section.visual.screen === 'login'">
+                  <div class="mock-sidebar"><span class="mock-logo">T</span><i /><i /><i /></div>
+                  <div class="mock-workspace">
+                    <div class="mock-user"><span>TP</span><b>TokenPro 用户</b><em>已登录</em></div>
+                    <div class="mock-cards"><div><small>可用余额</small><strong>$ 128.00</strong><button>刷新</button></div><div><small>客户端版本</small><strong>已是最新</strong><button>检查更新</button></div></div>
+                    <div class="mock-client"><span>Codex / Claude 客户端</span><button>模型选择</button></div>
+                  </div>
+                </template>
+                <template v-else-if="section.visual.screen === 'models' || section.visual.screen === 'bridge'">
+                  <div class="mock-modal">
+                    <header><b>选择模型</b><span>×</span></header>
+                    <nav><span class="active">订阅分组</span><span>GPT</span><span>Claude</span><span>其他</span></nav>
+                    <div class="mock-model selected"><i>✓</i><span><b>主对话模型</b><small>推荐 · 可用</small></span><em>已选择</em></div>
+                    <div class="mock-model"><i /><span><b>备用模型</b><small>按需选择</small></span></div>
+                    <footer><small>{{ section.visual.screen === 'bridge' ? '将启动 127.0.0.1 本地桥接' : '已选择 1 个模型' }}</small><button>应用并打开</button></footer>
+                  </div>
+                </template>
+                <template v-else-if="section.visual.screen === 'verify'">
+                  <div class="verify-flow"><div><span>1</span><b>选择的模型</b><small>出现在客户端</small></div><i>→</i><div><span>2</span><b>测试请求</b><small>正常收到回复</small></div><i>→</i><div><span>3</span><b>用量记录</b><small>模型与分组正确</small></div></div>
+                </template>
+                <template v-else-if="section.visual.screen === 'launch'">
+                  <div class="verify-flow"><div><span>1</span><b>TokenPro</b><small>保存所选模型</small></div><i>→</i><div><span>2</span><b>独立配置目录</b><small>仅注入新终端</small></div><i>→</i><div><span>3</span><b>Codex CLI</b><small>官方配置不受影响</small></div></div>
+                </template>
+                <template v-else>
+                  <div class="restore-flow"><div><small>当前状态</small><b>TokenPro 配置</b></div><i>→</i><button>恢复官方配置</button><i>→</i><div><small>恢复完成</small><b>官方客户端配置</b></div></div>
+                </template>
+                <div class="visual-callouts"><span v-for="(callout, index) in section.visual.callouts" :key="callout"><b>{{ index + 1 }}</b>{{ callout }}</span></div>
+              </div>
+              <figcaption>{{ section.visual.caption }}</figcaption>
+            </figure>
 
             <div v-if="section.code" class="code-stack">
               <div v-for="block in section.code" :key="block.label" class="code-panel standalone">
@@ -179,6 +217,12 @@ onUnmounted(() => {
 
             <div v-if="section.note" class="inline-note info"><span>i</span><p>{{ section.note }}</p></div>
             <div v-if="section.warning" class="inline-note warning"><span>!</span><p>{{ section.warning }}</p></div>
+
+            <div v-if="section.faq" class="faq-list">
+              <details v-for="(item, index) in section.faq" :key="item.question" :open="index === 0">
+                <summary>{{ item.question }}<span>+</span></summary><p>{{ item.answer }}</p>
+              </details>
+            </div>
           </section>
         </div>
 
@@ -187,16 +231,15 @@ onUnmounted(() => {
           <a v-if="next" :href="`#${next.key}`" class="next"><small>下一篇</small><strong>{{ next.label }} →</strong></a><span v-else />
         </nav>
         <footer class="article-footer">
-          <span>© 2026 TokenPro · 客户端接入指南</span>
+          <span>© 2026 TokenPro · 客户端接入指南 · 更新于 2026-09-13</span>
           <div><a href="#codex-desktop">Codex</a><a href="#claude-desktop">Claude</a></div>
         </footer>
       </main>
 
       <aside class="toc" aria-label="教程概览">
-        <h2>客户端接入</h2><span class="toc-status"><i /> 2 个教程已整理</span>
-        <p>安装 · 配置 · 验证 · 恢复</p><div class="toc-divider" />
-        <a href="#codex-desktop">Codex 客户端 <span>→</span></a>
-        <a href="#claude-desktop">Claude 客户端 <span>→</span></a>
+        <h2>客户端接入</h2><span class="toc-status"><i /> {{ navItems.length }} 个教程已整理</span>
+        <p>安装 · 配置 · 验证 · 排障</p><div class="toc-divider" />
+        <a v-for="item in navItems" :key="item.key" :href="`#${item.key}`">{{ item.label }} <span>→</span></a>
       </aside>
     </div>
   </div>
