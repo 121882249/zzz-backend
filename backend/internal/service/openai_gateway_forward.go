@@ -39,7 +39,6 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	startTime := time.Now()
 	// 固定渠道映射后的请求级 canonical body；账号 normalize/strip 不得改写跨 failover hint。
 	canonicalImageIntentBody := body
-
 	restrictionResult := s.detectCodexClientRestriction(c, account, body)
 	apiKeyID := getAPIKeyIDFromContext(c)
 	logCodexCLIOnlyDetection(ctx, c, account, apiKeyID, restrictionResult, body)
@@ -52,6 +51,18 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			},
 		})
 		return nil, errors.New("codex_cli_only restriction: only codex official clients are allowed")
+	}
+	if TokenProNativeImages(c) && account.IsOpenAI() && !isOpenAIResponsesCompactPath(c) {
+		// Apply after client restrictions, before namespace flattening and all
+		// upstream transport branches. Authorization already checked the selected
+		// inbound model; the image request is separately authorized and billed.
+		var nativeErr error
+		body, nativeErr = PrepareTokenProNativeImages(body)
+		if nativeErr != nil {
+			return nil, nativeErr
+		}
+		canonicalImageIntentBody = body
+		SetOpenAIImageIntentHint(c, false)
 	}
 
 	normalizedBody, normalized, err := normalizeOpenAICodexCompactReasoningEffortForAccount(c, account, body)
@@ -332,7 +343,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	if apiKey != nil {
 		imageGenerationAllowed = GroupAllowsImageGeneration(apiKey.Group)
 	}
-	codexImageGenerationBridgeEnabled := isCodexCLI &&
+	codexImageGenerationBridgeEnabled := !TokenProNativeImages(c) && isCodexCLI &&
 		!isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader)) &&
 		imageGenerationAllowed &&
 		codexImageGenerationExplicitToolPolicy != codexImageGenerationExplicitToolPolicyStrip &&

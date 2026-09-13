@@ -383,6 +383,9 @@ func buildOpenAIImagesResponsesRequest(parsed *OpenAIImagesRequest, toolModel st
 
 	req := []byte(`{"instructions":"","stream":true,"reasoning":{"effort":"medium","summary":"auto"},"parallel_tool_calls":true,"include":["reasoning.encrypted_content"],"model":"","store":false,"tool_choice":{"type":"image_generation"}}`)
 	req, _ = sjson.SetBytes(req, "model", openAIImagesResponsesMainModelValue())
+	if parsed.ResponsesModel != "" {
+		req, _ = sjson.SetBytes(req, "model", parsed.ResponsesModel)
+	}
 	req, _ = sjson.SetBytes(req, "instructions", openAIImagesVerbatimPromptInstructions)
 
 	input := []byte(`[{"type":"message","role":"user","content":[{"type":"input_text","text":""}]}]`)
@@ -1822,7 +1825,11 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		return nil, err
 	}
 
-	responsesBody, err := buildOpenAIImagesResponsesRequest(parsed, requestModel)
+	driverRequest := *parsed
+	if driverRequest.ResponsesModel != "" {
+		driverRequest.ResponsesModel = account.GetMappedModel(driverRequest.ResponsesModel)
+	}
+	responsesBody, err := buildOpenAIImagesResponsesRequest(&driverRequest, requestModel)
 	if err != nil {
 		return nil, err
 	}

@@ -476,6 +476,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		}
 		apiKey = resolvedKey
 	}
+	service.RestrictTokenProNativeImages(c, apiKey.Group, reqModel)
 	ensureCompositeTargetPlatform(c, apiKey, reqModel)
 	if !openAICompatibleTextTargetAllowed(c, apiKey, reqModel) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Model is not supported by this OpenAI-compatible endpoint for composite groups")
@@ -626,6 +627,11 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	// Generate session hash (header first; fallback to prompt_cache_key)
 	sessionHash := h.gatewayService.GenerateSessionHash(c, sessionHashBody)
 	if h.rejectIfCyberSessionBlocked(c, apiKey, sessionHashBody, reqModel, cyberBlockFormatResponses) {
+		return
+	}
+	// Pure image models dispatch the client's native Images tool after all
+	// admission checks, without selecting or charging an unrelated text driver.
+	if !nativeV2 && h.dispatchTokenProNativeImage(c, apiKey, reqModel, requestPlatform, body, reqStream, &streamStarted) {
 		return
 	}
 	c.Request = c.Request.WithContext(service.WithOpenAIGuardianParentAffinity(

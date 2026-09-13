@@ -89,7 +89,7 @@ func resolveGlobalAPIKeyForModel(
 		return nil, service.ErrGlobalGroupRequired
 	}
 	resolved, err := gatewayService.ResolveGlobalGroupForModelWithUserAndGroup(
-		c.Request.Context(), apiKey.User, userID, "", model, &parsed, nil,
+		c.Request.Context(), apiKey.User, userID, "", nativeImageAuthorizationModel(c, model), &parsed, nil,
 	)
 	if err != nil {
 		return nil, err
@@ -107,4 +107,13 @@ func resolveGlobalAPIKeyForModel(
 		c.Set(string(middleware2.ContextKeySubscription), resolved.Subscription)
 	}
 	return requestKey, nil
+}
+
+func nativeImageAuthorizationModel(c *gin.Context, model string) string {
+	if model == "gpt-image-2" {
+		if driver := service.TokenProNativeImageDriver(c); driver != "" {
+			return driver
+		}
+	}
+	return model
 }

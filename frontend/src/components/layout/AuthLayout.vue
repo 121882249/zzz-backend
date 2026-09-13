@@ -16,7 +16,7 @@
         </h1>
         <div class="auth-cosmic-line" aria-hidden="true"><i></i><i></i><i></i></div>
         <p class="auth-cosmic-description">{{ t('auth.cosmic.description') }}</p>
-        <div class="auth-cosmic-models" aria-label="GPT, Claude, Gemini, Grok">
+        <div class="auth-cosmic-models" :aria-label="authModels.map((model) => model.name).join(', ')">
           <span v-for="model in authModels" :key="model.name">
             <img :src="model.icon" alt="" />{{ model.name }}
           </span>
@@ -102,12 +102,13 @@ const siteSubtitle = computed(
 )
 const settingsLoaded = computed(() => appStore.publicSettingsLoaded)
 const currentYear = computed(() => new Date().getFullYear())
-const authModels = [
+const authModels = computed(() => [
   { name: 'GPT', icon: '/brand/model-openai.svg' },
   { name: 'Claude', icon: '/brand/model-claude.svg' },
   { name: 'Gemini', icon: '/brand/model-gemini.svg' },
-  { name: 'Grok', icon: '/brand/model-grok.svg' }
-]
+  { name: 'Grok', icon: '/brand/model-grok.svg' },
+  { name: t('auth.cosmic.moreModels'), icon: '/brand/model-more.svg' }
+])
 
 onMounted(() => appStore.fetchPublicSettings())
 </script>
@@ -234,10 +235,14 @@ onMounted(() => appStore.fetchPublicSettings())
 
 .auth-cosmic-models span {
   display: inline-flex;
+  box-sizing: border-box;
+  width: 104px;
   min-height: 42px;
+  flex: 0 0 104px;
   align-items: center;
+  justify-content: center;
   gap: 9px;
-  padding: 0 15px;
+  padding: 0 12px;
   border: 1px solid rgba(102, 195, 255, 0.32);
   border-radius: 12px;
   color: #dbe7ff;

@@ -224,7 +224,8 @@ export default {
       kicker: 'TOKENPRO INTELLIGENCE NETWORK',
       titleLineOne: 'One gateway to',
       titleHighlight: 'boundless intelligence',
-      description: 'Use one TokenPro key to access leading models through a unified and reliable intelligence network.'
+      description: 'Use one TokenPro key to access leading models through a unified and reliable intelligence network.',
+      moreModels: 'More models'
     },
     welcomeBack: 'Welcome Back',
     signInToAccount: 'Sign in to your account to continue',

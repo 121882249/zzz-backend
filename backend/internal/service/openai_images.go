@@ -71,10 +71,13 @@ type OpenAIImagesUpload struct {
 }
 
 type OpenAIImagesRequest struct {
-	Endpoint           string
-	ContentType        string
-	Multipart          bool
-	Model              string
+	Endpoint    string
+	ContentType string
+	Multipart   bool
+	Model       string
+	// Internal-only: authorized text selection driving a native image tool.
+	// ParseOpenAIImagesRequest never reads this value from request JSON.
+	ResponsesModel     string
 	ExplicitModel      bool
 	Prompt             string
 	Stream             bool
@@ -570,6 +573,11 @@ func (s *OpenAIGatewayService) ForwardImages(
 ) (*OpenAIForwardResult, error) {
 	if parsed == nil {
 		return nil, fmt.Errorf("parsed images request is required")
+	}
+	if parsed.ResponsesModel != "" && account.IsOpenAI() {
+		// Reuse the existing Responses-to-Images converter for both API-key
+		// and OAuth accounts; no local helper or image cache is involved.
+		return s.forwardOpenAIImagesOAuth(ctx, c, account, parsed, channelMappedModel)
 	}
 	switch account.Type {
 	case AccountTypeAPIKey:
