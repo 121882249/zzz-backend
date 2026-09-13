@@ -61,14 +61,6 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
 		return
 	}
-	if preferredBody, changed, preferredErr := h.gatewayService.ApplyTokenProPreferredImageModel(c, body); preferredErr != nil {
-		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", preferredErr.Error())
-		return
-	} else if changed {
-		body = preferredBody
-		reqLog.Info("openai.images.tokenpro_preferred_model_applied")
-	}
-
 	if isMultipartImagesContentType(c.GetHeader("Content-Type")) {
 		setOpsRequestContext(c, "", false)
 	} else {

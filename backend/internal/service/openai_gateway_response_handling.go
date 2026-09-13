@@ -610,11 +610,6 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				data = string(normalizedData)
 				line = "data: " + data
 			}
-			if displayData, normalized := normalizeTokenProCodexImageDisplayPayload(c, dataBytes); normalized {
-				dataBytes = displayData
-				data = string(displayData)
-				line = "data: " + data
-			}
 			imageCounter.AddSSEData(dataBytes)
 			searchCounter += countGrokNativeSearchCallsInSSEDataDedup(dataBytes, streamSearchSeen)
 

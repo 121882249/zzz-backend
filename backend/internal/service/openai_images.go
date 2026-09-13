@@ -235,34 +235,6 @@ func (s *OpenAIGatewayService) ParseOpenAIImagesRequest(c *gin.Context, body []b
 	return req, nil
 }
 
-// ApplyTokenProPreferredImageModel makes the image model selected in TokenPro
-// Desktop authoritative for the separate Images API request emitted by Codex's
-// client-side image_gen tool. Codex currently sends gpt-image-2 in that follow-up
-// request even when the custom provider carries a different preferred model.
-// Rewriting before parsing is important because global-key group resolution and
-// account scheduling both use the parsed request model.
-func (s *OpenAIGatewayService) ApplyTokenProPreferredImageModel(c *gin.Context, body []byte) ([]byte, bool, error) {
-	preferred := consumeTokenProPreferredImageModel(c)
-	if !IsGPTImageGenerationModel(preferred) {
-		return body, false, nil
-	}
-	contentType := ""
-	if c != nil {
-		contentType = c.GetHeader("Content-Type")
-	}
-	rewritten, rewrittenContentType, err := rewriteOpenAIImagesModel(body, contentType, preferred)
-	if err != nil {
-		return nil, false, err
-	}
-	if c != nil {
-		c.Set(tokenProImageDisplayContextKey, true)
-		if rewrittenContentType != "" && rewrittenContentType != contentType {
-			c.Request.Header.Set("Content-Type", rewrittenContentType)
-		}
-	}
-	return rewritten, true, nil
-}
-
 func parseOpenAIImagesJSONRequest(body []byte, req *OpenAIImagesRequest) error {
 	if modelResult := gjson.GetBytes(body, "model"); modelResult.Exists() {
 		req.Model = strings.TrimSpace(modelResult.String())

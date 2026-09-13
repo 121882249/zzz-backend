@@ -20,10 +20,6 @@ import (
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
 	beginUpstreamResponseModelObservation(c)
-	preferredImageModel := consumeTokenProPreferredImageModel(c)
-	if preferredImageModel != "" {
-		c.Set(tokenProImageDisplayContextKey, true)
-	}
 	ClearActualOpenAIUpstreamEndpoint(c)
 	if shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
 		SetActualOpenAIUpstreamEndpoint(c, "/v1/chat/completions")
@@ -71,19 +67,6 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 	if legacyIngressChanged {
 		body = legacyIngressBody
-	}
-	// TokenPro only exposes the Codex image tool to OpenAI-backed models.
-	// Apply this by selected upstream platform, not by the optional desktop
-	// image-model header, so Grok and newly added non-OpenAI models cannot
-	// inherit either the hosted image_generation tool or the image_gen
-	// namespace advertised by Codex.
-	strippedBody, imageToolsStripped, stripErr := stripImageGenerationToolsForAccount(account, body)
-	if stripErr != nil {
-		return nil, fmt.Errorf("strip image tools from non-OpenAI model: %w", stripErr)
-	}
-	if imageToolsStripped {
-		body = strippedBody
-		logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Stripped image tools from non-OpenAI platform=%s model=%s", account.Platform, gjson.GetBytes(body, "model").String())
 	}
 	// 在分流到 passthrough / Codex transform / 原生 ChatCompletions 之前统一修正
 	// 显式为 null 的工具 Schema type，否则 upstream 的 400 会被归一成可重试的 502，
@@ -356,9 +339,6 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		s.isCodexImageGenerationBridgeEnabled(ctx, account, apiKey)
 	var imageIntent bool
 	canonicalImageIntent := resolveOpenAIImageIntentHint(c, reqModel, canonicalImageIntentBody, IsImageGenerationIntent)
-	if codexImageGenerationBridgeEnabled || canonicalImageIntent {
-		c.Set(tokenProImageDisplayContextKey, true)
-	}
 	if isCodexCLI && codexImageGenerationExplicitToolPolicy == codexImageGenerationExplicitToolPolicyStrip {
 		decoded, decodeErr := ensureReqBody()
 		if decodeErr != nil {
@@ -438,10 +418,6 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		if codexImageGenerationBridgeEnabled && ensureOpenAIResponsesImageGenerationTool(decoded) {
 			markDecodedModified()
 			logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Injected /responses image_generation tool for Codex client")
-		}
-		if codexImageGenerationBridgeEnabled && applyPreferredOpenAIResponsesImageModel(decoded, preferredImageModel) {
-			markDecodedModified()
-			logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Applied TokenPro preferred image model=%s", preferredImageModel)
 		}
 		if codexImageGenerationBridgeEnabled && ensureOpenAIResponsesImageGenerationToolChoiceAuto(decoded) {
 			markDecodedModified()

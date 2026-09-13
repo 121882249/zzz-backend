@@ -36,11 +36,6 @@ func (s *GatewayService) ForwardAsResponses(
 	parsed *ParsedRequest,
 ) (*ForwardResult, error) {
 	startTime := time.Now()
-	preferredImageModel := consumeTokenProPreferredImageModel(c)
-	if preferredImageModel != "" {
-		c.Set(tokenProImageDisplayContextKey, true)
-	}
-
 	normalizedBody, normalized, err := normalizeOpenAIResponsesLegacyIngress(body)
 	if err != nil {
 		return nil, err
@@ -48,17 +43,6 @@ func (s *GatewayService) ForwardAsResponses(
 	if normalized {
 		body = normalizedBody
 	}
-	strippedBody, changed, stripErr := stripOpenAIImageGenerationToolsFromRawPayload(body)
-	if stripErr != nil {
-		return nil, fmt.Errorf("strip image tools from non-OpenAI Responses model: %w", stripErr)
-	}
-	if changed {
-		body = strippedBody
-		logger.L().Debug("gateway forward_as_responses: stripped image tools from non-OpenAI model",
-			zap.String("model", strings.TrimSpace(gjson.GetBytes(body, "model").String())),
-		)
-	}
-
 	// 1. Lower Codex client-side tools to function tools understood by Anthropic.
 	adaptedBody, clientToolMapping, err := adaptResponsesClientToolsForAnthropic(body)
 	if err != nil {
