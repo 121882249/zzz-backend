@@ -86,14 +86,14 @@ func TestUpdateServiceReportsTokenProUpstreamVersion(t *testing.T) {
 	svc := NewUpdateService(
 		&updateServiceCacheStub{},
 		&updateServiceGitHubClientStub{release: &GitHubRelease{TagName: "v0.2.2", Name: "v0.2.2"}},
-		"TokenPro-R51-v0.2.4",
+		"TokenPro-R52-v0.2.4",
 		"release",
 	)
 
 	info, err := svc.CheckUpdate(context.Background(), true)
 
 	require.NoError(t, err)
-	require.Equal(t, "TokenPro-R51-v0.2.4", info.CurrentVersion)
+	require.Equal(t, "TokenPro-R52-v0.2.4", info.CurrentVersion)
 	require.Equal(t, "0.2.4", info.CurrentUpstreamVersion)
 	require.Equal(t, "0.2.2", info.LatestVersion)
 	require.False(t, info.HasUpdate)

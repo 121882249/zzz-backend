@@ -87,15 +87,14 @@ func TestResolveGlobalGroupForModelHonorsAllowlistAndPreferredGroup(t *testing.T
 	}
 	svc := &GatewayService{accountRepo: accounts, groupRepo: groupRepo, cfg: testConfig()}
 
-	resolved, err := svc.ResolveGlobalGroupForModelWithUserAndGroup(
+	_, err := svc.ResolveGlobalGroupForModelWithUserAndGroup(
 		context.Background(), nil, 18, "", "gpt-image-2.5-sunburst", nil, nil,
 	)
-	require.NoError(t, err)
-	require.Equal(t, int64(65), resolved.Group.ID,
-		"an earlier account match must not bypass that group's model allowlist")
+	require.ErrorIs(t, err, ErrGlobalGroupRequired,
+		"a global key must never scan groups when the client omitted group_id")
 
 	preferred := int64(65)
-	resolved, err = svc.ResolveGlobalGroupForModelWithUserAndGroup(
+	resolved, err := svc.ResolveGlobalGroupForModelWithUserAndGroup(
 		context.Background(), nil, 18, "", "gpt-image-2.5-sunburst", &preferred, nil,
 	)
 	require.NoError(t, err)

@@ -44,6 +44,10 @@ func (h *GatewayHandler) ResolveGlobalKeyForRoute(c *gin.Context, model string) 
 }
 
 func respondGlobalKeyRoutingError(c *gin.Context, err error, respond func(*gin.Context, int, string, string)) {
+	if errors.Is(err, service.ErrGlobalGroupRequired) {
+		respond(c, http.StatusBadRequest, "group_id_required", "全局 Key 请求必须携带有效的分组 ID。请更新 TokenPro 客户端并重新连接。")
+		return
+	}
 	if errors.Is(err, service.ErrNoAvailableAccounts) {
 		respond(c, http.StatusServiceUnavailable, "no_available_group", "当前模型没有可用分组或有效订阅。")
 		return
@@ -77,16 +81,15 @@ func resolveGlobalAPIKeyForModel(
 	if gatewayService == nil {
 		return nil, service.ErrNoAvailableAccounts
 	}
-	var preferredGroupID *int64
-	if rawGroupID != "" {
-		parsed, parseErr := strconv.ParseInt(rawGroupID, 10, 64)
-		if parseErr != nil || parsed <= 0 {
-			return nil, service.ErrNoAvailableAccounts
-		}
-		preferredGroupID = &parsed
+	if rawGroupID == "" {
+		return nil, service.ErrGlobalGroupRequired
+	}
+	parsed, parseErr := strconv.ParseInt(rawGroupID, 10, 64)
+	if parseErr != nil || parsed <= 0 {
+		return nil, service.ErrGlobalGroupRequired
 	}
 	resolved, err := gatewayService.ResolveGlobalGroupForModelWithUserAndGroup(
-		c.Request.Context(), apiKey.User, userID, "", model, preferredGroupID, nil,
+		c.Request.Context(), apiKey.User, userID, "", model, &parsed, nil,
 	)
 	if err != nil {
 		return nil, err

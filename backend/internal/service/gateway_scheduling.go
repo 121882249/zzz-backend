@@ -6,6 +6,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	mathrand "math/rand"
@@ -27,79 +28,52 @@ type GlobalGroupResolution struct {
 	Subscription *UserSubscription
 }
 
-// ResolveGlobalGroupForModel resolves a global key to an active group that
-// can route the requested model. It deliberately uses the no-slot account
-// selector: callers must subsequently invoke SelectAccountWithLoadAwareness
-// for the actual request so an account concurrency slot is acquired exactly
-// once. The returned Group is request-scoped and must not be persisted onto
-// the API key.
-func (s *GatewayService) ResolveGlobalGroupForModel(ctx context.Context, userID int64, sessionHash, requestedModel string, excludedIDs map[int64]struct{}) (*Group, error) {
-	resolved, err := s.ResolveGlobalGroupForModelWithUser(ctx, nil, userID, sessionHash, requestedModel, excludedIDs)
-	if err != nil {
-		return nil, err
-	}
-	return resolved.Group, nil
-}
-
-// ResolveGlobalGroupForModelWithSubscription is the request-scoped variant
-// that also returns the active subscription needed by existing billing checks.
-func (s *GatewayService) ResolveGlobalGroupForModelWithSubscription(ctx context.Context, userID int64, sessionHash, requestedModel string, excludedIDs map[int64]struct{}) (*GlobalGroupResolution, error) {
-	return s.ResolveGlobalGroupForModelWithUser(ctx, nil, userID, sessionHash, requestedModel, excludedIDs)
-}
-
-// ResolveGlobalGroupForModelWithUser also applies the authenticated user's
-// group permissions without reloading the user on every request.
-func (s *GatewayService) ResolveGlobalGroupForModelWithUser(ctx context.Context, user *User, userID int64, sessionHash, requestedModel string, excludedIDs map[int64]struct{}) (*GlobalGroupResolution, error) {
-	return s.ResolveGlobalGroupForModelWithUserAndGroup(ctx, user, userID, sessionHash, requestedModel, nil, excludedIDs)
-}
-
 // ResolveGlobalGroupForModelWithUserAndGroup resolves a global key while
-// honoring an optional client-selected group. The group hint is never trusted:
+// honoring the required client-selected group. The group hint is never trusted:
 // the same user visibility, subscription, model allowlist and account
 // schedulability checks are applied before it becomes request-scoped.
 func (s *GatewayService) ResolveGlobalGroupForModelWithUserAndGroup(ctx context.Context, user *User, userID int64, sessionHash, requestedModel string, preferredGroupID *int64, excludedIDs map[int64]struct{}) (*GlobalGroupResolution, error) {
 	if s == nil || s.groupRepo == nil {
 		return nil, ErrNoAvailableAccounts
 	}
-	groups, err := s.groupRepo.ListActive(ctx)
+	if preferredGroupID == nil || *preferredGroupID <= 0 {
+		return nil, ErrGlobalGroupRequired
+	}
+	group, err := s.groupRepo.GetByID(ctx, *preferredGroupID)
 	if err != nil {
+		if errors.Is(err, ErrGroupNotFound) {
+			return nil, ErrNoAvailableAccounts
+		}
 		return nil, err
 	}
-
-	for i := range groups {
-		group := &groups[i]
-		if preferredGroupID != nil && group.ID != *preferredGroupID {
-			continue
+	if group == nil || !group.IsActive() {
+		return nil, ErrNoAvailableAccounts
+	}
+	if user != nil && !user.CanBindGroup(group.ID, group.IsExclusive) {
+		return nil, ErrNoAvailableAccounts
+	}
+	// GroupModelAllowlist runs before a global key has a request-scoped
+	// group, so global routing must enforce the same admission rule here.
+	if group.ModelAllowlistEnabled() && !group.ModelAllowlist.Allows(requestedModel) {
+		return nil, ErrNoAvailableAccounts
+	}
+	var subscription *UserSubscription
+	if group.IsSubscriptionType() {
+		if s.userSubRepo == nil {
+			return nil, ErrNoAvailableAccounts
 		}
-		if !group.IsActive() {
-			continue
-		}
-		if user != nil && !user.CanBindGroup(group.ID, group.IsExclusive) {
-			continue
-		}
-		// GroupModelAllowlist runs before a global key has a request-scoped
-		// group, so global routing must enforce the same admission rule here.
-		if group.ModelAllowlistEnabled() && !group.ModelAllowlist.Allows(requestedModel) {
-			continue
-		}
-		var subscription *UserSubscription
-		if group.IsSubscriptionType() {
-			if s.userSubRepo == nil {
-				continue
-			}
-			var subErr error
-			subscription, subErr = s.userSubRepo.GetActiveByUserIDAndGroupID(ctx, userID, group.ID)
-			if subErr != nil || subscription == nil {
-				continue
-			}
-		}
-
-		groupID := group.ID
-		if _, selectErr := s.SelectAccountForModelWithExclusions(ctx, &groupID, sessionHash, requestedModel, excludedIDs); selectErr == nil {
-			return &GlobalGroupResolution{Group: group, Subscription: subscription}, nil
+		var subErr error
+		subscription, subErr = s.userSubRepo.GetActiveByUserIDAndGroupID(ctx, userID, group.ID)
+		if subErr != nil || subscription == nil {
+			return nil, ErrNoAvailableAccounts
 		}
 	}
-	return nil, ErrNoAvailableAccounts
+
+	groupID := group.ID
+	if _, selectErr := s.SelectAccountForModelWithExclusions(ctx, &groupID, sessionHash, requestedModel, excludedIDs); selectErr != nil {
+		return nil, ErrNoAvailableAccounts
+	}
+	return &GlobalGroupResolution{Group: group, Subscription: subscription}, nil
 }
 
 // SelectAccount 选择账号（粘性会话+优先级）

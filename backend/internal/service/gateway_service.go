@@ -420,6 +420,10 @@ var (
 // ErrNoAvailableAccounts 表示没有可用的账号
 var ErrNoAvailableAccounts = errors.New("no available accounts")
 
+// ErrGlobalGroupRequired 表示全局 Key 请求未携带客户端已选择的分组。
+// 全局 Key 不再自动扫描或猜测分组，避免同名模型和生图模型串线。
+var ErrGlobalGroupRequired = errors.New("global key requests require an explicit group id")
+
 // ErrClaudeCodeOnly 表示分组仅允许 Claude Code 客户端访问
 var ErrClaudeCodeOnly = errors.New("this group only allows Claude Code clients")
 
