@@ -28,7 +28,12 @@ func TestTokenProPureDispatchConcurrentCorrelation(t *testing.T) {
 				t.Error(err)
 				return
 			}
-			ids <- item["call_id"].(string)
+			id, ok := item["call_id"].(string)
+			if !ok {
+				t.Error("missing string call_id")
+				return
+			}
+			ids <- id
 		}()
 	}
 	wg.Wait()

@@ -1,5 +1,8 @@
 # TokenPro R54: native Codex image delivery
 
+Release candidate R54 was never deployed. R55 fixes the static-analysis findings
+and is the deployment version for this same feature; the R54 image is not overwritten.
+
 This release is paired with the TokenPro desktop native-v1 configuration. It
 does not install or start a local bridge, and does not recreate legacy state files.
 

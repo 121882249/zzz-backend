@@ -105,7 +105,8 @@ func PrepareTokenProNativeImages(body []byte) ([]byte, error) {
 			kept = append(kept, native)
 		} else {
 			children, _ := nativeNamespace["tools"].([]any)
-			nativeNamespace["tools"] = append(children, native["tools"].([]any)...)
+			nativeTools, _ := native["tools"].([]any)
+			nativeNamespace["tools"] = append(children, nativeTools...)
 		}
 	}
 	request["tools"] = kept

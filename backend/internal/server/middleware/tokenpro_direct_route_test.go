@@ -327,7 +327,10 @@ func TestTokenProMultipartRejectsDuplicateModel(t *testing.T) {
 	require.NoError(t, w.WriteField("model", "tp-g65-"+base64.RawURLEncoding.EncodeToString([]byte("gpt-image-2"))))
 	require.NoError(t, w.WriteField("model", "plain-other-model"))
 	require.NoError(t, w.Close())
-	_, _, _, err := rewriteTokenProMultipartModel(body.Bytes(), w.Boundary())
+	_, _, _, err := rewriteTokenProMultipartRoute(body.Bytes(), w.Boundary(), func(model string) (int64, string, bool, error) {
+		group, public, routed := decodeTokenProDirectModel(model)
+		return group, public, routed, nil
+	})
 	require.Error(t, err)
 }
 

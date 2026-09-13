@@ -187,15 +187,6 @@ func TokenProDirectRoute() gin.HandlerFunc {
 	}
 }
 
-// rewriteTokenProMultipartModel restores the public model field used by image
-// edits while preserving uploaded files and the caller's multipart boundary.
-func rewriteTokenProMultipartModel(body []byte, boundary string) (int64, []byte, bool, error) {
-	return rewriteTokenProMultipartRoute(body, boundary, func(model string) (int64, string, bool, error) {
-		group, public, routed := decodeTokenProDirectModel(model)
-		return group, public, routed, nil
-	})
-}
-
 func rewriteTokenProMultipartRoute(body []byte, boundary string, resolve func(string) (int64, string, bool, error)) (int64, []byte, bool, error) {
 	boundary = strings.TrimSpace(boundary)
 	if boundary == "" {
