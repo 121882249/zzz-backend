@@ -49,9 +49,6 @@ func (s *GatewayService) ResolveGlobalGroupForModelWithUserAndGroup(ctx context.
 	if group == nil || !group.IsActive() {
 		return nil, ErrNoAvailableAccounts
 	}
-	if user != nil && !user.CanBindGroup(group.ID, group.IsExclusive) {
-		return nil, ErrNoAvailableAccounts
-	}
 	// GroupModelAllowlist runs before a global key has a request-scoped
 	// group, so global routing must enforce the same admission rule here.
 	if group.ModelAllowlistEnabled() && !group.ModelAllowlist.Allows(requestedModel) {
@@ -59,6 +56,10 @@ func (s *GatewayService) ResolveGlobalGroupForModelWithUserAndGroup(ctx context.
 	}
 	var subscription *UserSubscription
 	if group.IsSubscriptionType() {
+		// Subscription groups are visible and bindable through an active
+		// subscription. Do not run the standard/exclusive AllowedGroups gate
+		// first: GetAvailableGroups intentionally uses the subscription as the
+		// grant, so doing so here made a listed group fail at request time.
 		if s.userSubRepo == nil {
 			return nil, ErrNoAvailableAccounts
 		}
@@ -67,6 +68,8 @@ func (s *GatewayService) ResolveGlobalGroupForModelWithUserAndGroup(ctx context.
 		if subErr != nil || subscription == nil {
 			return nil, ErrNoAvailableAccounts
 		}
+	} else if user != nil && !user.CanBindGroup(group.ID, group.IsExclusive) {
+		return nil, ErrNoAvailableAccounts
 	}
 
 	groupID := group.ID
