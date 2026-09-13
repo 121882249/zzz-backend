@@ -242,13 +242,10 @@ func (h *ConcurrencyHelper) TryAcquireUserSlotForAPIKey(ctx context.Context, use
 	return h.withAPIKeySlot(ctx, apiKeyID, releaseFunc), true, nil
 }
 
-// TryAcquireUserSlotWithAPIKey applies the user-wide limit only to legacy
-// group-scoped keys. A global key is intentionally not serialized at the user
-// level; account/vendor limits are enforced by the scheduler instead.
+// TryAcquireUserSlotWithAPIKey applies the user-wide concurrency setting to
+// every key type, including global keys. Account/vendor limits remain an
+// independent downstream constraint.
 func (h *ConcurrencyHelper) TryAcquireUserSlotWithAPIKey(ctx context.Context, apiKey *service.APIKey, userID int64, maxConcurrency int) (func(), bool, error) {
-	if apiKey != nil && apiKey.IsGlobal() {
-		return func() {}, true, nil
-	}
 	if apiKey == nil {
 		return h.TryAcquireUserSlot(ctx, userID, maxConcurrency)
 	}
@@ -284,14 +281,9 @@ func (h *ConcurrencyHelper) AcquireUserSlotWithWait(c *gin.Context, userID int64
 	return h.acquireUserSlotWithWaitTimeout(c, userID, maxConcurrency, maxConcurrencyWait, isStream, streamStarted)
 }
 
-// AcquireUserSlotWithWaitForAPIKey keeps the legacy user-wide limit for
-// group-scoped keys. A global key identifies a user but must not serialize all
-// of that user's model requests behind one user slot; account-level limits are
-// enforced later by the scheduler.
+// AcquireUserSlotWithWaitForAPIKey applies the authenticated user's configured
+// concurrency to both global and group-scoped keys.
 func (h *ConcurrencyHelper) AcquireUserSlotWithWaitForAPIKey(c *gin.Context, apiKey *service.APIKey, userID int64, maxConcurrency int, isStream bool, streamStarted *bool) (func(), error) {
-	if apiKey != nil && apiKey.IsGlobal() {
-		return func() {}, nil
-	}
 	return h.AcquireUserSlotWithWait(c, userID, maxConcurrency, isStream, streamStarted)
 }
 

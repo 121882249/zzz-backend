@@ -339,8 +339,8 @@ func TestTryAcquireUserSlotForAPIKey_TracksAPIKeySlot(t *testing.T) {
 	require.Equal(t, 1, cache.apiKeyReleaseCalls)
 }
 
-func TestTryAcquireUserSlotWithAPIKey_GlobalKeyDoesNotUseUserSlot(t *testing.T) {
-	cache := &helperConcurrencyCacheStub{}
+func TestTryAcquireUserSlotWithAPIKey_GlobalKeyUsesUserSetting(t *testing.T) {
+	cache := &helperConcurrencyCacheStub{userSeq: []bool{true}}
 	concurrency := service.NewConcurrencyService(cache)
 	helper := NewConcurrencyHelper(concurrency, SSEPingFormatNone, 5*time.Millisecond)
 
@@ -354,7 +354,49 @@ func TestTryAcquireUserSlotWithAPIKey_GlobalKeyDoesNotUseUserSlot(t *testing.T) 
 	require.True(t, acquired)
 	require.NotNil(t, release)
 	release()
-	require.Equal(t, 0, cache.userAcquireCalls)
+	require.Equal(t, 1, cache.userAcquireCalls)
+	require.Equal(t, 1, cache.userReleaseCalls)
+	require.Equal(t, 1, cache.apiKeyTrackCalls)
+	require.Equal(t, 1, cache.apiKeyReleaseCalls)
+	require.Equal(t, []int64{77}, cache.apiKeyTrackIDs)
+}
+
+func TestAcquireUserSlotWithWaitForAPIKey_GlobalKeyUsesUserSetting(t *testing.T) {
+	cache := &helperConcurrencyCacheStub{userSeq: []bool{true}}
+	concurrency := service.NewConcurrencyService(cache)
+	helper := NewConcurrencyHelper(concurrency, SSEPingFormatNone, 5*time.Millisecond)
+	c, _ := newHelperTestContext(http.MethodPost, "/v1/responses")
+	c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{ID: 77, KeyType: service.APIKeyTypeGlobal})
+	streamStarted := false
+
+	release, err := helper.AcquireUserSlotWithWaitForAPIKey(c,
+		&service.APIKey{ID: 77, KeyType: service.APIKeyTypeGlobal}, 202, 1, false, &streamStarted)
+	require.NoError(t, err)
+	require.NotNil(t, release)
+	release()
+	require.Equal(t, 1, cache.userAcquireCalls)
+	require.Equal(t, 1, cache.userReleaseCalls)
+	require.Equal(t, 1, cache.apiKeyTrackCalls)
+	require.Equal(t, 1, cache.apiKeyReleaseCalls)
+}
+
+func TestAcquireUserSlotWithWaitForAPIKey_GlobalKeyRejectsWhenUserLimitIsFull(t *testing.T) {
+	cache := &helperConcurrencyCacheStub{userSeq: []bool{false}, waitAllowed: false}
+	concurrency := service.NewConcurrencyService(cache)
+	helper := NewConcurrencyHelper(concurrency, SSEPingFormatNone, 5*time.Millisecond)
+	c, _ := newHelperTestContext(http.MethodPost, "/v1/responses")
+	apiKey := &service.APIKey{ID: 77, KeyType: service.APIKeyTypeGlobal}
+	c.Set(string(middleware2.ContextKeyAPIKey), apiKey)
+	streamStarted := false
+
+	release, err := helper.AcquireUserSlotWithWaitForAPIKey(c, apiKey, 202, 1, false, &streamStarted)
+	require.Error(t, err)
+	require.Nil(t, release)
+	var queueFull *WaitQueueFullError
+	require.ErrorAs(t, err, &queueFull)
+	require.Equal(t, "user", queueFull.SlotType)
+	require.Equal(t, 1, cache.userAcquireCalls)
+	require.Equal(t, 1, cache.waitIncrementCalls)
 	require.Equal(t, 0, cache.apiKeyTrackCalls)
 }
 
