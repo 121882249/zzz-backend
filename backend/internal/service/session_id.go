@@ -44,6 +44,9 @@ func ExtractClientSessionID(c *gin.Context) string {
 	if c == nil || c.Request == nil {
 		return ""
 	}
+	if sessionID := sanitizeSessionID(c.GetString(TokenProImageSessionContextKey)); sessionID != "" {
+		return sessionID
+	}
 	for _, header := range clientSessionIDHeaders {
 		if sessionID := sanitizeSessionID(c.GetHeader(header)); sessionID != "" {
 			return sessionID

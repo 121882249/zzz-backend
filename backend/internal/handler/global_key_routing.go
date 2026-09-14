@@ -44,6 +44,10 @@ func (h *GatewayHandler) ResolveGlobalKeyForRoute(c *gin.Context, model string) 
 }
 
 func respondGlobalKeyRoutingError(c *gin.Context, err error, respond func(*gin.Context, int, string, string)) {
+	if errors.Is(err, service.ErrImageTurnConflict) || errors.Is(err, service.ErrImageTurnMissing) {
+		respond(c, http.StatusConflict, "native_image_turn_conflict", "This turn cannot bind to the selected image route. Start a new turn; no alternate model was used.")
+		return
+	}
 	if errors.Is(err, service.ErrGlobalGroupRequired) {
 		respond(c, http.StatusBadRequest, "group_id_required", "全局 Key 请求必须携带有效的分组 ID。请更新 TokenPro 客户端并重新连接。")
 		return
@@ -105,6 +109,9 @@ func resolveGlobalAPIKeyForModel(
 	c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.Group, resolved.Group))
 	if resolved.Subscription != nil {
 		c.Set(string(middleware2.ContextKeySubscription), resolved.Subscription)
+	}
+	if err := service.BindTokenProImageTurn(c, requestKey); err != nil {
+		return nil, err
 	}
 	return requestKey, nil
 }
