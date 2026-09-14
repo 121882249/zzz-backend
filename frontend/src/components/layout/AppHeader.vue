@@ -30,10 +30,13 @@
         <!-- Desktop Downloads -->
         <router-link
           to="/home"
-          class="hidden items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white sm:flex"
+          class="download-app-cta group hidden sm:flex"
         >
-          <Icon name="download" size="sm" />
-          <span class="hidden sm:inline">{{ t('nav.downloadApp') }}</span>
+          <span class="download-app-cta__icon" aria-hidden="true">
+            <Icon name="download" size="sm" />
+          </span>
+          <span>{{ t('nav.downloadApp') }}</span>
+          <span class="download-app-cta__pulse" aria-hidden="true"></span>
         </router-link>
 
         <!-- Docs Link -->
@@ -374,6 +377,106 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.download-app-cta {
+  position: relative;
+  min-height: 40px;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  padding: 5px 12px 5px 6px;
+  border: 1px solid rgba(151, 169, 255, 0.65);
+  border-radius: 12px;
+  color: #fff;
+  background:
+    linear-gradient(110deg, rgba(1, 10, 42, 0.2), rgba(20, 56, 180, 0.12)),
+    url('/brand/orbital-gateway-bg.webp') 64% 30% / 330px auto;
+  box-shadow:
+    0 5px 16px rgba(67, 92, 225, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    color 180ms ease,
+    transform 180ms ease;
+}
+
+.download-app-cta:hover {
+  border-color: rgba(90, 117, 255, 0.78);
+  color: #fff;
+  box-shadow:
+    0 8px 24px rgba(78, 77, 230, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.24);
+  transform: translateY(-1px);
+}
+
+.download-app-cta__icon {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 8px;
+  color: #fff;
+  background: rgba(13, 24, 57, 0.22);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.download-app-cta__pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #55e7ff;
+  box-shadow:
+    0 0 0 4px rgba(85, 231, 255, 0.12),
+    0 0 10px rgba(85, 231, 255, 0.7);
+  animation: download-pulse 1.8s ease-in-out infinite;
+}
+
+:global(.dark) .download-app-cta {
+  border-color: rgba(97, 168, 255, 0.42);
+  color: #fff;
+  background:
+    linear-gradient(110deg, rgba(1, 8, 35, 0.32), rgba(17, 39, 135, 0.18)),
+    url('/brand/orbital-gateway-bg.webp') 64% 30% / 330px auto;
+  box-shadow:
+    0 7px 22px rgba(46, 101, 255, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.download-app-cta:focus-visible {
+  outline: 2px solid #3988ff;
+  outline-offset: 3px;
+}
+
+:global(.dark) .download-app-cta:hover {
+  border-color: rgba(100, 220, 255, 0.68);
+  color: #fff;
+  box-shadow: 0 9px 28px rgba(72, 84, 255, 0.3);
+}
+
+@keyframes download-pulse {
+  0%,
+  100% {
+    opacity: 0.7;
+    transform: scale(0.86);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .download-app-cta,
+  .download-app-cta__pulse {
+    animation: none;
+    transition: none;
+  }
+}
+
 .dropdown-enter-active,
 .dropdown-leave-active {
   transition: all 0.2s ease;

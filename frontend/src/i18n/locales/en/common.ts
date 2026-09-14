@@ -199,7 +199,7 @@ export default {
     github: 'GitHub',
     mySubscriptions: 'My Subscriptions',
     buySubscription: 'Recharge / Subscription',
-    downloadApp: 'Download App',
+    downloadApp: 'Download Connector',
     docs: 'Docs',
     myOrders: 'My Orders',
     orderManagement: 'Orders',

@@ -133,8 +133,8 @@ onMounted(() => appStore.fetchPublicSettings())
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(90deg, rgba(1, 5, 17, 0.08), rgba(1, 5, 17, 0.38) 58%, #020612 78%),
-    linear-gradient(180deg, rgba(1, 6, 20, 0.05), rgba(1, 6, 20, 0.42)),
+    linear-gradient(180deg, rgba(1, 6, 20, 0.08), rgba(1, 6, 20, 0.36)),
+    linear-gradient(rgba(1, 5, 17, 0.08), rgba(1, 5, 17, 0.08)),
     url('/brand/orbital-gateway-bg.webp') center / cover;
 }
 
@@ -270,9 +270,17 @@ onMounted(() => appStore.fetchPublicSettings())
   justify-content: center;
   overflow-y: auto;
   padding: 44px clamp(30px, 4vw, 72px);
-  border-left: 1px solid rgba(94, 157, 255, 0.16);
-  background: linear-gradient(135deg, rgba(2, 7, 22, 0.78), rgba(2, 6, 18, 0.96));
-  backdrop-filter: blur(18px);
+  background: transparent;
+}
+
+.auth-cosmic-form-pane::before {
+  position: absolute;
+  z-index: -1;
+  inset: 7% 4%;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(1, 6, 22, 0.38), rgba(1, 6, 22, 0.14) 44%, transparent 72%);
+  content: '';
+  pointer-events: none;
 }
 
 .auth-cosmic-mobile-brand {
@@ -387,7 +395,7 @@ onMounted(() => appStore.fetchPublicSettings())
     min-height: 100vh;
     padding: 32px 20px;
     border-left: 0;
-    background: rgba(2, 7, 22, 0.74);
+    background: rgba(2, 7, 22, 0.16);
   }
 
   .auth-cosmic-mobile-brand {
