@@ -2,10 +2,12 @@ package service
 
 import (
 	"encoding/json"
+	"strconv"
 	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestTokenProPureDispatchRejectsInvalidInputs(t *testing.T) {
@@ -61,4 +63,39 @@ func TestTokenProPureDispatchFailureContinuationDoesNotClaimSuccess(t *testing.T
 	require.NoError(t, err)
 	require.NotContains(t, string(encoded), "已生成")
 	require.NotContains(t, string(encoded), "已展示")
+	require.Contains(t, string(encoded), "这次没能生成图片")
+}
+
+func TestTokenProPureDispatchSuccessContinuationIsFriendly(t *testing.T) {
+	item, err := BuildTokenProNativeImageItem([]byte(`{"input":"cat"}`))
+	require.NoError(t, err)
+	body, err := json.Marshal(map[string]any{"input": []any{
+		map[string]any{"role": "user", "content": "cat"}, item,
+		map[string]any{"type": "function_call_output", "call_id": item["call_id"], "output": []any{
+			map[string]any{"type": "input_image", "image_url": "data:image/png;base64,AQID"},
+		}},
+	}})
+	require.NoError(t, err)
+	result, err := BuildTokenProNativeImageItem(body)
+	require.NoError(t, err)
+	encoded, err := json.Marshal(result)
+	require.NoError(t, err)
+	require.Contains(t, string(encoded), "图片生成好了 ✨")
+	require.NotContains(t, string(encoded), "图片工具")
+}
+
+func TestTokenProNativeImageFailureMessages(t *testing.T) {
+	tests := []struct {
+		output string
+		want   string
+	}{
+		{`Error: request timed out`, "图片生成超时了，请重新发起。"},
+		{`Error: service overloaded`, "生图服务有点忙，请稍后再试。"},
+		{`Error: content policy violation`, "这次请求未通过检查，请调整图片描述后再试。"},
+		{`unexpected empty result`, "图片未能正常返回，请重新生成。"},
+	}
+	for _, tt := range tests {
+		output := gjson.Get(`{"output":`+strconv.Quote(tt.output)+`}`, "output")
+		require.Equal(t, tt.want, tokenProNativeImageResultText(output))
+	}
 }

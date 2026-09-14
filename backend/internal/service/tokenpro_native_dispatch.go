@@ -64,7 +64,7 @@ func BuildTokenProNativeImageItem(body []byte) (gin.H, error) {
 			pending = item.Get("call_id").String()
 		}
 		if item.Get("type").String() == "function_call_output" && pending != "" && item.Get("call_id").String() == pending {
-			return gin.H{"type": "message", "id": tokenProDispatchID("msg_"), "role": "assistant", "status": "completed", "content": []any{gin.H{"type": "output_text", "text": "图片工具已返回，请查看本次工具结果；如失败，请按错误提示处理。", "annotations": []any{}}}}, nil
+			return gin.H{"type": "message", "id": tokenProDispatchID("msg_"), "role": "assistant", "status": "completed", "content": []any{gin.H{"type": "output_text", "text": tokenProNativeImageResultText(item.Get("output")), "annotations": []any{}}}}, nil
 		}
 	}
 	if pending != "" {
@@ -75,4 +75,32 @@ func BuildTokenProNativeImageItem(body []byte) (gin.H, error) {
 	}
 	args, _ := json.Marshal(gin.H{"prompt": strings.TrimSpace(prompt)})
 	return gin.H{"type": "function_call", "id": tokenProDispatchID("fc_"), "call_id": tokenProDispatchID("call_tp_pure_"), "namespace": "image_gen", "name": "imagegen", "arguments": string(args)}, nil
+}
+
+func tokenProNativeImageResultText(output gjson.Result) string {
+	if output.IsArray() {
+		for _, part := range output.Array() {
+			if part.Get("type").String() == "input_image" && strings.TrimSpace(part.Get("image_url").String()) != "" {
+				return "图片生成好了 ✨"
+			}
+		}
+	}
+
+	message := output.Raw
+	if output.Type == gjson.String {
+		message = output.String()
+	}
+	message = strings.ToLower(message)
+	switch {
+	case strings.Contains(message, "timeout"), strings.Contains(message, "timed out"), strings.Contains(message, "超时"):
+		return "图片生成超时了，请重新发起。"
+	case strings.Contains(message, "rate limit"), strings.Contains(message, "overload"), strings.Contains(message, "busy"), strings.Contains(message, "繁忙"):
+		return "生图服务有点忙，请稍后再试。"
+	case strings.Contains(message, "content policy"), strings.Contains(message, "moderation"), strings.Contains(message, "safety"), strings.Contains(message, "审核"):
+		return "这次请求未通过检查，请调整图片描述后再试。"
+	case strings.Contains(message, "error"), strings.Contains(message, "fail"), strings.Contains(message, "失败"):
+		return "这次没能生成图片，请稍后再试。"
+	default:
+		return "图片未能正常返回，请重新生成。"
+	}
 }

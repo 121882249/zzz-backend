@@ -167,7 +167,7 @@ func TokenProDirectRoute(stores ...service.TokenProImageTurnStore) gin.HandlerFu
 				if !valid || imageGroup != groupID || imageModel != publicModel {
 					// Native image tools use the provider's default image route.
 					// Never silently bill/render a different catalog image selection.
-					c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "native_image_selection_mismatch", "message": "The selected image model differs from the applied native image route. Apply this image model in TokenPro before generating."}})
+					c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "native_image_selection_mismatch", "message": "图片模型与当前配置不一致，请重新应用模型。没有改用其他模型。"}})
 					return
 				}
 			}
@@ -204,7 +204,7 @@ func TokenProDirectRoute(stores ...service.TokenProImageTurnStore) gin.HandlerFu
 		}
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": gin.H{
-				"type": "invalid_request_error", "message": "Invalid TokenPro model route",
+				"type": "invalid_request_error", "message": "当前图片模型配置无效，请重新应用模型。",
 			}})
 			return
 		}
@@ -215,7 +215,7 @@ func TokenProDirectRoute(stores ...service.TokenProImageTurnStore) gin.HandlerFu
 		group := strconv.FormatInt(groupID, 10)
 		if current := strings.TrimSpace(c.GetHeader(tokenProGroupIDHeader)); current != "" && current != group {
 			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": gin.H{
-				"type": "invalid_request_error", "message": "TokenPro model route does not match the group header",
+				"type": "invalid_request_error", "message": "图片模型与当前分组不一致，请重新应用模型。没有改用其他模型。",
 			}})
 			return
 		}
@@ -233,7 +233,7 @@ func TokenProDirectRoute(stores ...service.TokenProImageTurnStore) gin.HandlerFu
 }
 
 func abortImageTurn(c *gin.Context, status int, code string) {
-	c.AbortWithStatusJSON(status, gin.H{"error": gin.H{"type": code, "message": "Cannot resolve this turn's exact image model. Start a new turn with the selected model; no alternate route was used."}})
+	c.AbortWithStatusJSON(status, gin.H{"error": gin.H{"type": code, "message": "本次生图请求已失效，请重新发起。没有改用其他模型。"}})
 }
 
 func validTokenProTurnID(value string) bool {
