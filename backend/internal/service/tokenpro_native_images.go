@@ -11,6 +11,18 @@ import (
 // upstream response. It changes tool transport, never group authorization.
 const TokenProNativeImagesContextKey = "tokenpro_native_images_v1"
 const TokenProNativeImageDriverContextKey = "tokenpro_native_image_driver"
+const TokenProTextImageDeliveryContextKey = "tokenpro_text_image_delivery"
+
+// Ordinary GPT conversations need the client's image tool to display/save the
+// result, too. This is delivery compatibility, not pure-image model dispatch.
+// Set only after an authenticated same-group turn binding succeeds.
+func TokenProNativeImageDelivery(c *gin.Context) bool {
+	return TokenProNativeImages(c) || (c != nil && c.GetBool(TokenProTextImageDeliveryContextKey))
+}
+
+func tokenProTextImageGroup(group *Group) bool {
+	return group != nil && group.Platform == PlatformOpenAI && group.AllowImageGeneration
+}
 
 // A text-only selection invokes the image tool through its authorized text
 // model, just as a direct Responses image_generation request does. This is not
@@ -41,7 +53,10 @@ func TokenProPureImageGroup(group *Group) bool {
 func RestrictTokenProNativeImages(c *gin.Context, group *Group, model string) {
 	if !TokenProPureImageGroup(group) {
 		c.Set(TokenProNativeImagesContextKey, false)
-		c.Set(TokenProNativeImageDriverContextKey, "")
+		if !tokenProTextImageGroup(group) || !c.GetBool(TokenProTextImageDeliveryContextKey) {
+			c.Set(TokenProNativeImageDriverContextKey, "")
+			c.Set(TokenProTextImageDeliveryContextKey, false)
+		}
 	}
 }
 

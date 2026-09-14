@@ -169,8 +169,8 @@ func TokenProDirectRoute(stores ...service.TokenProImageTurnStore) gin.HandlerFu
 				} else {
 					pending.TurnID, pending.ThreadID, pending.ValidationErr = tokenProTurnMetadata(c, body)
 				}
-				// Ordinary groups must not fail native turn checks or create turn
-				// bindings. Defer both until the actual group has been authorized.
+				// Defer until the actual group has been authorized. Ordinary GPT
+				// groups may bind their own image tool, without pure-image dispatch.
 				c.Set(service.TokenProImageTurnContextKey, pending)
 			}
 			if routed {

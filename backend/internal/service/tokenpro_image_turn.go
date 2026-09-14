@@ -51,11 +51,14 @@ type TokenProPendingImageTurn struct {
 func BindTokenProImageTurn(c *gin.Context, key *APIKey) error {
 	// Resolve the trusted group before enforcing any native-only metadata.
 	// Old clients may still send a provider-wide native header for text groups.
-	eligible := key != nil && key.IsGlobal() && key.GroupID != nil && TokenProPureImageGroup(key.Group)
+	pure := key != nil && TokenProPureImageGroup(key.Group)
+	textDelivery := key != nil && tokenProTextImageGroup(key.Group) && !pure
+	eligible := key != nil && key.IsGlobal() && key.GroupID != nil && (pure || textDelivery)
 	if !eligible {
 		imageRequest := TokenProNativeImages(c) && c.Request != nil &&
 			(strings.HasSuffix(c.Request.URL.Path, "/images/generations") || strings.HasSuffix(c.Request.URL.Path, "/images/edits"))
 		c.Set(TokenProNativeImagesContextKey, false)
+		c.Set(TokenProTextImageDeliveryContextKey, false)
 		c.Set(TokenProNativeImageDriverContextKey, "")
 		if imageRequest {
 			// Reject stale native turn routes after a group's policy changes.
@@ -65,11 +68,35 @@ func BindTokenProImageTurn(c *gin.Context, key *APIKey) error {
 	}
 	v, ok := c.Get(TokenProImageTurnContextKey)
 	if !ok {
+		// Images already resolved this driver through the authenticated turn
+		// store in ingress. Do not discard it merely because this is a text group.
+		if textDelivery && TokenProNativeImages(c) {
+			c.Set(TokenProNativeImagesContextKey, false)
+			if driver := TokenProNativeImageDriver(c); !strings.HasPrefix(driver, "gpt-") || IsGPTImageGenerationModel(driver) {
+				c.Set(TokenProNativeImageDriverContextKey, "")
+				return ErrImageTurnConflict
+			}
+			c.Set(TokenProTextImageDeliveryContextKey, true)
+		}
 		return nil
 	}
 	pending, ok := v.(*TokenProPendingImageTurn)
 	if !ok || pending == nil {
+		if textDelivery {
+			return nil
+		}
 		return ErrImageTurnMissing
+	}
+	if textDelivery {
+		c.Set(TokenProNativeImagesContextKey, false)
+		c.Set(TokenProTextImageDeliveryContextKey, false)
+		// Missing/invalid metadata must not break an ordinary text request.
+		// Other platforms/models and old provider-wide mode headers do not opt in.
+		if pending.Legacy || pending.ValidationErr != nil || pending.Store == nil ||
+			pending.TurnID == "" || pending.ThreadID == "" ||
+			!strings.HasPrefix(pending.Model, "gpt-") || IsGPTImageGenerationModel(pending.Model) {
+			return nil
+		}
 	}
 	if pending.ValidationErr != nil {
 		return pending.ValidationErr
@@ -86,6 +113,7 @@ func BindTokenProImageTurn(c *gin.Context, key *APIKey) error {
 	if err := pending.Store.Bind(ctx, TokenProImageTurnKey(key, pending.TurnID), TokenProImageTurnRoute{GroupID: *key.GroupID, Model: pending.Model, ThreadID: pending.ThreadID}); err != nil {
 		return err
 	}
-	c.Set(TokenProNativeImagesContextKey, true)
+	c.Set(TokenProNativeImagesContextKey, pure)
+	c.Set(TokenProTextImageDeliveryContextKey, textDelivery)
 	return nil
 }

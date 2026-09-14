@@ -52,7 +52,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		})
 		return nil, errors.New("codex_cli_only restriction: only codex official clients are allowed")
 	}
-	if TokenProNativeImages(c) && account.IsOpenAI() && !isOpenAIResponsesCompactPath(c) {
+	if TokenProNativeImageDelivery(c) && account.IsOpenAI() && !isOpenAIResponsesCompactPath(c) {
 		// Apply after client restrictions, before namespace flattening and all
 		// upstream transport branches. Authorization already checked the selected
 		// inbound model; the image request is separately authorized and billed.
@@ -343,7 +343,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	if apiKey != nil {
 		imageGenerationAllowed = GroupAllowsImageGeneration(apiKey.Group)
 	}
-	codexImageGenerationBridgeEnabled := !TokenProNativeImages(c) && isCodexCLI &&
+	codexImageGenerationBridgeEnabled := !TokenProNativeImageDelivery(c) && isCodexCLI &&
 		!isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader)) &&
 		imageGenerationAllowed &&
 		codexImageGenerationExplicitToolPolicy != codexImageGenerationExplicitToolPolicyStrip &&

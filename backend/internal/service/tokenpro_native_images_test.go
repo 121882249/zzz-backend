@@ -33,11 +33,14 @@ func TestTokenProNativeImagesPreserveHistoryAndToolCorrelation(t *testing.T) {
 
 func TestTokenProNativeImagesForwardDisablesLegacyHostedInjection(t *testing.T) {
 	for _, tc := range []struct {
-		model       string
-		passthrough bool
+		model        string
+		passthrough  bool
+		textDelivery bool
 	}{
-		{"gpt-5.6-sol", false},
-		{"gpt-5.6-sol", true},
+		{"gpt-5.6-sol", false, false},
+		{"gpt-5.6-sol", true, false},
+		{"gpt-5.6-luna", false, true},
+		{"gpt-5.6-luna", true, true},
 	} {
 		t.Run(tc.model+fmt.Sprint(tc.passthrough), func(t *testing.T) {
 			upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"id":"resp_native","output":[{"id":"fc_A","type":"function_call","call_id":"call_A","name":"imagegen","namespace":"image_gen","arguments":"{\"prompt\":\"cat\"}"}],"usage":{"input_tokens":1,"output_tokens":2}}`))}}
@@ -51,7 +54,8 @@ func TestTokenProNativeImagesForwardDisablesLegacyHostedInjection(t *testing.T) 
 			c, _ := gin.CreateTestContext(rec)
 			c.Request = httptest.NewRequest("POST", "/v1/responses", nil)
 			c.Set("api_key", &APIKey{Group: &Group{AllowImageGeneration: true}})
-			c.Set(TokenProNativeImagesContextKey, true)
+			c.Set(TokenProNativeImagesContextKey, !tc.textDelivery)
+			c.Set(TokenProTextImageDeliveryContextKey, tc.textDelivery)
 			SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
 			result, err := svc.Forward(context.Background(), c, account, []byte(`{"model":"`+tc.model+`","stream":false,"input":"draw a cat"}`))
 			require.NoError(t, err)
