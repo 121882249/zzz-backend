@@ -89,13 +89,19 @@ func TestTokenProNativeImagesGroupPolicyDisablesAllDownstreamAdapters(t *testing
 		{"name-only", PlatformOpenAI, "", "gpt-image-2.5-flare", false},
 		{"other-description", PlatformOpenAI, "普通", "gpt-image-2.5-flare", false},
 		{"other-platform", PlatformAnthropic, "生图", "gpt-image-2.5-flare", false},
-		{"text-keeps-own-route", PlatformOpenAI, "普通", "gpt-5.6-sol", true},
+		{"ordinary-text", PlatformOpenAI, "普通", "gpt-5.6-sol", false},
+		{"image-group-text", PlatformOpenAI, "生图", "gpt-5.6-sol", true},
+		{"composite-image-group", PlatformComposite, "生图", "gpt-image-2", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c, _ := gin.CreateTestContext(httptest.NewRecorder())
 			c.Set(TokenProNativeImagesContextKey, true)
+			c.Set(TokenProNativeImageDriverContextKey, "gpt-5.6-sol")
 			RestrictTokenProNativeImages(c, &Group{Name: "生图", Platform: tc.platform, Description: tc.description}, tc.model)
 			require.Equal(t, tc.want, TokenProNativeImages(c))
+			if !tc.want {
+				require.Empty(t, c.GetString(TokenProNativeImageDriverContextKey))
+			}
 		})
 	}
 }

@@ -78,7 +78,9 @@ func TokenProDirectRoute(stores ...service.TokenProImageTurnStore) gin.HandlerFu
 		// conversation's catalog slug. Only Images endpoints may consume its
 		// explicitly configured default image route; text requests must ignore it.
 		imageEndpoint := strings.HasSuffix(c.Request.URL.Path, "/images/generations") || strings.HasSuffix(c.Request.URL.Path, "/images/edits")
-		turnMode := imageMode == "native-v2"
+		// New clients do not set a provider-wide image mode. The native Images
+		// call identifies its turn; Responses eligibility is checked after auth.
+		turnMode := imageMode == "native-v2" || (imageEndpoint && len(imageTurnHeaders) > 0)
 		if turnMode {
 			// Provider-level defaults must never override a turn's explicit choice.
 			imageRoute = ""
@@ -154,22 +156,21 @@ func TokenProDirectRoute(stores ...service.TokenProImageTurnStore) gin.HandlerFu
 			model := strings.TrimSpace(gjson.GetBytes(body, "model").String())
 			var publicModel string
 			groupID, publicModel, routed, err = resolve(model)
-			if err == nil && routed && turnMode && strings.HasSuffix(c.Request.URL.Path, "/responses") && strings.HasPrefix(publicModel, "gpt-") {
-				turnID, threadID, metadataErr := tokenProTurnMetadata(c, body)
-				if metadataErr != nil || turnStore == nil {
-					abortImageTurn(c, http.StatusBadRequest, "native_image_turn_missing")
-					return
+			if err == nil && routed && strings.HasSuffix(c.Request.URL.Path, "/responses") && (imageMode == "" || turnMode || imageMode == "native-v1") {
+				pending := &service.TokenProPendingImageTurn{Store: turnStore, Model: publicModel, Legacy: imageMode == "native-v1"}
+				if pending.Legacy {
+					if service.IsGPTImageGenerationModel(publicModel) {
+						imageGroup, imageModel, valid := decodeTokenProDirectModel(imageRoute)
+						if !valid || imageGroup != groupID || imageModel != publicModel {
+							pending.ValidationErr = service.ErrImageTurnConflict
+						}
+					}
+				} else {
+					pending.TurnID, pending.ThreadID, pending.ValidationErr = tokenProTurnMetadata(c, body)
 				}
-				c.Set(service.TokenProImageTurnContextKey, &service.TokenProPendingImageTurn{Store: turnStore, TurnID: turnID, ThreadID: threadID, Model: publicModel})
-			}
-			if err == nil && routed && imageMode == "native-v1" && strings.HasSuffix(c.Request.URL.Path, "/responses") && service.IsGPTImageGenerationModel(publicModel) {
-				imageGroup, imageModel, valid := decodeTokenProDirectModel(imageRoute)
-				if !valid || imageGroup != groupID || imageModel != publicModel {
-					// Native image tools use the provider's default image route.
-					// Never silently bill/render a different catalog image selection.
-					c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "native_image_selection_mismatch", "message": "图片模型与当前配置不一致，请重新应用模型。没有改用其他模型。"}})
-					return
-				}
+				// Ordinary groups must not fail native turn checks or create turn
+				// bindings. Defer both until the actual group has been authorized.
+				c.Set(service.TokenProImageTurnContextKey, pending)
 			}
 			if routed {
 				rewritten, err = sjson.SetBytes(body, "model", publicModel)
@@ -220,9 +221,9 @@ func TokenProDirectRoute(stores ...service.TokenProImageTurnStore) gin.HandlerFu
 			return
 		}
 		c.Request.Header.Set(tokenProGroupIDHeader, group)
-		if (imageMode == "native-v1" || turnMode) && strings.HasSuffix(c.Request.URL.Path, "/responses") {
-			// This request has an authenticated global key and a validated
-			// explicit model route. Python/unmarked API callers remain unchanged.
+		if (imageMode == "native-v1" || turnMode) && imageEndpoint {
+			// Images must recheck group policy, including routes saved before an
+			// administrator changed the group's platform or description.
 			c.Set(service.TokenProNativeImagesContextKey, true)
 		}
 		c.Request.Body = io.NopCloser(bytes.NewReader(rewritten))

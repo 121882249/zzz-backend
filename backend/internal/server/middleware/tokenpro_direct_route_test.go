@@ -62,6 +62,10 @@ func TestTokenProNativeModeRequiresRoutedGlobalRequest(t *testing.T) {
 			r.Use(func(c *gin.Context) { c.Set(string(ContextKeyAPIKey), &service.APIKey{KeyType: tc.keyType}); c.Next() })
 			r.Use(TokenProDirectRoute())
 			r.POST(tc.path, func(c *gin.Context) {
+				require.False(t, service.TokenProNativeImages(c), "native mode requires the trusted group")
+				groupID := int64(16)
+				require.NoError(t, service.BindTokenProImageTurn(c, &service.APIKey{KeyType: tc.keyType, GroupID: &groupID,
+					Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI, Description: "生图"}}))
 				require.Equal(t, tc.enabled, service.TokenProNativeImages(c))
 				require.Empty(t, c.GetHeader("X-TokenPro-Image-Mode"))
 				c.Status(204)

@@ -36,11 +36,12 @@ func TokenProPureImageGroup(group *Group) bool {
 	return group != nil && group.Platform == PlatformOpenAI && strings.TrimSpace(group.Description) == "生图"
 }
 
-// Pure-image groups outside this explicit policy must keep their legacy path,
-// including downstream hosted-image detection. Merely skipping dispatch is not enough.
+// Every model outside this explicit group policy keeps its ordinary path,
+// including downstream hosted-image detection and text requests.
 func RestrictTokenProNativeImages(c *gin.Context, group *Group, model string) {
-	if TokenProNativeImages(c) && IsGPTImageGenerationModel(model) && !TokenProPureImageGroup(group) {
+	if !TokenProPureImageGroup(group) {
 		c.Set(TokenProNativeImagesContextKey, false)
+		c.Set(TokenProNativeImageDriverContextKey, "")
 	}
 }
 

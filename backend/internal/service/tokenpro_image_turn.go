@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -39,28 +40,52 @@ type TokenProImageTurnStore interface {
 // Pending metadata is installed by ingress but bound only after the handler
 // validates the user's selected group. Store before any tool call is emitted.
 type TokenProPendingImageTurn struct {
-	Store    TokenProImageTurnStore
-	TurnID   string
-	ThreadID string
-	Model    string
+	Store         TokenProImageTurnStore
+	TurnID        string
+	ThreadID      string
+	Model         string
+	ValidationErr error
+	Legacy        bool
 }
 
 func BindTokenProImageTurn(c *gin.Context, key *APIKey) error {
+	// Resolve the trusted group before enforcing any native-only metadata.
+	// Old clients may still send a provider-wide native header for text groups.
+	eligible := key != nil && key.IsGlobal() && key.GroupID != nil && TokenProPureImageGroup(key.Group)
+	if !eligible {
+		imageRequest := TokenProNativeImages(c) && c.Request != nil &&
+			(strings.HasSuffix(c.Request.URL.Path, "/images/generations") || strings.HasSuffix(c.Request.URL.Path, "/images/edits"))
+		c.Set(TokenProNativeImagesContextKey, false)
+		c.Set(TokenProNativeImageDriverContextKey, "")
+		if imageRequest {
+			// Reject stale native turn routes after a group's policy changes.
+			return ErrImageTurnConflict
+		}
+		return nil
+	}
 	v, ok := c.Get(TokenProImageTurnContextKey)
 	if !ok {
 		return nil
 	}
 	pending, ok := v.(*TokenProPendingImageTurn)
-	if !ok || pending == nil || pending.Store == nil {
+	if !ok || pending == nil {
 		return ErrImageTurnMissing
 	}
-	if key.Group == nil || key.GroupID == nil || key.Group.Platform != PlatformOpenAI {
-		return ErrImageTurnConflict
+	if pending.ValidationErr != nil {
+		return pending.ValidationErr
 	}
-	if IsGPTImageGenerationModel(pending.Model) && !TokenProPureImageGroup(key.Group) {
-		return ErrImageTurnConflict
+	if pending.Legacy {
+		c.Set(TokenProNativeImagesContextKey, true)
+		return nil
+	}
+	if pending.Store == nil || pending.TurnID == "" || pending.ThreadID == "" {
+		return ErrImageTurnMissing
 	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 	defer cancel()
-	return pending.Store.Bind(ctx, TokenProImageTurnKey(key, pending.TurnID), TokenProImageTurnRoute{GroupID: *key.GroupID, Model: pending.Model, ThreadID: pending.ThreadID})
+	if err := pending.Store.Bind(ctx, TokenProImageTurnKey(key, pending.TurnID), TokenProImageTurnRoute{GroupID: *key.GroupID, Model: pending.Model, ThreadID: pending.ThreadID}); err != nil {
+		return err
+	}
+	c.Set(TokenProNativeImagesContextKey, true)
+	return nil
 }
