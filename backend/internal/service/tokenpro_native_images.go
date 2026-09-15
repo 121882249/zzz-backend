@@ -60,7 +60,7 @@ func RestrictTokenProNativeImages(c *gin.Context, group *Group, model string) {
 	}
 }
 
-const tokenProNativeImageInstructions = "[TokenPro native image delivery v1] For image generation or editing, call the client's image_gen.imagegen function. Its result is delivered by the client's native Images API tool. Do not use the hosted image_generation tool: this client cannot display its result. Do not claim an image is generated or displayed unless the native tool returned an actual image. On tool failure, report the error; do not retry through hosted image_generation or replace it with a text-only success message."
+const tokenProNativeImageInstructions = "[TokenPro native image delivery v1] For image generation or editing, call the client's image_gen.imagegen function. Its result is delivered by the client's native Images API tool. Do not use the hosted image_generation tool: this client cannot display its result. Do not claim an image is generated or displayed unless the native tool returned an actual image. After successful native image delivery, acknowledge completion in plain text only. Never repeat the displayed image using Markdown, HTML, or a file link. For new image generation omit both referenced_image_paths and num_last_images_to_include. On tool failure, report the error; do not retry through hosted image_generation or replace it with a text-only success message."
 
 // PrepareTokenProNativeImages adapts only explicitly opted-in Codex requests.
 // It never changes history, emits a tool result, or manufactures image success.

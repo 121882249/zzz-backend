@@ -56,6 +56,11 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		// Apply after client restrictions, before namespace flattening and all
 		// upstream transport branches. Authorization already checked the selected
 		// inbound model; the image request is separately authorized and billed.
+		if paths := tokenProDisplayedImagePaths(body); len(paths) > 0 {
+			originalWriter := c.Writer
+			c.Writer = &tokenProImageReplyWriter{ResponseWriter: originalWriter, paths: paths, deltas: make(map[string]string)}
+			defer func() { c.Writer = originalWriter }()
+		}
 		var nativeErr error
 		body, nativeErr = PrepareTokenProNativeImages(body)
 		if nativeErr != nil {
