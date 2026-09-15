@@ -116,8 +116,8 @@ func tokenProReceiptOutputText(output gjson.Result) string {
 	var text strings.Builder
 	for _, part := range output.Array() {
 		if part.Get("type").String() == "input_text" {
-			text.WriteString(part.Get("text").String())
-			text.WriteByte('\n')
+			_, _ = text.WriteString(part.Get("text").String())
+			_ = text.WriteByte('\n')
 		}
 	}
 	return text.String()

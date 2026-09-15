@@ -18,8 +18,10 @@ func TestImageReceiptStoreLifecycle(t *testing.T) {
 	r := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: r.Addr()})
 	t.Cleanup(func() { _ = client.Close() })
-	a := NewTokenProImageTurnStore(client).(service.TokenProImageCallStore)
-	b := NewTokenProImageTurnStore(client).(service.TokenProImageCallStore)
+	a, ok := NewTokenProImageTurnStore(client).(service.TokenProImageCallStore)
+	require.True(t, ok)
+	b, ok := NewTokenProImageTurnStore(client).(service.TokenProImageCallStore)
+	require.True(t, ok)
 	ctx := context.Background()
 	key := service.TokenProImageTurnKey(&service.APIKey{ID: 7, UserID: 8, Key: "fixture"}, "turn")
 	call := service.TokenProImageCall{CallID: "call_tp_receipt_" + strings.Repeat("a", 32), RequestHash: "req-A", PromptHash: "prompt"}
