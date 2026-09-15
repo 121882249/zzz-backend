@@ -41,6 +41,10 @@ func (APIKey) Fields() []ent.Field {
 		field.String("name").
 			MaxLen(100).
 			NotEmpty(),
+		field.String("key_type").
+			MaxLen(20).
+			Default("group").
+			Comment("API key scope: group or global"),
 		field.Int64("group_id").
 			Optional().
 			Nillable(),
@@ -137,6 +141,7 @@ func (APIKey) Indexes() []ent.Index {
 	return []ent.Index{
 		// key 字段已在 Fields() 中声明 Unique()，无需重复索引
 		index.Fields("user_id"),
+		index.Fields("user_id", "key_type"),
 		index.Fields("group_id"),
 		index.Fields("status"),
 		index.Fields("deleted_at"),

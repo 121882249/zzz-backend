@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
@@ -26,6 +27,19 @@ type PromptAdminService interface {
 }
 
 type PromptAdminHandler struct{ service PromptAdminService }
+
+type contentMonitorService interface {
+	GetConfig() (PublicConfig, error)
+	SaveMonitorEmails(context.Context, []string, int64) (PublicConfig, error)
+	ListMonitoringEvents(context.Context, string, int, int) (*ContentMonitorPage, error)
+	DeleteMonitoringEvents(context.Context) (*DeleteResult, error)
+}
+
+type contentMonitorConfig struct {
+	Emails        []string  `json:"emails"`
+	ConfigVersion int64     `json:"config_version"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
 
 func NewPromptAdminHandler(service PromptAdminService) *PromptAdminHandler {
 	return &PromptAdminHandler{service: service}
@@ -96,11 +110,88 @@ func (h *PromptAdminHandler) ListEvents(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
+	filter.ExcludeScannerBackend = "account-monitor"
 	result, err := h.service.ListEvents(c.Request.Context(), filter, page, pageSize)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
+	response.Success(c, result)
+}
+
+func (h *PromptAdminHandler) GetContentMonitorConfig(c *gin.Context) {
+	service, ok := h.service.(contentMonitorService)
+	if !ok {
+		response.ErrorFrom(c, infraerrors.New(500, "content_monitor_unavailable", "内容监控服务不可用"))
+		return
+	}
+	config, err := service.GetConfig()
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, contentMonitorConfig{Emails: config.MonitorUserEmails, ConfigVersion: config.ConfigVersion, UpdatedAt: config.UpdatedAt})
+}
+
+func (h *PromptAdminHandler) UpdateContentMonitorConfig(c *gin.Context) {
+	service, ok := h.service.(contentMonitorService)
+	if !ok {
+		response.ErrorFrom(c, infraerrors.New(500, "content_monitor_unavailable", "内容监控服务不可用"))
+		return
+	}
+	var request struct {
+		Emails []string `json:"emails"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		response.ErrorFrom(c, infraerrors.BadRequest("content_monitor_invalid_request", "内容监控配置无效"))
+		return
+	}
+	config, err := service.SaveMonitorEmails(c.Request.Context(), request.Emails, adminID(c))
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	setPromptAdminAudit(c, "success", "", map[string]any{"monitor_count": len(config.MonitorUserEmails), "config_version": config.ConfigVersion})
+	response.Success(c, contentMonitorConfig{Emails: config.MonitorUserEmails, ConfigVersion: config.ConfigVersion, UpdatedAt: config.UpdatedAt})
+}
+
+func (h *PromptAdminHandler) ListContentMonitorEvents(c *gin.Context) {
+	service, ok := h.service.(contentMonitorService)
+	if !ok {
+		response.ErrorFrom(c, infraerrors.New(500, "content_monitor_unavailable", "内容监控服务不可用"))
+		return
+	}
+	page, err := positiveIntQuery(c, "page", 1, 0)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	pageSize, err := positiveIntQuery(c, "page_size", 20, 100)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	result, err := service.ListMonitoringEvents(c.Request.Context(), c.Query("email"), page, pageSize)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *PromptAdminHandler) DeleteContentMonitorEvents(c *gin.Context) {
+	service, ok := h.service.(contentMonitorService)
+	if !ok {
+		response.ErrorFrom(c, infraerrors.New(500, "content_monitor_unavailable", "内容监控服务不可用"))
+		return
+	}
+	result, err := service.DeleteMonitoringEvents(c.Request.Context())
+	if err != nil {
+		setPromptAdminAudit(c, "failed", infraerrors.Reason(err), nil)
+		response.ErrorFrom(c, err)
+		return
+	}
+	setPromptAdminAudit(c, "success", "", map[string]any{"deleted_events": result.DeletedEvents})
 	response.Success(c, result)
 }
 
@@ -176,6 +267,7 @@ func (h *PromptAdminHandler) DeletePreview(c *gin.Context) {
 		response.ErrorFrom(c, infraerrors.BadRequest("prompt_audit_delete_preview_invalid", "删除预览筛选无效"))
 		return
 	}
+	filter.ExcludeScannerBackend = "account-monitor"
 	preview, err := h.service.PreviewDelete(c.Request.Context(), filter, adminID(c))
 	if err != nil {
 		setPromptAdminAudit(c, "failed", "prompt_audit_delete_preview_invalid", nil)
@@ -195,6 +287,7 @@ func (h *PromptAdminHandler) DeleteByFilter(c *gin.Context) {
 		response.ErrorFrom(c, infraerrors.BadRequest("prompt_audit_delete_confirmation_invalid", "删除确认无效或已过期"))
 		return
 	}
+	request.Filter.ExcludeScannerBackend = "account-monitor"
 	result, err := h.service.DeleteByFilter(c.Request.Context(), request, adminID(c))
 	if err != nil {
 		setPromptAdminAudit(c, "failed", "prompt_audit_delete_confirmation_invalid", map[string]any{

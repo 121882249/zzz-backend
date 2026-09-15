@@ -77,6 +77,7 @@ const createAdminUser = (overrides: Partial<AdminUser> = {}): AdminUser => ({
   created_at: '2026-04-17T00:00:00Z',
   updated_at: '2026-04-17T00:00:00Z',
   notes: '',
+  created_ip: '203.0.113.42',
   last_active_at: '2026-04-16T02:00:00Z',
   last_used_at: '2026-04-17T02:00:00Z',
   current_concurrency: 0,
@@ -105,6 +106,7 @@ const DataTableStub = {
       </template>
       <div v-for="row in data" :key="row.id">
         <slot name="cell-last_used_at" :value="row.last_used_at" :row="row" />
+        <slot name="cell-created_ip" :value="row.created_ip" :row="row" />
       </div>
     </div>
   `
@@ -163,6 +165,11 @@ const mountBulkDeleteView = () => mount(UsersView, {
     }
   }
 })
+
+const IpGeoCellStub = {
+  props: ['ip'],
+  template: '<button data-test="ip-geo-cell">{{ ip }} · 获取地区</button>'
+}
 
 describe('admin UsersView', () => {
   beforeEach(() => {
@@ -285,6 +292,7 @@ describe('admin UsersView', () => {
           ConfirmDialog: true,
           EmptyState: true,
           GroupBadge: true,
+          IpGeoCell: IpGeoCellStub,
           Select: true,
           UserAttributesConfigModal: true,
           UserConcurrencyCell: true,
@@ -307,8 +315,14 @@ describe('admin UsersView', () => {
 
     const columns = wrapper.get('[data-test="columns"]').text()
     const visibleColumns = columns.split(',')
-    expect(visibleColumns.slice(-4, -1)).toEqual(['last_active_at', 'last_used_at', 'created_at'])
+    expect(visibleColumns.slice(-5, -1)).toEqual([
+      'last_active_at',
+      'last_used_at',
+      'created_at',
+      'created_ip'
+    ])
     expect(visibleColumns).not.toContain('last_login_at')
+    expect(wrapper.get('[data-test="ip-geo-cell"]').text()).toBe('203.0.113.42 · 获取地区')
 
     await wrapper.get('[data-test="sort-last-used"]').trigger('click')
     await flushPromises()
@@ -371,6 +385,7 @@ describe('admin UsersView', () => {
           ConfirmDialog: true,
           EmptyState: true,
           GroupBadge: true,
+          IpGeoCell: IpGeoCellStub,
           Select: true,
           UserAttributesConfigModal: true,
           UserConcurrencyCell: true,
@@ -449,6 +464,7 @@ describe('admin UsersView', () => {
           ConfirmDialog: true,
           EmptyState: true,
           GroupBadge: true,
+          IpGeoCell: IpGeoCellStub,
           Select: true,
           UserAttributesConfigModal: true,
           UserConcurrencyCell: true,

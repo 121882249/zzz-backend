@@ -24,9 +24,13 @@ const (
 
 // ChannelLimits holds limits for a single payment channel within a provider instance.
 type ChannelLimits struct {
-	DailyLimit float64 `json:"dailyLimit,omitempty"`
-	SingleMin  float64 `json:"singleMin,omitempty"`
-	SingleMax  float64 `json:"singleMax,omitempty"`
+	DailyLimit             float64  `json:"dailyLimit"`
+	SingleMin              float64  `json:"singleMin"`
+	SingleMax              float64  `json:"singleMax"`
+	BalanceMultiplier      *float64 `json:"balanceMultiplier,omitempty"`
+	SubscriptionMultiplier *float64 `json:"subscriptionMultiplier,omitempty"`
+	FeeRate                *float64 `json:"feeRate,omitempty"`
+	FixedFee               *float64 `json:"fixedFee,omitempty"`
 }
 
 // InstanceLimits holds per-channel limits for a provider instance (JSON).
@@ -83,7 +87,7 @@ type instanceCandidate struct {
 //  2. Batch-query daily usage (PENDING + PAID + COMPLETED + RECHARGING) for all candidates
 //  3. Filter out instances where: single-min/max violated OR daily remaining < orderAmount
 //  4. Pick from survivors using the configured strategy (round-robin / least-amount)
-//  5. If all filtered out, fall back to full list (let the provider itself reject)
+//  5. If all instances are filtered out, reject the order.
 func (lb *DefaultLoadBalancer) SelectInstance(
 	ctx context.Context,
 	providerKey string,
@@ -103,10 +107,10 @@ func (lb *DefaultLoadBalancer) SelectInstance(
 	// Step 3: filter by limits.
 	available := filterByLimits(candidates, paymentType, orderAmount)
 	if len(available) == 0 {
-		slog.Warn("all instances exceeded limits, using full candidate list",
+		slog.Warn("all instances exceeded configured limits",
 			"provider", providerKey, "payment_type", paymentType,
 			"order_amount", orderAmount, "count", len(candidates))
-		available = candidates
+		return nil, fmt.Errorf("no available instance for payment type %s within configured limits", paymentType)
 	}
 
 	// Step 4: pick by strategy.

@@ -107,6 +107,16 @@ func (s *PromptService) EffectiveMode() Mode {
 	return s.config.EffectiveMode()
 }
 
+// Monitor exposes the passive content-monitor path to the request coordinator.
+// It records selected accounts without enabling Guard auditing or changing the
+// request decision.
+func (s *PromptService) Monitor(ctx context.Context, req Request) error {
+	if s == nil || s.enqueuer == nil {
+		return nil
+	}
+	return s.enqueuer.Monitor(ctx, req)
+}
+
 func (s *PromptService) Enqueue(_ context.Context, req Request) error {
 	if s == nil || s.enqueuer == nil || s.EffectiveMode() != ModeAsync {
 		return nil
@@ -170,6 +180,24 @@ func (s *PromptService) GetConfig() (PublicConfig, error) { return s.config.Publ
 
 func (s *PromptService) SaveConfig(ctx context.Context, req UpdateConfigRequest, actorID int64) (PublicConfig, error) {
 	return s.config.Save(ctx, req, actorID)
+}
+
+func (s *PromptService) SaveMonitorEmails(ctx context.Context, emails []string, actorID int64) (PublicConfig, error) {
+	current, err := s.config.Public()
+	if err != nil {
+		return PublicConfig{}, err
+	}
+	endpoints := make([]UpdateEndpoint, 0, len(current.Endpoints))
+	for _, endpoint := range current.Endpoints {
+		endpoints = append(endpoints, UpdateEndpoint{ID: endpoint.ID, Name: endpoint.Name, Protocol: endpoint.Protocol, BaseURL: endpoint.BaseURL, Model: endpoint.Model, TimeoutMS: endpoint.TimeoutMS, InputLimit: endpoint.InputLimit, Enabled: endpoint.Enabled})
+	}
+	return s.config.Save(ctx, UpdateConfigRequest{
+		ExpectedConfigVersion: current.ConfigVersion, Enabled: current.Enabled, BlockingEnabled: current.BlockingEnabled,
+		BlockingLatestTurnOnly: current.BlockingLatestTurnOnly, StorePassEvents: current.StorePassEvents,
+		Strategy: current.Strategy, WorkerCount: current.WorkerCount, QueueCapacity: current.QueueCapacity,
+		Scanners: append([]string(nil), current.Scanners...), AllGroups: current.AllGroups,
+		GroupIDs: append([]int64(nil), current.GroupIDs...), MonitorUserEmails: emails, Endpoints: endpoints,
+	}, actorID)
 }
 
 func (s *PromptService) Runtime(ctx context.Context) RuntimeSnapshot {
@@ -385,6 +413,16 @@ func (s *PromptService) probeSnapshot() map[string]ProbeResult {
 
 func (s *PromptService) ListEvents(ctx context.Context, filter EventFilter, page, pageSize int) (*EventPage, error) {
 	return s.repo.ListEvents(ctx, filter, page, pageSize)
+}
+func (s *PromptService) ListMonitoringEvents(ctx context.Context, email string, page, pageSize int) (*ContentMonitorPage, error) {
+	return s.repo.ListMonitoringEvents(ctx, email, page, pageSize)
+}
+func (s *PromptService) DeleteMonitoringEvents(ctx context.Context) (*DeleteResult, error) {
+	result, err := s.repo.DeleteMonitoringEvents(ctx)
+	if err == nil {
+		s.deletePayloads(ctx, result.JobIDs)
+	}
+	return result, err
 }
 func (s *PromptService) GetEvent(ctx context.Context, id int64) (*Event, error) {
 	return s.repo.GetEvent(ctx, id)

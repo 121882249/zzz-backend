@@ -109,6 +109,14 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "request_id is required")
 		return
 	}
+	if apiKey.IsGlobal() && endpoint.IsGenerationRequest() {
+		resolvedKey, resolveErr := resolveGlobalAPIKeyForModel(c, h.globalGroupResolver, apiKey, subject.UserID, routingModel)
+		if resolveErr != nil {
+			h.errorResponse(c, http.StatusServiceUnavailable, "no_available_group", "当前模型没有可用分组或有效订阅。")
+			return
+		}
+		apiKey = resolvedKey
+	}
 
 	reqLog = reqLog.With(zap.String("model", requestModel))
 	setOpsRequestContext(c, requestModel, false)
@@ -142,7 +150,7 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 	service.SetOpsLatencyMs(c, service.OpsAuthLatencyMsKey, time.Since(requestStart).Milliseconds())
 
-	userReleaseFunc, acquired := h.acquireResponsesUserSlot(c, subject.UserID, subject.Concurrency, false, &streamStarted, reqLog)
+	userReleaseFunc, acquired := h.acquireResponsesUserSlot(c, apiKey, subject.UserID, subject.Concurrency, false, &streamStarted, reqLog)
 	if !acquired {
 		return
 	}

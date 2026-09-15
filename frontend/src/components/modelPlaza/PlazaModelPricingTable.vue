@@ -8,8 +8,8 @@
         <col class="w-[14%]" />
         <col class="w-[11%]" />
         <col class="w-[8%]" />
-        <col class="w-[14%]" />
-        <col class="w-[8%]" />
+        <col class="w-[10%]" />
+        <col class="w-[12%]" />
       </colgroup>
       <thead>
         <tr
@@ -24,7 +24,7 @@
           <th colspan="3" class="pz-bg pt-2 text-center">
             <div class="pz-title border-b pb-2 font-semibold">
               {{ t('modelPlaza.table.paidPrice') }}
-              <span class="pz-unit ml-1 normal-case font-normal">{{ t('modelPlaza.table.unitPerMillion') }}</span>
+              <span class="pz-unit ml-1 normal-case font-normal">{{ t('modelPlaza.table.paidUnitPerMillion') }}</span>
             </div>
           </th>
           <th
@@ -38,7 +38,7 @@
           </th>
           <th
             rowspan="2"
-            class="border-l border-gray-100 py-2.5 pl-3 pr-5 text-right align-middle dark:border-dark-700/60"
+            class="border-l border-gray-100 py-2.5 pl-2 pr-4 text-right align-middle dark:border-dark-700/60"
           >
             {{ t('modelPlaza.table.rate') }}
           </th>
@@ -49,11 +49,11 @@
           <th class="pz-bg px-3 py-2 font-medium">{{ t('modelPlaza.table.input') }}</th>
           <th class="pz-bg px-3 py-2 font-medium">{{ t('modelPlaza.table.output') }}</th>
           <th class="pz-bg px-3 py-2 font-medium">{{ t('modelPlaza.table.cache') }}</th>
-          <th class="border-l border-gray-100 px-3 py-2 font-medium dark:border-dark-700/60">
+          <th class="border-l border-gray-100 px-2 py-2 font-medium dark:border-dark-700/60">
             {{ t('modelPlaza.table.input') }}
           </th>
-          <th class="px-3 py-2 font-medium">{{ t('modelPlaza.table.output') }}</th>
-          <th class="px-3 py-2 font-medium">{{ t('modelPlaza.table.cache') }}</th>
+          <th class="px-2 py-2 font-medium">{{ t('modelPlaza.table.output') }}</th>
+          <th class="px-2 py-2 font-medium">{{ t('modelPlaza.table.cache') }}</th>
         </tr>
       </thead>
       <tbody>
@@ -208,7 +208,7 @@
 
           <!-- 官方价格(参考价,不乘倍率;官方有阶梯时每档一行) -->
           <td
-            class="border-l border-gray-100 px-3 py-2.5 align-middle font-mono text-xs text-gray-500 dark:border-dark-700/60 dark:text-dark-400"
+            class="border-l border-gray-100 px-2 py-2.5 align-middle font-mono text-xs text-gray-500 dark:border-dark-700/60 dark:text-dark-400"
           >
             <template v-if="officialIntervals(m).length">
               <div
@@ -278,24 +278,28 @@
 
           <!-- 折扣倍率(分时时段行展示 生效倍率×时段倍率;生图独立倍率行展示独立倍率;专属倍率划线展示原倍率) -->
           <td
-            class="border-l border-gray-100 py-2.5 pl-3 pr-5 text-right align-middle font-mono text-xs dark:border-dark-700/60"
+            class="border-l border-gray-100 py-2.5 pl-2 pr-4 text-right align-middle font-mono text-xs dark:border-dark-700/60"
           >
-            <span
-              v-if="period"
-              class="font-bold text-primary-600 dark:text-primary-400"
-              :title="t('modelPlaza.table.timePricingRateHint', { rate: effectiveRate, multiplier: period.multiplier })"
-              >{{ periodRate(period) }}x</span
-            >
-            <span
-              v-else-if="usesIndependentImageRate(m)"
-              class="font-bold text-gray-700 dark:text-gray-300"
-              >{{ requestRate(m) }}x</span
-            >
-            <template v-else-if="hasCustomRate">
-              <span class="mr-1 text-gray-400 line-through dark:text-dark-500">{{ rateMultiplier }}x</span>
-              <span class="font-bold text-primary-600 dark:text-primary-400">{{ effectiveRate }}x</span>
-            </template>
-            <span v-else class="font-bold text-gray-700 dark:text-gray-300">{{ effectiveRate }}x</span>
+            <div class="flex flex-col items-end gap-0.5">
+              <div>
+                <span v-if="period" class="font-bold text-primary-600 dark:text-primary-400"
+                  :title="t('modelPlaza.table.timePricingRateHint', { rate: effectiveRate, multiplier: period.multiplier })"
+                  >{{ rowRateLabel(m, period) }}x</span>
+                <span v-else-if="usesIndependentImageRate(m)" class="font-bold text-gray-700 dark:text-gray-300"
+                  >{{ rowRateLabel(m, null) }}x</span>
+                <template v-else-if="hasCustomRate">
+                  <span class="mr-1 text-gray-400 line-through dark:text-dark-500">{{ rowRateLabel(m, null, rateMultiplier) }}x</span>
+                  <span class="font-bold text-primary-600 dark:text-primary-400">{{ rowRateLabel(m, null) }}x</span>
+                </template>
+                <span v-else class="font-bold text-gray-700 dark:text-gray-300">{{ rowRateLabel(m, null) }}x</span>
+              </div>
+              <span
+                v-if="discountPercent(m, period) != null"
+                class="whitespace-nowrap font-sans text-[11px] font-medium text-emerald-600 dark:text-emerald-400"
+              >
+                {{ t('modelPlaza.table.cheaperThanOfficial', { percent: discountPercent(m, period) }) }}
+              </span>
+            </div>
           </td>
         </tr>
       </tbody>
@@ -380,6 +384,7 @@ function billingModeLabel(m: PlazaModel): string {
 
 /** 价格统一保底 2 位小数,更长的有效小数原样保留。 */
 const MIN_DECIMALS = 2
+const OFFICIAL_USD_TO_CNY_RATE = 6.8
 
 /** 表格行:每个模型一行标准价;配置了分时倍率的模型再按时段各加一行。 */
 interface PlazaRow {
@@ -405,11 +410,11 @@ function periodRate(period: PlazaTimePricingPeriod): number {
   return Math.round(effectiveRate.value * period.multiplier * 1000) / 1000
 }
 
-/** 实付价 = 渠道单价 × 生效倍率(时段行再乘时段倍率),按 $/1M token 展示。 */
+/** 实付价 = 渠道单价 × 生效倍率(时段行再乘时段倍率),按人民币展示。 */
 function paidPerMillion(value: number | null | undefined, period: PlazaTimePricingPeriod | null = null): string {
   if (value == null) return '-'
   const rate = period ? periodRate(period) : effectiveRate.value
-  return formatScaled(value * rate, PER_MILLION, MIN_DECIMALS)
+  return formatPaid(value * rate, PER_MILLION)
 }
 
 /** 图片计费模型且分组开启生图独立倍率:实付倍率取独立倍率,与计费口径一致。 */
@@ -422,10 +427,65 @@ function requestRate(m: PlazaModel): number {
   return usesIndependentImageRate(m) ? (props.imageRateMultiplier ?? 1) : effectiveRate.value
 }
 
+/**
+ * 每个 token 模型都按本行价格独立计算现金倍率：
+ * （渠道单价 × 本行生效倍率）÷（官方美元单价 × 6.8）。
+ * 优先比较首档输入价；缺失时依次回退到输出价和缓存读取价。
+ * 非 token 模型的实付与官方价通常不是同一计费单位，无法可靠比较时只展示配置倍率。
+ */
+function cashRate(m: PlazaModel, rate = requestRate(m)): number | null {
+  if (billingMode(m) !== BILLING_MODE_TOKEN) return null
+
+  const paidInterval = tokenIntervals(m)[0]
+  const officialInterval = officialIntervals(m)[0]
+  const paid = paidInterval ?? m.pricing
+  const reference = officialInterval ?? m.official_pricing
+
+  const pairs: Array<[number | null | undefined, number | null | undefined]> = [
+    [paid?.input_price, reference?.input_price],
+    [paid?.output_price, reference?.output_price],
+    [paid?.cache_read_price, reference?.cache_read_price]
+  ]
+
+  for (const [paidPrice, officialPrice] of pairs) {
+    if (
+      paidPrice != null &&
+      officialPrice != null &&
+      paidPrice >= 0 &&
+      officialPrice > 0 &&
+      Number.isFinite(paidPrice) &&
+      Number.isFinite(officialPrice)
+    ) {
+      return (paidPrice * rate) / (officialPrice * OFFICIAL_USD_TO_CNY_RATE)
+    }
+  }
+  return null
+}
+
+function rowRateLabel(
+  m: PlazaModel,
+  period: PlazaTimePricingPeriod | null = null,
+  rate = period ? periodRate(period) : requestRate(m)
+): string {
+  const ratio = cashRate(m, rate)
+  return ratio == null ? trimZero(rate) : ratio.toFixed(4)
+}
+
+function discountPercent(m: PlazaModel, period: PlazaTimePricingPeriod | null = null): string | null {
+  const ratio = cashRate(m, period ? periodRate(period) : requestRate(m))
+  if (ratio == null || !Number.isFinite(ratio) || ratio < 0 || ratio >= 1) return null
+  return ((1 - ratio) * 100).toFixed(2)
+}
+
 /** 按次 / 按图片单价(乘该行生效倍率,不换算 1M)。 */
 function paidRequestPrice(m: PlazaModel, value: number | null | undefined): string {
   if (value == null) return '-'
-  return formatScaled(value * requestRate(m), 1, MIN_DECIMALS)
+  return formatPaid(value * requestRate(m), 1)
+}
+
+/** formatScaled 默认使用美元符号；模型广场实付价使用人民币符号。 */
+function formatPaid(value: number, scale: number): string {
+  return formatScaled(value, scale, MIN_DECIMALS).replace(/^\$/, '¥')
 }
 
 /** 官方参考价不乘倍率。 */
@@ -507,8 +567,6 @@ function tierHint(m: PlazaModel): string {
     ? t('modelPlaza.table.tierHintMarginal')
     : t('modelPlaza.table.tierHint')
 }
-
-
 /** 按次/按图模式的阶梯定价(仅保留配了按次价的档位)。 */
 function requestIntervals(m: PlazaModel): UserPricingInterval[] {
   return (m.pricing?.intervals ?? []).filter((iv) => iv.per_request_price != null)

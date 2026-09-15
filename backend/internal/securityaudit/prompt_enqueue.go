@@ -12,12 +12,42 @@ type Enqueuer struct {
 	metrics Metrics
 }
 
+type monitoringRepository interface {
+	RecordMonitoring(ctx context.Context, snapshot PromptSnapshot, configVersion int64) (*Event, error)
+}
+
 func NewEnqueuer(config ConfigStore, repo JobRepository, payload PayloadStore, metrics ...Metrics) *Enqueuer {
 	var metric Metrics
 	if len(metrics) > 0 {
 		metric = metrics[0]
 	}
 	return &Enqueuer{config: config, repo: repo, payload: payload, metrics: metric}
+}
+
+// Monitor records prompts for explicitly selected accounts. It is independent
+// from Guard auditing, performs no model call, and never changes the request
+// decision.
+func (e *Enqueuer) Monitor(ctx context.Context, req Request) error {
+	if e == nil || e.config == nil || e.repo == nil {
+		return nil
+	}
+	cfg, ok := e.config.Active()
+	if !ok || !cfg.MonitorsUser(req.UserEmail) {
+		return nil
+	}
+	repo, ok := e.repo.(monitoringRepository)
+	if !ok {
+		return errors.New("account monitoring repository unavailable")
+	}
+	snapshot, err := ExtractPromptSnapshot(req)
+	if errors.Is(err, ErrNoPromptText) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	_, err = repo.RecordMonitoring(ctx, snapshot.Redacted(), cfg.ConfigVersion)
+	return err
 }
 
 func (e *Enqueuer) Enqueue(ctx context.Context, req Request) error {

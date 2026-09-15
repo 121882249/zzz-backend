@@ -52,15 +52,18 @@
           </div>
         </template>
 
-        <!-- 成功状态 -->
+        <!-- 支付组件操作结束：这里只表示支付操作已返回，不宣称到账 -->
         <template v-else-if="stripeSuccess">
           <div class="card p-6 text-center">
             <div class="flex flex-col items-center gap-3 py-4">
               <div class="flex h-16 w-16 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/30">
                 <Icon name="check" size="lg" class="text-green-500" />
               </div>
-              <p class="text-lg font-bold text-gray-900 dark:text-white">{{ t('payment.result.success') }}</p>
-              <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('payment.stripeSuccessProcessing') }}</p>
+              <p class="text-lg font-bold text-gray-900 dark:text-white">{{ t('payment.operationComplete') }}</p>
+              <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('payment.operationCompleteHint') }}</p>
+              <button class="btn btn-secondary mt-2" @click="leaveResultPage">
+                {{ canClosePopup ? t('common.close') : t('payment.result.backToRecharge') }}
+              </button>
             </div>
           </div>
         </template>
@@ -116,6 +119,7 @@ const paymentStore = usePaymentStore()
 
 // 弹窗模式：指定支付宝或微信方式时跳过 AppLayout
 const isPopup = computed(() => !!route.query.method)
+const canClosePopup = computed(() => isPopup.value && typeof window !== 'undefined' && !!window.opener)
 
 const loading = ref(true)
 const initError = ref('')
@@ -131,7 +135,6 @@ const showPaymentElement = ref(false)
 
 let stripeInstance: Stripe | null = null
 let elementsInstance: StripeElements | null = null
-let redirectTimer: ReturnType<typeof setTimeout> | null = null
 
 onMounted(async () => {
   const orderId = Number(route.query.order_id)
@@ -234,7 +237,6 @@ async function confirmWechatPay(stripe: Stripe, clientSecret: string) {
     startPolling()
   } else if (paymentIntent?.status === 'succeeded') {
     stripeSuccess.value = true
-    scheduleClose()
   } else {
     stripeError.value = t('payment.result.failed')
   }
@@ -270,8 +272,10 @@ async function handleGenericPay() {
     if (error) {
       stripeError.value = error.message || t('payment.result.failed')
     } else {
+      // 支付组件已完成本次操作，但这不等于资金已经到账。
+      // 使用中性结果页结束等待，最终到账仍以服务端订单和余额为准。
+      showPaymentElement.value = false
       stripeSuccess.value = true
-      scheduleClose()
     }
   } catch (err: unknown) {
     stripeError.value = extractI18nErrorMessage(err, t, 'payment.errors', t('payment.result.failed'))
@@ -285,30 +289,30 @@ let pollTimer: ReturnType<typeof setInterval> | null = null
 function startPolling() {
   const orderId = Number(route.query.order_id)
   if (!orderId) return
-  pollTimer = setInterval(async () => {
+  if (pollTimer) return
+  const refreshStatus = async () => {
     const o = await paymentStore.pollOrderStatus(orderId)
     if (!o) return
     if (o.status === 'COMPLETED' || o.status === 'PAID') {
       if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
       stripeSuccess.value = true
       wechatQrUrl.value = ''
-      scheduleClose()
+    } else if (['FAILED', 'CANCELLED', 'EXPIRED'].includes(o.status)) {
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
+      wechatQrUrl.value = ''
+      stripeError.value = t('payment.result.failed')
     }
-  }, 3000)
+  }
+  void refreshStatus()
+  pollTimer = setInterval(refreshStatus, 3000)
 }
 
-function scheduleClose() {
-  if (window.opener) {
-    redirectTimer = setTimeout(() => { window.close() }, 2000)
-  } else {
-    redirectTimer = setTimeout(() => {
-      router.push({ path: '/payment/result', query: { order_id: String(route.query.order_id || ''), status: 'success' } })
-    }, 2000)
-  }
+function leaveResultPage() {
+  if (isPopup.value && window.opener) window.close()
+  else router.push('/purchase')
 }
 
 onUnmounted(() => {
-  if (redirectTimer) clearTimeout(redirectTimer)
   if (pollTimer) clearInterval(pollTimer)
 })
 </script>

@@ -60,4 +60,26 @@ describe('PaymentMethodSelector', () => {
     expect(button.classes()).toContain('border-primary-500')
     expect(button.classes()).not.toContain('border-[#02A9F1]')
   })
+
+  it('highlights the fixed provider fee in red', () => {
+    const wrapper = mount(PaymentMethodSelector, {
+      props: {
+        selected: 'stripe',
+        methods: [{
+          type: 'stripe',
+          display_name: 'Stripe',
+          fee_rate: 2.5,
+          fixed_fee: 2.35,
+          currency: 'HKD',
+          available: true,
+        }],
+      },
+    })
+
+    const fixedFee = wrapper.get('[data-testid="payment-fixed-fee"]')
+    expect(fixedFee.text()).toContain('HKD')
+    expect(fixedFee.text()).toContain('2.35')
+    expect(fixedFee.classes()).toContain('text-red-500')
+    expect(wrapper.text()).toContain('2.5% +')
+  })
 })

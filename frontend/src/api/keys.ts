@@ -147,6 +147,12 @@ export async function deleteKey(id: number): Promise<{ message: string }> {
   return data
 }
 
+/** Regenerate the system global TokenPro key while preserving its row and routing scope. */
+export async function regenerate(id: number): Promise<ApiKey> {
+  const { data } = await apiClient.post<ApiKey>(`/keys/${id}/regenerate`)
+  return data
+}
+
 /**
  * Toggle API key status (active/inactive)
  * @param id - API key ID
@@ -163,6 +169,7 @@ export const keysAPI = {
   create,
   update,
   bulkUpdate,
+  regenerate,
   delete: deleteKey,
   toggleStatus
 }

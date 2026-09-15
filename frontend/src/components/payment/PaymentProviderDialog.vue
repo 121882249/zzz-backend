@@ -70,6 +70,46 @@
         </div>
       </div>
 
+      <!-- Provider-owned product name -->
+      <div class="grid grid-cols-1 gap-3 rounded-lg border border-gray-100 p-3 dark:border-dark-700 sm:grid-cols-3">
+        <div>
+          <label class="input-label">
+            {{ t('admin.settings.payment.productNamePrefix') }}
+            <span class="text-red-500"> *</span>
+          </label>
+          <input
+            v-model="config.productNamePrefix"
+            data-testid="provider-product-name-prefix"
+            type="text"
+            class="input"
+            placeholder="Sub2API"
+            required
+          />
+        </div>
+        <div>
+          <label class="input-label">{{ t('admin.settings.payment.productNameSuffixAuto') }}</label>
+          <input
+            :value="providerProductCurrency"
+            data-testid="provider-product-name-suffix"
+            type="text"
+            class="input bg-gray-50 dark:bg-dark-800"
+            readonly
+          />
+          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {{ t('admin.settings.payment.productNameCurrencyHint') }}
+          </p>
+        </div>
+        <div>
+          <label class="input-label">{{ t('admin.settings.payment.preview') }}</label>
+          <div
+            data-testid="provider-product-name-preview"
+            class="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-600 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-300"
+          >
+            {{ providerProductNamePreview }}
+          </div>
+        </div>
+      </div>
+
       <div v-if="form.provider_key === 'easypay'" class="space-y-3 rounded-lg border border-gray-100 p-3 dark:border-dark-700">
         <div class="flex items-center justify-between gap-3">
           <div>
@@ -243,7 +283,7 @@
         </div>
       </div>
 
-      <!-- Per-type limits (collapsible) -->
+      <!-- Per-type limits and pricing (collapsible) -->
       <div v-if="limitableTypes.length" class="border-t border-gray-200 pt-4 dark:border-dark-700">
         <button type="button" @click="limitsExpanded = !limitsExpanded" class="flex w-full items-center justify-between">
           <h4 class="text-sm font-semibold text-gray-900 dark:text-white">
@@ -258,14 +298,14 @@
             class="rounded-lg border border-gray-100 p-3 dark:border-dark-700"
           >
             <p class="mb-2 text-xs font-medium text-gray-700 dark:text-gray-300">{{ lt.label }}</p>
-            <div class="grid grid-cols-3 gap-3">
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <div>
                 <label class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.payment.limitSingleMin') }}</label>
                 <input
                   type="number"
                   :value="getLimitVal(lt.value, 'singleMin')"
                   @input="setLimitVal(lt.value, 'singleMin', ($event.target as HTMLInputElement).value)"
-                  class="input mt-0.5" min="1" step="0.01" :placeholder="limitPlaceholder(lt.value)"
+                  class="input mt-0.5" min="0" step="0.01" placeholder="0"
                 />
               </div>
               <div>
@@ -274,7 +314,7 @@
                   type="number"
                   :value="getLimitVal(lt.value, 'singleMax')"
                   @input="setLimitVal(lt.value, 'singleMax', ($event.target as HTMLInputElement).value)"
-                  class="input mt-0.5" min="1" step="0.01" :placeholder="limitPlaceholder(lt.value)"
+                  class="input mt-0.5" min="0" step="0.01" placeholder="0"
                 />
               </div>
               <div>
@@ -283,12 +323,51 @@
                   type="number"
                   :value="getLimitVal(lt.value, 'dailyLimit')"
                   @input="setLimitVal(lt.value, 'dailyLimit', ($event.target as HTMLInputElement).value)"
-                  class="input mt-0.5" min="1" step="0.01" :placeholder="limitPlaceholder(lt.value)"
+                  class="input mt-0.5" min="0" step="0.01" placeholder="0"
+                />
+              </div>
+            </div>
+            <div class="mt-3 grid grid-cols-1 gap-3 border-t border-gray-100 pt-3 dark:border-dark-700 sm:grid-cols-2 lg:grid-cols-4">
+              <div>
+                <label class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.payment.channelBalanceMultiplier') }}</label>
+                <input
+                  type="number"
+                  :value="getPricingVal(lt.value, 'balanceMultiplier')"
+                  @input="setPricingVal(lt.value, 'balanceMultiplier', ($event.target as HTMLInputElement).value)"
+                  class="input mt-0.5" min="0.01" step="0.01" placeholder="1"
+                />
+              </div>
+              <div>
+                <label class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.payment.channelSubscriptionMultiplier') }}</label>
+                <input
+                  type="number"
+                  :value="getPricingVal(lt.value, 'subscriptionMultiplier')"
+                  @input="setPricingVal(lt.value, 'subscriptionMultiplier', ($event.target as HTMLInputElement).value)"
+                  class="input mt-0.5" min="0.01" step="0.01" placeholder="1"
+                />
+              </div>
+              <div>
+                <label class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.payment.channelFeeRate') }}</label>
+                <input
+                  type="number"
+                  :value="getPricingVal(lt.value, 'feeRate')"
+                  @input="setPricingVal(lt.value, 'feeRate', ($event.target as HTMLInputElement).value)"
+                  class="input mt-0.5" min="0" max="100" step="0.01" placeholder="0"
+                />
+              </div>
+              <div>
+                <label class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.payment.channelFixedFee') }}</label>
+                <input
+                  type="number"
+                  :value="getPricingVal(lt.value, 'fixedFee')"
+                  @input="setPricingVal(lt.value, 'fixedFee', ($event.target as HTMLInputElement).value)"
+                  class="input mt-0.5" min="0" step="0.01" placeholder="0"
                 />
               </div>
             </div>
           </div>
           <p class="text-xs text-gray-400 dark:text-gray-500">{{ t('admin.settings.payment.limitsHint') }}</p>
+          <p class="text-xs text-gray-400 dark:text-gray-500">{{ t('admin.settings.payment.channelPricingHint') }}</p>
         </div>
       </div>
     </form>
@@ -314,6 +393,7 @@ import type { SelectOption } from '@/components/common/Select.vue'
 import ToggleSwitch from './ToggleSwitch.vue'
 import type { ProviderInstance } from '@/types/payment'
 import type { EasyPayCustomMethod, TypeOption } from './providerConfig'
+import { DEFAULT_PAYMENT_CURRENCY, normalizePaymentCurrency } from './currency'
 import {
   PROVIDER_CONFIG_FIELDS,
   PROVIDER_SUPPORTED_TYPES,
@@ -328,6 +408,9 @@ import {
   parseEasyPayCustomMethods,
   serializeEasyPayCustomMethods,
 } from './providerConfig'
+
+const providerProductNamePrefixConfigKey = 'productNamePrefix'
+const defaultProviderProductNamePrefix = 'Sub2API'
 
 /** Default payment_mode per provider key — "" means "no preference, use
  * provider's built-in default behavior". */
@@ -430,6 +513,18 @@ const providerWebhookHint = computed(() =>
 )
 
 const callbackPaths = computed(() => PROVIDER_CALLBACK_PATHS[form.provider_key] || null)
+
+const providerProductCurrency = computed(() => {
+  if (form.provider_key === 'stripe' || form.provider_key === 'airwallex') {
+    return normalizePaymentCurrency(config.currency)
+  }
+  return DEFAULT_PAYMENT_CURRENCY
+})
+
+const providerProductNamePreview = computed(() => {
+  const prefix = (config[providerProductNamePrefixConfigKey] || defaultProviderProductNamePrefix).trim()
+  return `${prefix || defaultProviderProductNamePrefix} 100 ${providerProductCurrency.value}`
+})
 
 const supportsPaymentMode = computed(() => providerSupportsPaymentMode(form.provider_key))
 
@@ -564,6 +659,7 @@ function toggleType(type: string) {
   } else {
     form.supported_types = [...form.supported_types, type]
   }
+	ensureCommercialDefaults()
 }
 
 function normalizedEasyPayCustomMethods(): EasyPayCustomMethod[] {
@@ -593,6 +689,7 @@ function onKeyChange() {
   form.payment_mode = defaultPaymentMode(form.provider_key)
   clearConfig()
   applyDefaults()
+	ensureCommercialDefaults()
 }
 
 function clearConfig() {
@@ -609,55 +706,83 @@ function applyDefaults() {
   for (const f of PROVIDER_CONFIG_FIELDS[form.provider_key] || []) {
     if (f.defaultValue && !config[f.key]) config[f.key] = f.defaultValue
   }
+  if (!(config[providerProductNamePrefixConfigKey] || '').trim()) {
+    config[providerProductNamePrefixConfigKey] = defaultProviderProductNamePrefix
+  }
 }
 
 function getLimitVal(paymentType: string, field: string): string {
+	const val = limits[paymentType]?.[field]
+	return typeof val === 'number' && Number.isFinite(val) ? String(val) : '0'
+}
+
+function getPricingVal(paymentType: string, field: string): string {
   const val = limits[paymentType]?.[field]
-  return val && val > 0 ? String(val) : ''
-}
-
-/** Returns true if any limit field for this payment type has a value */
-function hasAnyLimit(paymentType: string): boolean {
-  const l = limits[paymentType]
-  if (!l) return false
-  return (l.singleMin > 0) || (l.singleMax > 0) || (l.dailyLimit > 0)
-}
-
-/** Dynamic placeholder: "不限制" if sibling has value, "使用全局配置" if all empty */
-function limitPlaceholder(paymentType: string): string {
-  return hasAnyLimit(paymentType)
-    ? t('admin.settings.payment.limitsNoLimit')
-    : t('admin.settings.payment.limitsUseGlobal')
+  return typeof val === 'number' && Number.isFinite(val) ? String(val) : ''
 }
 
 function setLimitVal(paymentType: string, field: string, val: string) {
-  if (!limits[paymentType]) limits[paymentType] = {}
+	ensureCommercialDefaults()
   const num = Number(val)
-  // Empty → clear the field (use global); reject ≤0
-  if (val === '' || isNaN(num)) {
-    delete limits[paymentType][field]
+	limits[paymentType][field] = val.trim() === '' || !Number.isFinite(num) || num < 0 ? 0 : num
+}
+
+function setPricingVal(paymentType: string, field: string, val: string) {
+	ensureCommercialDefaults()
+  if (val.trim() === '') {
+		limits[paymentType][field] = field === 'balanceMultiplier' || field === 'subscriptionMultiplier' ? 1 : 0
     return
   }
-  if (num <= 0) return
+  const num = Number(val)
+  if (!Number.isFinite(num)) return
+	if ((field === 'balanceMultiplier' || field === 'subscriptionMultiplier') && num <= 0) return
+  if (field === 'feeRate' && (num < 0 || num > 100)) return
+  if (field === 'fixedFee' && num < 0) return
   limits[paymentType][field] = num
 }
 
 function serializeLimits(): string {
+	ensureCommercialDefaults()
   const result: Record<string, Record<string, number>> = {}
-  for (const [pt, fields] of Object.entries(limits)) {
-    const clean: Record<string, number> = {}
-    for (const [k, v] of Object.entries(fields)) {
-      if (v > 0) clean[k] = v
-    }
-    if (Object.keys(clean).length > 0) result[pt] = clean
+	for (const { value: pt } of limitableTypes.value) {
+		const fields = limits[pt]
+		result[pt] = {
+			singleMin: fields.singleMin,
+			singleMax: fields.singleMax,
+			dailyLimit: fields.dailyLimit,
+			balanceMultiplier: fields.balanceMultiplier,
+			subscriptionMultiplier: fields.subscriptionMultiplier,
+			feeRate: fields.feeRate,
+			fixedFee: fields.fixedFee,
+		}
   }
-  return Object.keys(result).length > 0 ? JSON.stringify(result) : ''
+	return JSON.stringify(result)
+}
+
+function ensureCommercialDefaults() {
+	for (const { value: paymentType } of limitableTypes.value) {
+		const current = limits[paymentType] || {}
+		limits[paymentType] = {
+			singleMin: Number.isFinite(current.singleMin) && current.singleMin >= 0 ? current.singleMin : 0,
+			singleMax: Number.isFinite(current.singleMax) && current.singleMax >= 0 ? current.singleMax : 0,
+			dailyLimit: Number.isFinite(current.dailyLimit) && current.dailyLimit >= 0 ? current.dailyLimit : 0,
+			balanceMultiplier: Number.isFinite(current.balanceMultiplier) && current.balanceMultiplier > 0 ? current.balanceMultiplier : 1,
+			subscriptionMultiplier: Number.isFinite(current.subscriptionMultiplier) && current.subscriptionMultiplier > 0 ? current.subscriptionMultiplier : 1,
+			feeRate: Number.isFinite(current.feeRate) && current.feeRate >= 0 ? current.feeRate : 0,
+			fixedFee: Number.isFinite(current.fixedFee) && current.fixedFee >= 0 ? current.fixedFee : 0,
+		}
+	}
 }
 
 function handleSave() {
+	ensureCommercialDefaults()
   // Validate required fields
   if (!form.name.trim()) {
     emitValidationError(t('admin.settings.payment.validationNameRequired'))
+    return
+  }
+  if (!(config[providerProductNamePrefixConfigKey] || '').trim()) {
+    emitValidationError(t('admin.settings.payment.validationProductNamePrefixRequired'))
     return
   }
   if (form.provider_key === 'easypay') {
@@ -667,6 +792,7 @@ function handleSave() {
       return
     }
     syncEasyPayCustomMethods()
+		ensureCommercialDefaults()
   }
   // Validate required config fields — all non-optional fields must be filled.
   // In edit mode, sensitive fields may be left blank to preserve the stored
@@ -681,6 +807,13 @@ function handleSave() {
       return
     }
   }
+	for (const { value: paymentType } of limitableTypes.value) {
+		const values = limits[paymentType]
+		if (values.singleMin > 0 && values.singleMax > 0 && values.singleMin > values.singleMax) {
+			emitValidationError(t('admin.settings.payment.validationLimitRange'))
+			return
+		}
+	}
 
   const clearableConfigKeys = new Set(
     (PROVIDER_CONFIG_FIELDS[form.provider_key] || [])
@@ -793,6 +926,7 @@ function reset(defaultKey: string) {
   form.allow_user_refund = false
   clearConfig()
   applyDefaults()
+	ensureCommercialDefaults()
 }
 
 function loadProvider(provider: ProviderInstance) {
@@ -843,6 +977,7 @@ function loadProvider(provider: ProviderInstance) {
       limitsExpanded.value = Object.keys(limits).length > 0
     } catch { /* ignore */ }
   }
+	ensureCommercialDefaults()
 }
 
 defineExpose({ reset, loadProvider })

@@ -69,6 +69,36 @@ func TestUpdateServicePerformUpdateNoUpdateReturnsSentinel(t *testing.T) {
 	require.ErrorIs(t, err, ErrNoUpdateAvailable)
 }
 
+func TestCompareVersionsUsesNumericCoreForCustomBuilds(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, 0, compareVersions("v0.1.172-tokenpro-hkd-code", "0.1.172"))
+	require.Equal(t, 1, compareVersions("0.1.173-tokenpro", "0.1.172"))
+	require.Equal(t, -1, compareVersions("0.1.171-tokenpro", "0.1.172"))
+	require.Equal(t, 1, compareVersions("TokenPro-R28", "0.2.0"))
+	require.Equal(t, 1, compareVersions("TokenPro-R28", "0.2.2"))
+	require.Equal(t, 0, compareVersions("TokenPro-R28", "0.2.4"))
+	require.Equal(t, -1, compareVersions("TokenPro-R28", "0.2.5"))
+	require.Equal(t, 1, compareVersions("TokenPro-R28", "0.1.185"))
+}
+
+func TestUpdateServiceReportsTokenProUpstreamVersion(t *testing.T) {
+	svc := NewUpdateService(
+		&updateServiceCacheStub{},
+		&updateServiceGitHubClientStub{release: &GitHubRelease{TagName: "v0.2.2", Name: "v0.2.2"}},
+		"TokenPro-R55-v0.2.4",
+		"release",
+	)
+
+	info, err := svc.CheckUpdate(context.Background(), true)
+
+	require.NoError(t, err)
+	require.Equal(t, "TokenPro-R55-v0.2.4", info.CurrentVersion)
+	require.Equal(t, "0.2.4", info.CurrentUpstreamVersion)
+	require.Equal(t, "0.2.2", info.LatestVersion)
+	require.False(t, info.HasUpdate)
+}
+
 func newRollbackTestService(current string, releases []*GitHubRelease) *UpdateService {
 	return NewUpdateService(
 		&updateServiceCacheStub{},

@@ -35,6 +35,8 @@ const (
 	FieldConcurrency = "concurrency"
 	// FieldStatus holds the string denoting the status field in the database.
 	FieldStatus = "status"
+	// FieldCreatedIP holds the string denoting the created_ip field in the database.
+	FieldCreatedIP = "created_ip"
 	// FieldUsername holds the string denoting the username field in the database.
 	FieldUsername = "username"
 	// FieldNotes holds the string denoting the notes field in the database.
@@ -206,6 +208,7 @@ var Columns = []string{
 	FieldFrozenBalance,
 	FieldConcurrency,
 	FieldStatus,
+	FieldCreatedIP,
 	FieldUsername,
 	FieldNotes,
 	FieldTotpSecretEncrypted,
@@ -271,6 +274,10 @@ var (
 	DefaultStatus string
 	// StatusValidator is a validator for the "status" field. It is called by the builders before save.
 	StatusValidator func(string) error
+	// DefaultCreatedIP holds the default value on creation for the "created_ip" field.
+	DefaultCreatedIP string
+	// CreatedIPValidator is a validator for the "created_ip" field. It is called by the builders before save.
+	CreatedIPValidator func(string) error
 	// DefaultUsername holds the default value on creation for the "username" field.
 	DefaultUsername string
 	// UsernameValidator is a validator for the "username" field. It is called by the builders before save.
@@ -353,6 +360,11 @@ func ByConcurrency(opts ...sql.OrderTermOption) OrderOption {
 // ByStatus orders the results by the status field.
 func ByStatus(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldStatus, opts...).ToFunc()
+}
+
+// ByCreatedIP orders the results by the created_ip field.
+func ByCreatedIP(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldCreatedIP, opts...).ToFunc()
 }
 
 // ByUsername orders the results by the username field.

@@ -50,6 +50,7 @@ export default {
     inactive: '禁用',
     more: '更多',
     close: '关闭',
+    menu: '菜单',
     toggleMenu: '切换菜单',
     userMenu: '用户菜单',
     pageNotFound: '页面不存在',
@@ -144,6 +145,7 @@ export default {
     adminCompliance: '部署与运营合规承诺',
     loginAgreementPrompt: {
       checkboxPrefix: '我已阅读并同意',
+      documentLinksLabel: '合规文件：',
       documentSeparator: '、',
       noticeTitle: '继续登录前需要先同意最新条款。',
       noticeDescription: '未同意前，账号密码输入和快捷登录会保持禁用。',
@@ -199,6 +201,7 @@ export default {
     buySubscription: '充值/订阅',
     recharge: '充值',
     subscribe: '订阅',
+    downloadApp: '下载连接程序',
     docs: '文档',
     myOrders: '我的订单',
     orderManagement: '订单管理',
@@ -213,11 +216,19 @@ export default {
     securityAudit: '安全审计',
     contentModeration: '内容审核',
     promptAudit: '提示词审计',
+    contentMonitor: '内容监控',
     auditLogs: '操作日志',
   },
 
   // Auth
   auth: {
+    cosmic: {
+      kicker: 'TOKENPRO INTELLIGENCE NETWORK',
+      titleLineOne: '一个入口，连接',
+      titleHighlight: '无界智能',
+      description: '用一个 TokenPro 密钥调用多种领先模型，在统一、稳定的智能网络中继续你的工作。',
+      moreModels: '更多模型'
+    },
     welcomeBack: '欢迎回来',
     signInToAccount: '登录您的账户以继续',
     signIn: '登录',

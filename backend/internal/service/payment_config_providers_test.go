@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"strconv"
 	"testing"
@@ -348,6 +349,7 @@ func TestCreateProviderInstanceAllowsVisibleMethodProvidersFromDifferentSources(
 		},
 		SupportedTypes: []string{"alipay"},
 		Enabled:        true,
+		Limits:         validProviderCommercialLimits(t, payment.TypeEasyPay, []string{"alipay"}),
 	})
 	require.NoError(t, err)
 
@@ -357,6 +359,7 @@ func TestCreateProviderInstanceAllowsVisibleMethodProvidersFromDifferentSources(
 		Config:         map[string]string{"appId": "app-1", "privateKey": "private-key"},
 		SupportedTypes: []string{"alipay"},
 		Enabled:        true,
+		Limits:         validProviderCommercialLimits(t, payment.TypeAlipay, []string{"alipay"}),
 	})
 	require.NoError(t, err)
 }
@@ -383,6 +386,7 @@ func TestUpdateProviderInstanceAllowsEnablingVisibleMethodProviderFromDifferentS
 		},
 		SupportedTypes: []string{"wxpay"},
 		Enabled:        true,
+		Limits:         validProviderCommercialLimits(t, payment.TypeEasyPay, []string{"wxpay"}),
 	})
 	require.NoError(t, err)
 	require.NotNil(t, existing)
@@ -393,6 +397,7 @@ func TestUpdateProviderInstanceAllowsEnablingVisibleMethodProviderFromDifferentS
 		Config:         validWxpayProviderConfig(t),
 		SupportedTypes: []string{"wxpay"},
 		Enabled:        false,
+		Limits:         validProviderCommercialLimits(t, payment.TypeWxpay, []string{"wxpay"}),
 	})
 	require.NoError(t, err)
 
@@ -424,12 +429,15 @@ func TestUpdateProviderInstancePersistsEnabledAndSupportedTypes(t *testing.T) {
 		},
 		SupportedTypes: []string{"alipay"},
 		Enabled:        false,
+		Limits:         validProviderCommercialLimits(t, payment.TypeEasyPay, []string{"alipay"}),
 	})
 	require.NoError(t, err)
 
+	updatedLimits := validProviderCommercialLimits(t, payment.TypeEasyPay, []string{"alipay", "wxpay"})
 	_, err = svc.UpdateProviderInstance(ctx, instance.ID, UpdateProviderInstanceRequest{
 		Enabled:        boolPtrValue(true),
 		SupportedTypes: []string{"alipay", "wxpay"},
+		Limits:         &updatedLimits,
 	})
 	require.NoError(t, err)
 
@@ -570,6 +578,7 @@ func TestUpdateProviderInstanceRejectsProtectedConfigChangesWhilePendingOrders(t
 				Config:         tc.createConfig(t),
 				SupportedTypes: tc.supportedType,
 				Enabled:        true,
+				Limits:         validProviderCommercialLimits(t, tc.providerKey, tc.supportedType),
 			})
 			require.NoError(t, err)
 
@@ -641,6 +650,7 @@ func TestUpdateProviderInstanceAllowsSafeConfigChangesWhilePendingOrders(t *test
 				Config:         tc.createConfig(t),
 				SupportedTypes: tc.supportedType,
 				Enabled:        true,
+				Limits:         validProviderCommercialLimits(t, tc.providerKey, tc.supportedType),
 			})
 			require.NoError(t, err)
 
@@ -677,6 +687,7 @@ func TestUpdateProviderInstanceClearsAirwallexAccountID(t *testing.T) {
 		Config:         validAirwallexProviderConfig(t),
 		SupportedTypes: []string{payment.TypeAirwallex},
 		Enabled:        true,
+		Limits:         validProviderCommercialLimits(t, payment.TypeAirwallex, []string{payment.TypeAirwallex}),
 	})
 	require.NoError(t, err)
 
@@ -755,6 +766,23 @@ func validStripeProviderConfig(t *testing.T) map[string]string {
 
 func boolPtrValue(v bool) *bool {
 	return &v
+}
+
+func validProviderCommercialLimits(t *testing.T, providerKey string, supportedTypes []string) string {
+	t.Helper()
+
+	limits := payment.InstanceLimits{}
+	for _, paymentType := range providerCommercialPaymentTypes(providerKey, joinTypes(supportedTypes)) {
+		limits[paymentType] = payment.ChannelLimits{
+			BalanceMultiplier:      commercialFloat(1),
+			SubscriptionMultiplier: commercialFloat(1),
+			FeeRate:                commercialFloat(0),
+			FixedFee:               commercialFloat(0),
+		}
+	}
+	encoded, err := json.Marshal(limits)
+	require.NoError(t, err)
+	return string(encoded)
 }
 
 func validAlipayProviderConfig(t *testing.T) map[string]string {

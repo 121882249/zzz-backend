@@ -169,6 +169,14 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	body = parsedReq.Body.Bytes()
 	reqModel := parsedReq.Model
 	reqStream := parsedReq.Stream
+	if apiKey.IsGlobal() {
+		resolvedKey, resolveErr := resolveGlobalAPIKeyForModel(c, h.gatewayService, apiKey, subject.UserID, reqModel)
+		if resolveErr != nil {
+			respondGlobalKeyRoutingError(c, resolveErr, h.errorResponse)
+			return
+		}
+		apiKey = resolvedKey
+	}
 	bindRequestedReasoningEffort(c, body, reqModel)
 	ensureCompositeTargetPlatform(c, apiKey, reqModel)
 	if policyBody, changed, err := applyAnthropicReasoningEffortPolicyForRequest(c, apiKey, body); err != nil {
@@ -240,7 +248,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 
 	// 1. 首先获取用户并发槽位
-	userReleaseFunc, err := h.concurrencyHelper.AcquireUserSlotWithWait(c, subject.UserID, subject.Concurrency, reqStream, &streamStarted)
+	userReleaseFunc, err := h.concurrencyHelper.AcquireUserSlotWithWaitForAPIKey(c, apiKey, subject.UserID, subject.Concurrency, reqStream, &streamStarted)
 	if err != nil {
 		reqLog.Warn("gateway.user_slot_acquire_failed", zap.Error(err))
 		h.handleConcurrencyError(c, err, "user", streamStarted)
@@ -2081,7 +2089,7 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		return
 	}
 
-	_, ok = middleware2.GetAuthSubjectFromContext(c)
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
 	if !ok {
 		h.errorResponse(c, http.StatusInternalServerError, "api_error", "User context not found")
 		return
@@ -2122,6 +2130,16 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 	body = parsedReq.Body.Bytes()
 	// count_tokens 走 messages 严格校验时，复用已解析请求，避免二次反序列化。
 	SetClaudeCodeClientContext(c, body, parsedReq)
+	// Global keys resolve their group from the concrete model for this request;
+	// ordinary group keys retain the existing fixed-group behavior.
+	if parsedReq.Model != "" && apiKey.IsGlobal() {
+		resolvedKey, resolveErr := resolveGlobalAPIKeyForModel(c, h.gatewayService, apiKey, subject.UserID, parsedReq.Model)
+		if resolveErr != nil {
+			respondGlobalKeyRoutingError(c, resolveErr, h.errorResponse)
+			return
+		}
+		apiKey = resolvedKey
+	}
 	ensureCompositeTargetPlatform(c, apiKey, parsedReq.Model)
 	reqLog = reqLog.With(zap.String("model", parsedReq.Model), zap.Bool("stream", parsedReq.Stream))
 	// 在请求上下文中记录 thinking 状态，供 Antigravity 最终模型 key 推导/模型维度限流使用

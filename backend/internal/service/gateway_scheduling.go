@@ -6,6 +6,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	mathrand "math/rand"
@@ -19,6 +20,64 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 )
+
+// GlobalGroupResolution is the request-scoped routing context for a global key.
+// Subscription is populated only for subscription groups.
+type GlobalGroupResolution struct {
+	Group        *Group
+	Subscription *UserSubscription
+}
+
+// ResolveGlobalGroupForModelWithUserAndGroup resolves a global key while
+// honoring the required client-selected group. The group hint is never trusted:
+// the same user visibility, subscription, model allowlist and account
+// schedulability checks are applied before it becomes request-scoped.
+func (s *GatewayService) ResolveGlobalGroupForModelWithUserAndGroup(ctx context.Context, user *User, userID int64, sessionHash, requestedModel string, preferredGroupID *int64, excludedIDs map[int64]struct{}) (*GlobalGroupResolution, error) {
+	if s == nil || s.groupRepo == nil {
+		return nil, ErrNoAvailableAccounts
+	}
+	if preferredGroupID == nil || *preferredGroupID <= 0 {
+		return nil, ErrGlobalGroupRequired
+	}
+	group, err := s.groupRepo.GetByID(ctx, *preferredGroupID)
+	if err != nil {
+		if errors.Is(err, ErrGroupNotFound) {
+			return nil, ErrNoAvailableAccounts
+		}
+		return nil, err
+	}
+	if group == nil || !group.IsActive() {
+		return nil, ErrNoAvailableAccounts
+	}
+	// GroupModelAllowlist runs before a global key has a request-scoped
+	// group, so global routing must enforce the same admission rule here.
+	if group.ModelAllowlistEnabled() && !group.ModelAllowlist.Allows(requestedModel) {
+		return nil, ErrNoAvailableAccounts
+	}
+	var subscription *UserSubscription
+	if group.IsSubscriptionType() {
+		// Subscription groups are visible and bindable through an active
+		// subscription. Do not run the standard/exclusive AllowedGroups gate
+		// first: GetAvailableGroups intentionally uses the subscription as the
+		// grant, so doing so here made a listed group fail at request time.
+		if s.userSubRepo == nil {
+			return nil, ErrNoAvailableAccounts
+		}
+		var subErr error
+		subscription, subErr = s.userSubRepo.GetActiveByUserIDAndGroupID(ctx, userID, group.ID)
+		if subErr != nil || subscription == nil {
+			return nil, ErrNoAvailableAccounts
+		}
+	} else if user != nil && !user.CanBindGroup(group.ID, group.IsExclusive) {
+		return nil, ErrNoAvailableAccounts
+	}
+
+	groupID := group.ID
+	if _, selectErr := s.SelectAccountForModelWithExclusions(ctx, &groupID, sessionHash, requestedModel, excludedIDs); selectErr != nil {
+		return nil, ErrNoAvailableAccounts
+	}
+	return &GlobalGroupResolution{Group: group, Subscription: subscription}, nil
+}
 
 // SelectAccount 选择账号（粘性会话+优先级）
 func (s *GatewayService) SelectAccount(ctx context.Context, groupID *int64, sessionHash string) (*Account, error) {

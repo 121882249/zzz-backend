@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -11,13 +12,18 @@ import (
 )
 
 type paymentOrderProviderSnapshot struct {
-	SchemaVersion      int
-	ProviderInstanceID string
-	ProviderKey        string
-	PaymentMode        string
-	MerchantAppID      string
-	MerchantID         string
-	Currency           string
+	SchemaVersion             int
+	ProviderInstanceID        string
+	ProviderKey               string
+	PaymentMode               string
+	MerchantAppID             string
+	MerchantID                string
+	Currency                  string
+	GatewayBaseAmount         float64
+	FeeRate                   float64
+	FixedFee                  float64
+	FeeAmount                 float64
+	BalanceRechargeMultiplier float64
 }
 
 func psOrderProviderSnapshot(order *dbent.PaymentOrder) *paymentOrderProviderSnapshot {
@@ -26,13 +32,18 @@ func psOrderProviderSnapshot(order *dbent.PaymentOrder) *paymentOrderProviderSna
 	}
 
 	snapshot := &paymentOrderProviderSnapshot{
-		SchemaVersion:      psSnapshotIntValue(order.ProviderSnapshot["schema_version"]),
-		ProviderInstanceID: psSnapshotStringValue(order.ProviderSnapshot["provider_instance_id"]),
-		ProviderKey:        psSnapshotStringValue(order.ProviderSnapshot["provider_key"]),
-		PaymentMode:        psSnapshotStringValue(order.ProviderSnapshot["payment_mode"]),
-		MerchantAppID:      psSnapshotStringValue(order.ProviderSnapshot["merchant_app_id"]),
-		MerchantID:         psSnapshotStringValue(order.ProviderSnapshot["merchant_id"]),
-		Currency:           psSnapshotStringValue(order.ProviderSnapshot["currency"]),
+		SchemaVersion:             psSnapshotIntValue(order.ProviderSnapshot["schema_version"]),
+		ProviderInstanceID:        psSnapshotStringValue(order.ProviderSnapshot["provider_instance_id"]),
+		ProviderKey:               psSnapshotStringValue(order.ProviderSnapshot["provider_key"]),
+		PaymentMode:               psSnapshotStringValue(order.ProviderSnapshot["payment_mode"]),
+		MerchantAppID:             psSnapshotStringValue(order.ProviderSnapshot["merchant_app_id"]),
+		MerchantID:                psSnapshotStringValue(order.ProviderSnapshot["merchant_id"]),
+		Currency:                  psSnapshotStringValue(order.ProviderSnapshot["currency"]),
+		GatewayBaseAmount:         psSnapshotFloatValue(order.ProviderSnapshot["gateway_base_amount"]),
+		FeeRate:                   psSnapshotFloatValue(order.ProviderSnapshot["fee_rate"]),
+		FixedFee:                  psSnapshotFloatValue(order.ProviderSnapshot["fixed_fee"]),
+		FeeAmount:                 psSnapshotFloatValue(order.ProviderSnapshot["fee_amount"]),
+		BalanceRechargeMultiplier: psSnapshotFloatValue(order.ProviderSnapshot["balance_recharge_multiplier"]),
 	}
 	if snapshot.SchemaVersion == 0 &&
 		snapshot.ProviderInstanceID == "" &&
@@ -74,6 +85,74 @@ func psSnapshotIntValue(value any) int {
 		}
 	}
 	return 0
+}
+
+func psSnapshotFloatValue(value any) float64 {
+	switch typed := value.(type) {
+	case int:
+		return float64(typed)
+	case int32:
+		return float64(typed)
+	case int64:
+		return float64(typed)
+	case float32:
+		return float64(typed)
+	case float64:
+		return typed
+	case string:
+		n, err := strconv.ParseFloat(strings.TrimSpace(typed), 64)
+		if err == nil {
+			return n
+		}
+	}
+	return 0
+}
+
+// PaymentOrderPricingInfo is the immutable pricing snapshot stored with an
+// order. For legacy orders, the gateway base and fee are reconstructed from
+// the stored percentage rate.
+type PaymentOrderPricingInfo struct {
+	GatewayBaseAmount         float64
+	FeeRate                   float64
+	FixedFee                  float64
+	FeeAmount                 float64
+	BalanceRechargeMultiplier float64
+}
+
+func PaymentOrderPricing(order *dbent.PaymentOrder) PaymentOrderPricingInfo {
+	if order == nil {
+		return PaymentOrderPricingInfo{BalanceRechargeMultiplier: 1}
+	}
+	if snapshot := psOrderProviderSnapshot(order); snapshot != nil && snapshot.SchemaVersion >= 3 {
+		multiplier := snapshot.BalanceRechargeMultiplier
+		if multiplier <= 0 {
+			multiplier = 1
+		}
+		feeAmount := snapshot.FeeAmount
+		if feeAmount < 0 {
+			feeAmount = 0
+		}
+		return PaymentOrderPricingInfo{
+			GatewayBaseAmount:         snapshot.GatewayBaseAmount,
+			FeeRate:                   snapshot.FeeRate,
+			FixedFee:                  snapshot.FixedFee,
+			FeeAmount:                 feeAmount,
+			BalanceRechargeMultiplier: multiplier,
+		}
+	}
+
+	baseAmount := order.PayAmount
+	if order.FeeRate > 0 {
+		baseAmount = order.PayAmount / (1 + order.FeeRate/100)
+		fractionDigits := payment.CurrencyMaxFractionDigits(PaymentOrderCurrency(order))
+		baseAmount = math.Round(baseAmount*math.Pow10(fractionDigits)) / math.Pow10(fractionDigits)
+	}
+	return PaymentOrderPricingInfo{
+		GatewayBaseAmount:         baseAmount,
+		FeeRate:                   order.FeeRate,
+		FeeAmount:                 math.Max(0, order.PayAmount-baseAmount),
+		BalanceRechargeMultiplier: 1,
+	}
 }
 
 func (s *PaymentService) resolveSnapshotOrderProviderInstance(ctx context.Context, order *dbent.PaymentOrder, snapshot *paymentOrderProviderSnapshot) (*dbent.PaymentProviderInstance, error) {

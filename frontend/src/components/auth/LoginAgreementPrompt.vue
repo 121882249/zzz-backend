@@ -57,6 +57,25 @@
     </div>
   </div>
 
+  <div
+    v-else-if="documents.length > 0"
+    data-testid="login-agreement-links"
+    class="px-0.5 text-center text-xs leading-5 text-gray-500 dark:text-dark-400"
+  >
+    <span>{{ t('legal.loginAgreementPrompt.documentLinksLabel') }}</span>
+    <template v-for="(doc, index) in documents" :key="doc.id || doc.title">
+      <RouterLink
+        :to="documentRoute(doc)"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="font-medium text-primary-600 underline-offset-4 transition hover:text-primary-700 hover:underline dark:text-primary-300 dark:hover:text-primary-200"
+      >
+        {{ doc.title }}
+      </RouterLink>
+      <span v-if="index < documents.length - 1">{{ t('legal.loginAgreementPrompt.documentSeparator') }}</span>
+    </template>
+  </div>
+
   <Teleport to="body">
     <Transition name="agreement-fade">
       <div

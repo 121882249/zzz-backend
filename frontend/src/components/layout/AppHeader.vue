@@ -5,10 +5,11 @@
       <div class="flex shrink-0 items-center gap-2 sm:gap-4">
         <button
           @click="toggleMobileSidebar"
-          class="btn-ghost btn-icon lg:hidden"
+          class="btn-ghost inline-flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-sm font-medium lg:hidden"
           :aria-label="t('common.toggleMenu')"
         >
           <Icon name="menu" size="md" />
+          <span>{{ t('common.menu') }}</span>
         </button>
 
         <div class="hidden lg:block">
@@ -21,10 +22,22 @@
         </div>
       </div>
 
-      <!-- Right: Announcements + Docs + Language + Subscriptions + Balance + User Dropdown -->
+      <!-- Right: Announcements + Downloads + Docs + Language + Subscriptions + Balance + User Dropdown -->
       <div class="flex min-w-0 items-center gap-1 sm:gap-3">
         <!-- Announcement Bell -->
         <AnnouncementBell v-if="user" />
+
+        <!-- Desktop Downloads -->
+        <router-link
+          to="/home"
+          class="download-app-cta group hidden sm:flex"
+        >
+          <span class="download-app-cta__icon" aria-hidden="true">
+            <Icon name="download" size="sm" />
+          </span>
+          <span>{{ t('nav.downloadApp') }}</span>
+          <span class="download-app-cta__pulse" aria-hidden="true"></span>
+        </router-link>
 
         <!-- Docs Link -->
         <a
@@ -108,18 +121,15 @@
             class="flex items-center gap-2 rounded-xl p-1.5 transition-colors hover:bg-gray-100 dark:hover:bg-dark-800"
             :aria-label="t('common.userMenu')"
           >
-            <div class="flex h-8 w-8 items-center justify-center overflow-hidden rounded-xl bg-gradient-to-br from-primary-500 to-primary-600 text-sm font-medium text-white shadow-sm">
-              <img
-                v-if="avatarUrl"
-                :src="avatarUrl"
-                :alt="displayName"
-                class="h-full w-full object-cover"
-              >
-              <span v-else>{{ userInitials }}</span>
+            <div class="flex h-8 w-8 items-center justify-center text-gray-900 dark:text-white">
+              <Icon name="userCircle" size="lg" :stroke-width="2" />
             </div>
             <div class="hidden text-left md:block">
-              <div class="text-sm font-medium text-gray-900 dark:text-white">
-                {{ displayName }}
+              <div
+                class="max-w-48 truncate text-sm font-medium text-gray-900 dark:text-white"
+                :title="user.email"
+              >
+                {{ user.email }}
               </div>
               <div class="text-xs text-gray-500 dark:text-dark-400">
                 {{ t('admin.users.roles.' + user.role) }}
@@ -278,7 +288,6 @@ const dropdownRef = ref<HTMLElement | null>(null)
 const contactInfo = computed(() => appStore.contactInfo)
 const docUrl = computed(() => sanitizeUrl(appStore.docUrl))
 const modelPlazaEnabled = computed(() => isFeatureFlagEnabled(FeatureFlags.modelPlaza))
-const avatarUrl = computed(() => user.value?.avatar_url?.trim() || '')
 const availableBalance = computed(() => Number(user.value?.balance || 0))
 const frozenBalance = computed(() => Number(user.value?.frozen_balance || 0))
 const totalBalance = computed(() => availableBalance.value + frozenBalance.value)
@@ -290,20 +299,6 @@ const balanceFrozenLabel = computed(() => `${balanceFrozenText.value} ${formatHe
 // 只在标准模式的管理员下显示新手引导按钮
 const showOnboardingButton = computed(() => {
   return !authStore.isSimpleMode && user.value?.role === 'admin'
-})
-
-const userInitials = computed(() => {
-  if (!user.value) return ''
-  // Prefer username, fallback to email
-  if (user.value.username) {
-    return user.value.username.substring(0, 2).toUpperCase()
-  }
-  if (user.value.email) {
-    // Get the part before @ and take first 2 chars
-    const localPart = user.value.email.split('@')[0]
-    return localPart.substring(0, 2).toUpperCase()
-  }
-  return ''
 })
 
 const displayName = computed(() => {
@@ -392,6 +387,106 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.download-app-cta {
+  position: relative;
+  min-height: 40px;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  padding: 5px 12px 5px 6px;
+  border: 1px solid rgba(151, 169, 255, 0.65);
+  border-radius: 12px;
+  color: #fff;
+  background:
+    linear-gradient(110deg, rgba(1, 10, 42, 0.2), rgba(20, 56, 180, 0.12)),
+    url('/brand/orbital-gateway-bg.webp') 64% 30% / 330px auto;
+  box-shadow:
+    0 5px 16px rgba(67, 92, 225, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    color 180ms ease,
+    transform 180ms ease;
+}
+
+.download-app-cta:hover {
+  border-color: rgba(90, 117, 255, 0.78);
+  color: #fff;
+  box-shadow:
+    0 8px 24px rgba(78, 77, 230, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.24);
+  transform: translateY(-1px);
+}
+
+.download-app-cta__icon {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 8px;
+  color: #fff;
+  background: rgba(13, 24, 57, 0.22);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.download-app-cta__pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #55e7ff;
+  box-shadow:
+    0 0 0 4px rgba(85, 231, 255, 0.12),
+    0 0 10px rgba(85, 231, 255, 0.7);
+  animation: download-pulse 1.8s ease-in-out infinite;
+}
+
+:global(.dark) .download-app-cta {
+  border-color: rgba(97, 168, 255, 0.42);
+  color: #fff;
+  background:
+    linear-gradient(110deg, rgba(1, 8, 35, 0.32), rgba(17, 39, 135, 0.18)),
+    url('/brand/orbital-gateway-bg.webp') 64% 30% / 330px auto;
+  box-shadow:
+    0 7px 22px rgba(46, 101, 255, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.download-app-cta:focus-visible {
+  outline: 2px solid #3988ff;
+  outline-offset: 3px;
+}
+
+:global(.dark) .download-app-cta:hover {
+  border-color: rgba(100, 220, 255, 0.68);
+  color: #fff;
+  box-shadow: 0 9px 28px rgba(72, 84, 255, 0.3);
+}
+
+@keyframes download-pulse {
+  0%,
+  100% {
+    opacity: 0.7;
+    transform: scale(0.86);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .download-app-cta,
+  .download-app-cta__pulse {
+    animation: none;
+    transition: none;
+  }
+}
+
 .dropdown-enter-active,
 .dropdown-leave-active {
   transition: all 0.2s ease;

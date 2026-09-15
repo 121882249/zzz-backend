@@ -28,6 +28,7 @@ type fakePromptEngine struct {
 	err       error
 	enqueues  atomic.Int64
 	evaluates atomic.Int64
+	monitors  atomic.Int64
 }
 
 func (f *fakePromptEngine) EffectiveMode() Mode { return f.mode }
@@ -38,6 +39,10 @@ func (f *fakePromptEngine) Enqueue(context.Context, Request) error {
 func (f *fakePromptEngine) Evaluate(context.Context, Request) (*PromptDecision, error) {
 	f.evaluates.Add(1)
 	return f.decision, f.err
+}
+func (f *fakePromptEngine) Monitor(context.Context, Request) error {
+	f.monitors.Add(1)
+	return nil
 }
 
 func TestCoordinatorModesAndPriority(t *testing.T) {
@@ -81,6 +86,7 @@ func TestCoordinatorDoesNotMutateRequestBody(t *testing.T) {
 	decision := NewCoordinator(&fakeLegacyEngine{}, prompt).Check(context.Background(), Request{Body: body})
 	require.True(t, decision.AllowNextStage)
 	require.Equal(t, original, body)
+	require.Equal(t, int64(1), prompt.monitors.Load())
 }
 
 func TestCoordinatorBlockingPriorityCoversBothEngineDecisionMatrix(t *testing.T) {

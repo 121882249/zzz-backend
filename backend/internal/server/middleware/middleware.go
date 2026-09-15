@@ -143,7 +143,10 @@ func OpenAIErrorWriter(c *gin.Context, status int, message string) {
 func RequireGroupAssignment(settingService *service.SettingService, writeError GatewayErrorWriter) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		apiKey, ok := GetAPIKeyFromContext(c)
-		if !ok || apiKey.GroupID != nil {
+		// A global key is intentionally unbound. Its group is resolved per
+		// request from the requested model, so the legacy ungrouped-key gate
+		// must not reject it before gateway routing runs.
+		if !ok || apiKey.IsGlobal() || apiKey.GroupID != nil {
 			c.Next()
 			return
 		}

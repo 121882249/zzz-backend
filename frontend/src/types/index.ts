@@ -104,6 +104,7 @@ export interface User {
 export interface AdminUser extends User {
   // 管理员备注（普通用户接口不返回）
   notes: string
+  created_ip: string
   last_used_at?: string | null
   // 用户专属分组倍率配置 (group_id -> rate_multiplier)
   group_rates?: Record<number, number>
@@ -731,6 +732,7 @@ export interface ApiKey {
   user_id: number
   key: string
   name: string
+  key_type: 'group' | 'global'
   group_id: number | null
   status: 'active' | 'inactive' | 'quota_exhausted' | 'expired'
   ip_whitelist: string[]

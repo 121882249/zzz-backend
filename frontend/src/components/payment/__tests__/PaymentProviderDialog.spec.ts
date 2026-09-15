@@ -7,6 +7,10 @@ import type { ProviderInstance } from '@/types/payment'
 
 const messages: Record<string, string> = {
   'admin.settings.payment.providerConfig': 'Credentials',
+	'admin.settings.payment.productNamePrefix': 'Product Name Prefix',
+	'admin.settings.payment.productNameSuffixAuto': 'Product suffix (automatic)',
+	'admin.settings.payment.productNameCurrencyHint': 'Uses provider currency.',
+	'admin.settings.payment.preview': 'Preview',
   'admin.settings.payment.easypayCustomMethods': 'Custom EasyPay methods',
   'admin.settings.payment.easypayCustomMethodsHint': 'Add provider-specific EasyPay type values.',
   'admin.settings.payment.addCustomMethod': 'Add method',
@@ -249,5 +253,58 @@ describe('PaymentProviderDialog payment guide', () => {
     await wrapper.find('form').trigger('submit.prevent')
 
     expect(wrapper.emitted('save')).toBeUndefined()
+  })
+
+  it('round-trips independent Stripe multiplier, percentage fee, and fixed fee', async () => {
+	const provider = providerFactory({
+	  provider_key: 'stripe',
+	  name: 'Stripe HKD',
+	  config: { currency: 'HKD', publishableKey: 'pk_test_123' },
+	  supported_types: ['card'],
+	  limits: '{"stripe":{"balanceMultiplier":8.5,"subscriptionMultiplier":7.8,"feeRate":3.4,"fixedFee":2}}',
+	})
+	const wrapper = mountDialog({ editing: provider })
+
+	;(wrapper.vm as unknown as { loadProvider: (provider: ProviderInstance) => void }).loadProvider(provider)
+	await nextTick()
+	await wrapper.find('form').trigger('submit.prevent')
+
+	const payload = wrapper.emitted('save')?.[0]?.[0] as { limits: string }
+	expect(JSON.parse(payload.limits)).toEqual({
+	  stripe: {
+		singleMin: 0,
+		singleMax: 0,
+		dailyLimit: 0,
+		balanceMultiplier: 8.5,
+		subscriptionMultiplier: 7.8,
+		feeRate: 3.4,
+		fixedFee: 2,
+	  },
+	})
+  })
+
+  it('stores the provider product prefix and derives the suffix from its currency', async () => {
+	const provider = providerFactory({
+	  provider_key: 'stripe',
+	  name: 'Stripe HKD',
+	  config: {
+		currency: 'HKD',
+		publishableKey: 'pk_test_123',
+		productNamePrefix: 'Tokenpro',
+	  },
+	  supported_types: ['card'],
+	})
+	const wrapper = mountDialog({ editing: provider })
+
+	;(wrapper.vm as unknown as { loadProvider: (provider: ProviderInstance) => void }).loadProvider(provider)
+	await nextTick()
+
+	expect((wrapper.get('[data-testid="provider-product-name-prefix"]').element as HTMLInputElement).value).toBe('Tokenpro')
+	expect((wrapper.get('[data-testid="provider-product-name-suffix"]').element as HTMLInputElement).value).toBe('HKD')
+	expect(wrapper.get('[data-testid="provider-product-name-preview"]').text()).toBe('Tokenpro 100 HKD')
+
+	await wrapper.find('form').trigger('submit.prevent')
+	const payload = wrapper.emitted('save')?.[0]?.[0] as { config: Record<string, string> }
+	expect(payload.config.productNamePrefix).toBe('Tokenpro')
   })
 })

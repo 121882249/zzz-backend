@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, shallowMount } from '@vue/test-utils'
 import PaymentView from '../PaymentView.vue'
 import { PAYMENT_RECOVERY_STORAGE_KEY } from '@/components/payment/paymentFlow'
-import { formatPaymentAmount } from '@/components/payment/currency'
+import { formatPaymentAmount, formatPaymentAmountCode } from '@/components/payment/currency'
 import AmountInput from '@/components/payment/AmountInput.vue'
 import SubscriptionPlanCard from '@/components/payment/SubscriptionPlanCard.vue'
 import en from '@/i18n/locales/en'
@@ -374,6 +374,50 @@ describe('PaymentView subscription plan grid', () => {
   })
 })
 
+describe('PaymentView per-method recharge pricing', () => {
+  it('uses the selected method multiplier, percentage fee, and fixed fee', async () => {
+	vi.useRealTimers()
+	routeState.path = '/purchase'
+	routeState.query = {}
+	getCheckoutInfo.mockReset().mockResolvedValue(checkoutInfoFixture({
+	  methods: {
+		wxpay: {
+		  ...checkoutInfoFixture().data.methods.wxpay,
+		  currency: 'HKD',
+		  balance_recharge_multiplier: 8.5,
+		  fee_rate: 3.4,
+		  fixed_fee: 2,
+		},
+	  },
+	  balance_recharge_multiplier: 10,
+	  recharge_fee_rate: 1,
+	}))
+	const wrapper = shallowMount(PaymentView, {
+	  global: {
+		stubs: {
+		  AppLayout: { template: '<div><slot /></div>' },
+		  Teleport: true,
+		  Transition: false,
+		},
+	  },
+	})
+	await flushPromises()
+
+	const amountInput = wrapper.findComponent({ name: 'AmountInput' })
+	expect(amountInput.props('amounts')).toEqual([10, 50, 100])
+	expect(amountInput.props('currency')).toBe('HKD')
+	amountInput.vm.$emit('update:modelValue', 10)
+	await wrapper.vm.$nextTick()
+
+	const text = wrapper.text()
+	expect(text).toContain(formatPaymentAmount(10, 'HKD'))
+	expect(text).toContain(formatPaymentAmount(0.34, 'HKD'))
+	expect(text).toContain(formatPaymentAmount(2, 'HKD'))
+	expect(text).toContain(formatPaymentAmount(12.34, 'HKD'))
+	expect(text).toContain('$85.00')
+  })
+})
+
 describe('PaymentView recharge rate preview', () => {
   it('uses the selected payment method currency in both locale templates', async () => {
     translate.mockClear()
@@ -385,6 +429,7 @@ describe('PaymentView recharge rate preview', () => {
         stripe: {
           ...checkoutInfoFixture().data.methods.wxpay,
           currency: 'USD',
+          balance_recharge_multiplier: 0.5,
         },
       },
     }))
@@ -404,10 +449,10 @@ describe('PaymentView recharge rate preview', () => {
 
     expect(translate).toHaveBeenCalledWith('payment.rechargeRatePreview', {
       currency: 'USD',
-      usd: '0.50',
+      balance: '0.50',
     })
-    expect(en.payment.rechargeRatePreview).toBe('Current rate: 1 {currency} = {usd} USD')
-    expect(zh.payment.rechargeRatePreview).toBe('当前倍率：1 {currency} = {usd} USD')
+    expect(en.payment.rechargeRatePreview).toBe('Current rate: 1 {currency} = {balance} USD balance')
+    expect(zh.payment.rechargeRatePreview).toBe('当前倍率：1 {currency} = {balance} USD 余额')
   })
 })
 
@@ -420,6 +465,7 @@ describe('PaymentView subscription confirmation amounts', () => {
       },
       method: {
         currency: 'CNY',
+		subscription_multiplier: 7.15,
       },
       plan: {
         price: 9.99,
@@ -436,11 +482,10 @@ describe('PaymentView subscription confirmation amounts', () => {
     expect(text).not.toContain(formatPaymentAmount(9.99, 'CNY'))
     // 换算必须使用订阅汇率（×7.15），而不是余额倍率（÷0.14 = 71.36）
     expect(text).not.toContain(formatPaymentAmount(71.36, 'CNY'))
-    expect(wrapper.findAll('button').some(button => button.text().includes(convertedPrice))).toBe(true)
+    expect(wrapper.findAll('button').some(button => button.text().includes(formatPaymentAmountCode(71.43, 'CNY')))).toBe(true)
   })
 
-  it('keeps plan price when the subscription rate is not configured or payment currency is not CNY', async () => {
-    // opt-in 回归锁：即使余额倍率已配置，未配置订阅汇率时 CNY 订阅仍按 price 直付
+  it('keeps plan price when the provider subscription multiplier is 1', async () => {
     const cnyWrapper = await mountSubscriptionConfirm({
       checkout: {
         balance_recharge_multiplier: 0.14,
@@ -448,6 +493,7 @@ describe('PaymentView subscription confirmation amounts', () => {
       },
       method: {
         currency: 'CNY',
+		subscription_multiplier: 1,
       },
       plan: {
         price: 7.99,
@@ -464,6 +510,7 @@ describe('PaymentView subscription confirmation amounts', () => {
       },
       method: {
         currency: 'USD',
+		subscription_multiplier: 1,
       },
       plan: {
         price: 7.99,
@@ -483,6 +530,8 @@ describe('PaymentView subscription confirmation amounts', () => {
       },
       method: {
         currency: 'CNY',
+		subscription_multiplier: 7.15,
+		fee_rate: 2.5,
       },
       plan: {
         price: 9.99,
@@ -497,7 +546,7 @@ describe('PaymentView subscription confirmation amounts', () => {
     expect(text).toContain(convertedPrice)
     expect(text).toContain(fee)
     expect(text).toContain(total)
-    expect(wrapper.findAll('button').some(button => button.text().includes(total))).toBe(true)
+    expect(wrapper.findAll('button').some(button => button.text().includes(formatPaymentAmountCode(73.22, 'CNY')))).toBe(true)
   })
 })
 

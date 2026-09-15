@@ -27,11 +27,28 @@ func (h *OpenAIGatewayHandler) GrokRealtime(c *gin.Context) {
 		return
 	}
 	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
-	if !ok || apiKey.Group == nil || apiKey.Group.Platform != service.PlatformGrok {
+	if !ok || (!apiKey.IsGlobal() && (apiKey.Group == nil || apiKey.Group.Platform != service.PlatformGrok)) {
 		h.errorResponse(c, http.StatusNotFound, "not_found_error", "Realtime API is not supported for this platform")
 		return
 	}
 	if !h.ensureResponsesDependencies(c, nil) {
+		return
+	}
+	reqLog := requestLogger(c, "handler.openai_gateway.grok_realtime")
+	model := c.Query("model")
+	if strings.TrimSpace(model) == "" {
+		model = "grok-voice-latest"
+	}
+	if apiKey.IsGlobal() {
+		resolvedKey, resolveErr := resolveGlobalAPIKeyForModel(c, h.globalGroupResolver, apiKey, apiKey.UserID, model)
+		if resolveErr != nil {
+			h.errorResponse(c, http.StatusServiceUnavailable, "no_available_group", "当前模型没有可用分组或有效订阅。")
+			return
+		}
+		apiKey = resolvedKey
+	}
+	if apiKey.Group == nil || apiKey.Group.Platform != service.PlatformGrok {
+		h.errorResponse(c, http.StatusNotFound, "not_found_error", "Realtime API is not supported for this platform")
 		return
 	}
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
@@ -42,12 +59,6 @@ func (h *OpenAIGatewayHandler) GrokRealtime(c *gin.Context) {
 		}
 		h.errorResponse(c, status, code, message)
 		return
-	}
-
-	reqLog := requestLogger(c, "handler.openai_gateway.grok_realtime")
-	model := c.Query("model")
-	if strings.TrimSpace(model) == "" {
-		model = "grok-voice-latest"
 	}
 	// Keep the HTTP response uncommitted while selecting and probing an account.
 	// Realtime is not an HTTP streaming response; using reqStream=true here would
@@ -172,11 +183,23 @@ func isExpectedGrokRealtimeClose(err error) bool {
 // GrokVoice handles xAI Voice HTTP endpoints. endpoint is "tts", "stt", or "custom-voices".
 func (h *OpenAIGatewayHandler) GrokVoice(c *gin.Context, endpoint string) {
 	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
-	if !ok || apiKey.Group == nil || apiKey.Group.Platform != service.PlatformGrok {
+	if !ok || (!apiKey.IsGlobal() && (apiKey.Group == nil || apiKey.Group.Platform != service.PlatformGrok)) {
 		h.errorResponse(c, http.StatusNotFound, "not_found_error", "Voice API is not supported for this platform")
 		return
 	}
 	if !h.ensureResponsesDependencies(c, nil) {
+		return
+	}
+	if apiKey.IsGlobal() {
+		resolvedKey, resolveErr := resolveGlobalAPIKeyForModel(c, h.globalGroupResolver, apiKey, apiKey.UserID, "grok-4.5")
+		if resolveErr != nil {
+			h.errorResponse(c, http.StatusServiceUnavailable, "no_available_group", "当前模型没有可用分组或有效订阅。")
+			return
+		}
+		apiKey = resolvedKey
+	}
+	if apiKey.Group == nil || apiKey.Group.Platform != service.PlatformGrok {
+		h.errorResponse(c, http.StatusNotFound, "not_found_error", "Voice API is not supported for this platform")
 		return
 	}
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)

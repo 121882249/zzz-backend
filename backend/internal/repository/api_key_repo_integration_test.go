@@ -224,8 +224,8 @@ func (s *APIKeyRepoSuite) TestListByUserID() {
 
 	keys, page, err := s.repo.ListByUserID(s.ctx, user.ID, pagination.PaginationParams{Page: 1, PageSize: 10}, service.APIKeyListFilters{})
 	s.Require().NoError(err, "ListByUserID")
-	s.Require().Len(keys, 2)
-	s.Require().Equal(int64(2), page.Total)
+	s.Require().Len(keys, 3)
+	s.Require().Equal(int64(3), page.Total)
 }
 
 func (s *APIKeyRepoSuite) TestListByUserID_Pagination() {
@@ -237,7 +237,7 @@ func (s *APIKeyRepoSuite) TestListByUserID_Pagination() {
 	keys, page, err := s.repo.ListByUserID(s.ctx, user.ID, pagination.PaginationParams{Page: 1, PageSize: 2}, service.APIKeyListFilters{})
 	s.Require().NoError(err)
 	s.Require().Len(keys, 2)
-	s.Require().Equal(int64(5), page.Total)
+	s.Require().Equal(int64(6), page.Total)
 	s.Require().Equal(3, page.Pages)
 }
 
@@ -248,7 +248,7 @@ func (s *APIKeyRepoSuite) TestCountByUserID() {
 
 	count, err := s.repo.CountByUserID(s.ctx, user.ID)
 	s.Require().NoError(err, "CountByUserID")
-	s.Require().Equal(int64(2), count)
+	s.Require().Equal(int64(3), count)
 }
 
 // --- ListByGroupID / CountByGroupID ---
@@ -314,7 +314,7 @@ func (s *APIKeyRepoSuite) TestSearchAPIKeys_NoKeyword() {
 
 	found, err := s.repo.SearchAPIKeys(s.ctx, user.ID, "", 10)
 	s.Require().NoError(err)
-	s.Require().Len(found, 2)
+	s.Require().Len(found, 3)
 }
 
 func (s *APIKeyRepoSuite) TestSearchAPIKeys_NoUserID() {
@@ -380,8 +380,8 @@ func (s *APIKeyRepoSuite) TestCRUD_Search_ClearGroupID() {
 
 	keys, page, err := s.repo.ListByUserID(s.ctx, user.ID, pagination.PaginationParams{Page: 1, PageSize: 10}, service.APIKeyListFilters{})
 	s.Require().NoError(err, "ListByUserID")
-	s.Require().Equal(int64(1), page.Total)
-	s.Require().Len(keys, 1)
+	s.Require().Equal(int64(2), page.Total)
+	s.Require().Len(keys, 2)
 
 	exists, err := s.repo.ExistsByKey(s.ctx, "sk-test-1")
 	s.Require().NoError(err, "ExistsByKey")

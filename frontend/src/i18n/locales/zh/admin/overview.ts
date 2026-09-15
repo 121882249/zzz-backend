@@ -525,6 +525,7 @@ export default {
         lastActive: '最后活跃时间',
         lastUsed: '最后使用时间',
         created: '创建时间',
+        createdIp: '注册IP',
         actions: '操作'
       },
       today: '今日',

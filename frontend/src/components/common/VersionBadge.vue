@@ -12,7 +12,7 @@
         ]"
         :title="hasUpdate ? t('version.updateAvailable') : t('version.upToDate')"
       >
-        <span v-if="currentVersion" class="font-medium">v{{ currentVersion }}</span>
+        <span v-if="currentVersion" class="font-medium">{{ displayVersion(currentVersion) }}</span>
         <span
           v-else
           class="h-3 w-12 animate-pulse rounded bg-gray-200 font-medium dark:bg-dark-600"
@@ -84,7 +84,7 @@
                   <span
                     v-if="currentVersion"
                     class="text-2xl font-bold text-gray-900 dark:text-white"
-                    >v{{ currentVersion }}</span
+                    >{{ displayVersion(currentVersion) }}</span
                   >
                   <span v-else class="text-2xl font-bold text-gray-400 dark:text-dark-500">--</span>
                   <!-- Show check mark when up to date -->
@@ -654,6 +654,7 @@ import Icon from '@/components/icons/Icon.vue'
 const GITHUB_REPO = 'Wei-Shaw/sub2api'
 // Docker Hub image published by CI (tags carry no "v" prefix, e.g. weishaw/sub2api:0.1.146)
 const DOCKER_IMAGE = 'weishaw/sub2api'
+const VERSION_POLL_INTERVAL_MS = 60 * 1000
 
 const { t } = useI18n()
 
@@ -668,12 +669,17 @@ const isAdmin = computed(() => authStore.isAdmin)
 
 const dropdownOpen = ref(false)
 const dropdownRef = ref<HTMLElement | null>(null)
+let versionPollTimer: ReturnType<typeof setInterval> | null = null
 
 // Use store's cached version state
 const loading = computed(() => appStore.versionLoading)
 const currentVersion = computed(() => appStore.currentVersion || props.version || '')
 const latestVersion = computed(() => appStore.latestVersion)
 const hasUpdate = computed(() => appStore.hasUpdate)
+
+function displayVersion(version: string): string {
+  return version.startsWith('TokenPro-') ? version : `v${version}`
+}
 const releaseInfo = computed(() => appStore.releaseInfo)
 const buildType = computed(() => appStore.buildType)
 
@@ -911,13 +917,21 @@ function handleClickOutside(event: MouseEvent) {
 
 onMounted(() => {
   if (isAdmin.value) {
-    // Use cached version if available, otherwise fetch
+    // Poll cheaply in the browser; the store only contacts the server after
+    // its 10-minute cache expires, so releases that happen in an open session
+    // still produce a notification without hammering the update endpoint.
     appStore.fetchVersion(false)
+    versionPollTimer = setInterval(() => {
+      if (document.visibilityState === 'visible' && isAdmin.value) {
+        appStore.fetchVersion(false)
+      }
+    }, VERSION_POLL_INTERVAL_MS)
   }
   document.addEventListener('click', handleClickOutside)
 })
 
 onBeforeUnmount(() => {
+  if (versionPollTimer) clearInterval(versionPollTimer)
   document.removeEventListener('click', handleClickOutside)
 })
 </script>

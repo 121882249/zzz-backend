@@ -68,6 +68,17 @@ func (h *GatewayHandler) WebSearch(c *gin.Context) {
 		}})
 		return
 	}
+	if apiKey.IsGlobal() {
+		resolvedKey, resolveErr := resolveGlobalAPIKeyForModel(c, h.gatewayService, apiKey, apiKey.UserID, searchModel)
+		if resolveErr != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{
+				"type":    "no_available_group",
+				"message": "当前模型没有可用分组或有效订阅。",
+			}})
+			return
+		}
+		apiKey = resolvedKey
+	}
 
 	if apiKey.Group == nil || apiKey.Group.Platform != "grok" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{

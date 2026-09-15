@@ -14,6 +14,14 @@ const (
 	StatusAPIKeyExpired        = "expired"
 )
 
+// API key scope identifies how a key is routed. Group keys retain the
+// legacy fixed-group behavior; global keys identify the user and are resolved
+// against the requested model for each request.
+const (
+	APIKeyTypeGroup  = "group"
+	APIKeyTypeGlobal = "global"
+)
+
 // Rate limit window durations
 const (
 	RateLimitWindow5h = 5 * time.Hour
@@ -32,6 +40,7 @@ type APIKey struct {
 	UserID      int64
 	Key         string
 	Name        string
+	KeyType     string
 	GroupID     *int64
 	Status      string
 	IPWhitelist []string
@@ -62,6 +71,20 @@ type APIKey struct {
 	Window5hStart *time.Time // Start of current 5h window
 	Window1dStart *time.Time // Start of current 1d window
 	Window7dStart *time.Time // Start of current 7d window
+}
+
+// IsGlobal reports whether this key is the system-provided user-scoped key.
+// Routing must use the explicit key type; name and group_id are intentionally
+// ignored so a user-created key named "TokenPro" remains group-scoped.
+func (k *APIKey) IsGlobal() bool {
+	return k != nil && k.KeyType == APIKeyTypeGlobal
+}
+
+// IsGroupScoped reports whether this key retains the legacy fixed-group route.
+// Empty/unknown values are treated as group for backwards compatibility with
+// records created before key_type was introduced.
+func (k *APIKey) IsGroupScoped() bool {
+	return k == nil || k.KeyType == "" || k.KeyType == APIKeyTypeGroup
 }
 
 func (k *APIKey) IsActive() bool {

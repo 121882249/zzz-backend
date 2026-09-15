@@ -44,6 +44,7 @@ type AdminUser struct {
 	User
 
 	Notes      string     `json:"notes"`
+	CreatedIP  string     `json:"created_ip"`
 	LastUsedAt *time.Time `json:"last_used_at"`
 	// GroupRates 用户专属分组倍率配置
 	// map[groupID]rateMultiplier
@@ -58,6 +59,7 @@ type APIKey struct {
 	UserID      int64      `json:"user_id"`
 	Key         string     `json:"key"`
 	Name        string     `json:"name"`
+	KeyType     string     `json:"key_type"`
 	GroupID     *int64     `json:"group_id"`
 	Status      string     `json:"status"`
 	IPWhitelist []string   `json:"ip_whitelist"`

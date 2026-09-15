@@ -13,6 +13,7 @@ const {
   getDashboardApiKeysUsage,
   getAvailableGroups,
   getUserGroupRates,
+  regenerateKey,
   showError,
   showSuccess,
   copyToClipboard,
@@ -25,6 +26,7 @@ const {
   getDashboardApiKeysUsage: vi.fn(),
   getAvailableGroups: vi.fn(),
   getUserGroupRates: vi.fn(),
+  regenerateKey: vi.fn(),
   showError: vi.fn(),
   showSuccess: vi.fn(),
   copyToClipboard: vi.fn(),
@@ -34,6 +36,7 @@ const {
 
 const messages: Record<string, string> = {
   'common.actions': 'Actions',
+  'common.delete': 'Delete',
   'common.name': 'Name',
   'common.refresh': 'Refresh',
   'common.status': 'Status',
@@ -45,11 +48,16 @@ const messages: Record<string, string> = {
   'keys.created': 'Created',
   'keys.expiresAt': 'Expires',
   'keys.group': 'Group',
+  'keys.globalManagedBadge': 'TokenPro automation only',
+  'keys.globalManagedKey': 'Managed automatically by TokenPro',
+  'keys.globalManagedKeyHint':
+    'Do not copy, configure, or use it for direct API calls. Use “Reset Key” for maintenance.',
   'keys.id': 'ID',
   'keys.currentConcurrency': 'Current Concurrency',
   'keys.lastUsedAt': 'Last Used',
   'keys.lastUsedIP': 'Last Used IP',
   'keys.rateLimitColumn': 'Rate Limit',
+  'keys.regenerateKey': 'Reset Key',
   'keys.searchPlaceholder': 'Search name or key...',
   'keys.status.active': 'Active',
   'keys.status.expired': 'Expired',
@@ -63,6 +71,7 @@ vi.mock('@/api', () => ({
     list: listKeys,
     create: vi.fn(),
     update: updateKey,
+    regenerate: regenerateKey,
     delete: vi.fn(),
     toggleStatus: vi.fn(),
   },
@@ -113,6 +122,7 @@ const createApiKey = (): ApiKey => ({
   user_id: 1,
   key: 'sk-test-key',
   name: 'test-key',
+  key_type: 'group',
   group_id: null,
   status: 'active',
   ip_whitelist: [],
@@ -173,9 +183,14 @@ const DataTableStub = {
           <slot name="cell-id" :value="row.id" :row="row" />
         </div>
         <slot name="cell-name" :value="row.name" :row="row" />
-        <slot name="cell-actions" :row="row" />
+        <div data-test="key-value">
+          <slot name="cell-key" :value="row.key" :row="row" />
+        </div>
         <div data-test="current-concurrency">
           <slot name="cell-current_concurrency" :value="row.current_concurrency" :row="row" />
+        </div>
+        <div data-test="key-actions">
+          <slot name="cell-actions" :row="row" />
         </div>
         <div
           v-if="columns.some((col) => col.key === 'last_used_ip')"
@@ -276,6 +291,7 @@ describe('user KeysView column settings', () => {
     getDashboardApiKeysUsage.mockReset()
     getAvailableGroups.mockReset()
     getUserGroupRates.mockReset()
+    regenerateKey.mockReset()
     showError.mockReset()
     showSuccess.mockReset()
     copyToClipboard.mockReset()
@@ -509,6 +525,45 @@ describe('user KeysView column settings', () => {
       (column) => column.key === 'current_concurrency'
     )
     expect(currentConcurrencyColumn?.sortable).toBe(true)
+  })
+
+  it('shows reset instead of delete for the global TokenPro key', async () => {
+    listKeys.mockResolvedValueOnce({
+      items: [{ ...createApiKey(), name: 'TokenPro', key_type: 'global' }],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      pages: 1,
+    })
+
+    const wrapper = await mountView()
+    const actions = wrapper.get('[data-test="key-actions"]').text()
+
+    expect(actions).toContain('Reset Key')
+    expect(actions).not.toContain('Delete')
+    expect(actions).not.toContain('Use Key')
+    expect(actions).not.toContain('Import to CCS')
+    expect(actions).not.toContain('Edit')
+    expect(actions).not.toContain('Disable')
+    expect(actions).not.toContain('Enable')
+    expect(wrapper.text()).toContain('TokenPro automation only')
+    expect(wrapper.text()).toContain('Managed automatically by TokenPro')
+  })
+
+  it('keeps delete for an ordinary key even when it is named TokenPro', async () => {
+    listKeys.mockResolvedValueOnce({
+      items: [{ ...createApiKey(), name: 'TokenPro', key_type: 'group' }],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      pages: 1,
+    })
+
+    const wrapper = await mountView()
+    const actions = wrapper.get('[data-test="key-actions"]').text()
+
+    expect(actions).toContain('Delete')
+    expect(actions).not.toContain('Reset Key')
   })
 
   it('keeps filters and selected page size when sorting by current concurrency', async () => {

@@ -194,6 +194,16 @@ func (s *ModelPlazaService) ListGroups(ctx context.Context) ([]PlazaGroup, error
 	out := make([]PlazaGroup, 0, len(order))
 	for _, gid := range order {
 		pg := byGroup[gid]
+		g := groupEnt[gid]
+		if g != nil && g.ModelAllowlistEnabled() {
+			filtered := pg.Models[:0]
+			for _, model := range pg.Models {
+				if g.ModelAllowlist.Allows(model.Name) {
+					filtered = append(filtered, model)
+				}
+			}
+			pg.Models = filtered
+		}
 		if len(pg.Models) == 0 {
 			continue
 		}
@@ -203,7 +213,6 @@ func (s *ModelPlazaService) ListGroups(ctx context.Context) ([]PlazaGroup, error
 			}
 			return pg.Models[i].Platform < pg.Models[j].Platform
 		})
-		g := groupEnt[gid]
 		for j := range pg.Models {
 			s.fillDisplayPricing(ctx, &pg.Models[j], g)
 			pg.Models[j].OfficialPricing = s.lookupOfficialPricing(ctx, pg.Models[j].Name, officialMemo)

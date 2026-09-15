@@ -1180,7 +1180,9 @@ func normalizeOpenAIResponsesImageOnlyModel(reqBody map[string]any) bool {
 	}
 
 	if toolMap, ok := tools[imageToolIndex].(map[string]any); ok {
-		if strings.TrimSpace(firstNonEmptyString(toolMap["model"])) == "" {
+		// The top-level image-only model is the user's selected image model. Keep
+		// the hosted tool aligned even when a client reuses a stale tool payload.
+		if strings.TrimSpace(firstNonEmptyString(toolMap["model"])) != imageModel {
 			toolMap["model"] = imageModel
 			modified = true
 		}
@@ -1212,7 +1214,8 @@ func normalizeOpenAIResponsesImageOnlyModel(reqBody map[string]any) bool {
 		modified = true
 	}
 
-	if _, ok := reqBody["tool_choice"]; !ok {
+	toolChoice, _ := reqBody["tool_choice"].(map[string]any)
+	if strings.TrimSpace(firstNonEmptyString(toolChoice["type"])) != "image_generation" {
 		reqBody["tool_choice"] = map[string]any{"type": "image_generation"}
 		modified = true
 	}

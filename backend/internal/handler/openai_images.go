@@ -61,7 +61,6 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
 		return
 	}
-
 	if isMultipartImagesContentType(c.GetHeader("Content-Type")) {
 		setOpsRequestContext(c, "", false)
 	} else {
@@ -74,11 +73,25 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		return
 	}
 	requestModel := parsed.Model
+	if apiKey.IsGlobal() {
+		resolvedKey, resolveErr := resolveGlobalAPIKeyForModel(c, h.globalGroupResolver, apiKey, subject.UserID, requestModel)
+		if resolveErr != nil {
+			respondGlobalKeyRoutingError(c, resolveErr, h.errorResponse)
+			return
+		}
+		apiKey = resolvedKey
+	}
 	ensureCompositeTargetPlatform(c, apiKey, requestModel)
 	clientRequestModel := clientRequestedModel(c, requestModel)
 	routingModel := requestModel
 	if resolvedModel, ok := service.ResolvedUpstreamModelFromContext(c.Request.Context()); ok {
 		routingModel = resolvedModel
+	}
+	if driver := service.TokenProNativeImageDriver(c); driver != "" && parsed.Model == "gpt-image-2" {
+		// The selected text model, not an unselected image catalog entry,
+		// authorizes/schedules this same-group hosted image tool invocation.
+		routingModel = driver
+		parsed.ResponsesModel = driver
 	}
 	if !compositeTargetPlatformAllowed(c, apiKey, requestModel, service.PlatformOpenAI) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Model is not supported by this OpenAI-compatible endpoint for composite groups")
@@ -103,6 +116,22 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		h.openAISecurityAuditError(c, decision)
 		return
 	}
+	finishReceipt, receiptErr := service.ClaimTokenProImageReceipt(c, apiKey, parsed)
+	if receiptErr != nil {
+		if errors.Is(receiptErr, service.ErrImageTurnConflict) {
+			h.errorResponse(c, http.StatusConflict, "native_image_receipt_conflict", "This image execution is already running or completed. No additional image was generated.")
+		} else {
+			h.errorResponse(c, http.StatusServiceUnavailable, "native_image_receipt_unavailable", "Image execution state is temporarily unavailable. No additional image was generated.")
+		}
+		return
+	}
+	if finishReceipt != nil {
+		defer func() {
+			if err := finishReceipt(false); err != nil {
+				reqLog.Warn("openai.images.receipt_finish_failed", zap.Error(err))
+			}
+		}()
+	}
 	imageReleaseFunc, acquired := h.acquireImageGenerationSlot(c, streamStarted)
 	if !acquired {
 		return
@@ -115,6 +144,11 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(parsed.Stream, false)))
 
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, routingModel)
+	if parsed.ResponsesModel != "" && channelMapping.Mapped {
+		parsed.ResponsesModel = channelMapping.MappedModel
+		// Mapping applies to the driver, never to the image tool model.
+		channelMapping.MappedModel = ""
+	}
 
 	if h.errorPassthroughService != nil {
 		service.BindErrorPassthroughService(c, h.errorPassthroughService)
@@ -125,7 +159,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 	service.SetOpsLatencyMs(c, service.OpsAuthLatencyMsKey, time.Since(requestStart).Milliseconds())
 	routingStart := time.Now()
 
-	userReleaseFunc, acquired := h.acquireResponsesUserSlot(c, subject.UserID, subject.Concurrency, parsed.Stream, &streamStarted, reqLog)
+	userReleaseFunc, acquired := h.acquireResponsesUserSlot(c, apiKey, subject.UserID, subject.Concurrency, parsed.Stream, &streamStarted, reqLog)
 	if !acquired {
 		return
 	}
@@ -250,6 +284,11 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 			}()
 			return h.gatewayService.ForwardImages(requestCtx, c, account, body, parsed, channelMapping.MappedModel)
 		}()
+		if result != nil && result.ImageCount > 0 && finishReceipt != nil {
+			if receiptErr := finishReceipt(true); receiptErr != nil {
+				reqLog.Warn("openai.images.receipt_finish_failed", zap.Error(receiptErr))
+			}
+		}
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()
 		upstreamLatencyMs, _ := getContextInt64(c, service.OpsUpstreamLatencyMsKey)
 		responseLatencyMs := forwardDurationMs

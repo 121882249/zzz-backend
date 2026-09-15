@@ -30,10 +30,18 @@
               {{ methodLabel(method) }}
             </span>
             <span
-              v-if="method.fee_rate > 0"
+			  v-if="method.fee_rate > 0 || (method.fixed_fee ?? 0) > 0"
               class="text-[10px] tracking-wide text-gray-500 dark:text-dark-400"
             >
-              {{ t('payment.fee') }} {{ method.fee_rate }}%
+			  {{ t('payment.fee') }}
+			  <template v-if="method.fee_rate > 0"> {{ method.fee_rate }}%</template>
+			  <template v-if="(method.fixed_fee ?? 0) > 0">
+				<span v-if="method.fee_rate > 0"> + </span>
+				<span
+				  data-testid="payment-fixed-fee"
+				  class="font-semibold text-red-500 dark:text-red-400"
+				>{{ formatMethodFixedFee(method) }}</span>
+			  </template>
             </span>
           </span>
         </span>
@@ -51,11 +59,14 @@ import wxpayIcon from '@/assets/icons/wxpay.svg'
 import stripeIcon from '@/assets/icons/stripe.svg'
 import airwallexIcon from '@/assets/icons/airwallex.svg'
 import paymentIcon from '@/assets/icons/payment.svg'
+	import { formatPaymentAmount, normalizePaymentCurrency } from './currency'
 
 export interface PaymentMethodOption {
   type: string
   display_name?: string
   fee_rate: number
+	fixed_fee?: number
+	currency?: string
   available: boolean
 }
 
@@ -96,6 +107,10 @@ function methodIcon(type: string): string {
 
 function methodLabel(method: PaymentMethodOption): string {
   return method.display_name || t(`payment.methods.${method.type}`, method.type)
+}
+
+function formatMethodFixedFee(method: PaymentMethodOption): string {
+	return formatPaymentAmount(method.fixed_fee ?? 0, normalizePaymentCurrency(method.currency))
 }
 
 function methodSelectedClass(type: string): string {

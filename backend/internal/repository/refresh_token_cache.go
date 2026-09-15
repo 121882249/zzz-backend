@@ -35,6 +35,14 @@ type refreshTokenCache struct {
 	rdb *redis.Client
 }
 
+var consumeRefreshTokenScript = redis.NewScript(`
+local value = redis.call("GET", KEYS[1])
+if value then
+  redis.call("DEL", KEYS[1])
+end
+return value
+`)
+
 // NewRefreshTokenCache creates a new RefreshTokenCache implementation.
 func NewRefreshTokenCache(rdb *redis.Client) service.RefreshTokenCache {
 	return &refreshTokenCache{rdb: rdb}
@@ -61,6 +69,21 @@ func (c *refreshTokenCache) GetRefreshToken(ctx context.Context, tokenHash strin
 	var data service.RefreshTokenData
 	if err := json.Unmarshal([]byte(val), &data); err != nil {
 		return nil, fmt.Errorf("unmarshal refresh token data: %w", err)
+	}
+	return &data, nil
+}
+
+func (c *refreshTokenCache) ConsumeRefreshToken(ctx context.Context, tokenHash string) (*service.RefreshTokenData, error) {
+	val, err := consumeRefreshTokenScript.Run(ctx, c.rdb, []string{refreshTokenKey(tokenHash)}).Text()
+	if err != nil {
+		if err == redis.Nil {
+			return nil, service.ErrRefreshTokenNotFound
+		}
+		return nil, err
+	}
+	var data service.RefreshTokenData
+	if err := json.Unmarshal([]byte(val), &data); err != nil {
+		return nil, fmt.Errorf("unmarshal consumed refresh token data: %w", err)
 	}
 	return &data, nil
 }

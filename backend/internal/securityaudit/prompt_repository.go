@@ -304,6 +304,38 @@ func (r *PostgreSQLRepository) RecordBlocking(ctx context.Context, snapshot Prom
 	return event, nil
 }
 
+// RecordMonitoring persists a selected user's prompt without invoking a Guard
+// model. It is deliberately allow-only and never participates in routing or
+// blocking decisions.
+func (r *PostgreSQLRepository) RecordMonitoring(ctx context.Context, snapshot PromptSnapshot, configVersion int64) (*Event, error) {
+	if r == nil || r.db == nil {
+		return nil, errors.New("prompt audit database unavailable")
+	}
+	result := &NormalizedResult{
+		Decision: EventPass, RiskLevel: RiskLow, Action: ActionAllow, Safety: "monitor",
+		Categories: []string{}, MatchedScanners: []string{}, ScannerScores: map[string]float64{},
+		ScannerEvidence: map[string]string{}, ScannerBackend: "account-monitor", ScannerVersion: "1",
+		PolicyID: "account-monitor", PolicyVersion: 1, ChunkTotal: 1,
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	job, err := insertJob(ctx, tx, snapshot.Redacted(), ModeAsync, configVersion, "done", 1)
+	if err != nil {
+		return nil, err
+	}
+	event, err := insertEvent(ctx, tx, job.ID, snapshot.Redacted(), configVersion, result)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return event, nil
+}
+
 // shouldStorePromptAuditEvent keeps store_pass_events scoped to safe results.
 // Risk events are always persisted while prompt auditing itself is enabled.
 func shouldStorePromptAuditEvent(decision EventDecision, storePassEvents bool) bool {

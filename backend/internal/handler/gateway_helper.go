@@ -242,6 +242,16 @@ func (h *ConcurrencyHelper) TryAcquireUserSlotForAPIKey(ctx context.Context, use
 	return h.withAPIKeySlot(ctx, apiKeyID, releaseFunc), true, nil
 }
 
+// TryAcquireUserSlotWithAPIKey applies the user-wide concurrency setting to
+// every key type, including global keys. Account/vendor limits remain an
+// independent downstream constraint.
+func (h *ConcurrencyHelper) TryAcquireUserSlotWithAPIKey(ctx context.Context, apiKey *service.APIKey, userID int64, maxConcurrency int) (func(), bool, error) {
+	if apiKey == nil {
+		return h.TryAcquireUserSlot(ctx, userID, maxConcurrency)
+	}
+	return h.TryAcquireUserSlotForAPIKey(ctx, userID, maxConcurrency, apiKey.ID)
+}
+
 // AcquireOpenAIWSIngressLease bounds the whole client WebSocket lifecycle,
 // independently from per-turn user and account slots.
 func (h *ConcurrencyHelper) AcquireOpenAIWSIngressLease(ctx context.Context, apiKeyID int64, maxConnections int) (*service.OpenAIWSIngressLease, bool, error) {
@@ -269,6 +279,12 @@ func (h *ConcurrencyHelper) TryAcquireAccountSlot(ctx context.Context, accountID
 // streamStarted is updated if streaming response has begun.
 func (h *ConcurrencyHelper) AcquireUserSlotWithWait(c *gin.Context, userID int64, maxConcurrency int, isStream bool, streamStarted *bool) (func(), error) {
 	return h.acquireUserSlotWithWaitTimeout(c, userID, maxConcurrency, maxConcurrencyWait, isStream, streamStarted)
+}
+
+// AcquireUserSlotWithWaitForAPIKey applies the authenticated user's configured
+// concurrency to both global and group-scoped keys.
+func (h *ConcurrencyHelper) AcquireUserSlotWithWaitForAPIKey(c *gin.Context, apiKey *service.APIKey, userID int64, maxConcurrency int, isStream bool, streamStarted *bool) (func(), error) {
+	return h.AcquireUserSlotWithWait(c, userID, maxConcurrency, isStream, streamStarted)
 }
 
 func (h *ConcurrencyHelper) acquireUserSlotWithWaitTimeout(c *gin.Context, userID int64, maxConcurrency int, timeout time.Duration, isStream bool, streamStarted *bool) (func(), error) {

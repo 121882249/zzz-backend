@@ -50,6 +50,7 @@ export default {
     inactive: 'Inactive',
     more: 'More',
     close: 'Close',
+    menu: 'Menu',
     toggleMenu: 'Toggle menu',
     userMenu: 'User menu',
     pageNotFound: 'Page not found',
@@ -144,6 +145,7 @@ export default {
     adminCompliance: 'Deployment and Operation Compliance Commitment',
     loginAgreementPrompt: {
       checkboxPrefix: 'I have read and agree to ',
+      documentLinksLabel: 'Compliance: ',
       documentSeparator: ', ',
       noticeTitle: 'Accept the latest terms before continuing.',
       noticeDescription: 'Account/password login and quick sign-in stay disabled until you accept.',
@@ -199,6 +201,7 @@ export default {
     buySubscription: 'Recharge / Subscription',
     recharge: 'Recharge',
     subscribe: 'Subscription',
+    downloadApp: 'Download Connector',
     docs: 'Docs',
     myOrders: 'My Orders',
     orderManagement: 'Orders',
@@ -213,11 +216,19 @@ export default {
     securityAudit: 'Security Audit',
     contentModeration: 'Content Moderation',
     promptAudit: 'Prompt Audit',
+    contentMonitor: 'Content Monitor',
     auditLogs: 'Audit Logs',
   },
 
   // Auth
   auth: {
+    cosmic: {
+      kicker: 'TOKENPRO INTELLIGENCE NETWORK',
+      titleLineOne: 'One gateway to',
+      titleHighlight: 'boundless intelligence',
+      description: 'Use one TokenPro key to access leading models through a unified and reliable intelligence network.',
+      moreModels: 'More models'
+    },
     welcomeBack: 'Welcome Back',
     signInToAccount: 'Sign in to your account to continue',
     signIn: 'Sign In',

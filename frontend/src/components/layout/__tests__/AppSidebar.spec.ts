@@ -80,3 +80,14 @@ describe('AppSidebar subscription feature flag', () => {
     expect(componentSource).toMatch(/path: '\/purchase'[^\n]*label: purchaseNavLabel\.value/)
   })
 })
+
+describe('AppSidebar model plaza entry', () => {
+  it('places the embedded model plaza after channel status with the grid icon', () => {
+    const channelStatusIndex = componentSource.indexOf("{ path: '/monitor', label: t('nav.channelStatus')")
+    const modelPlazaIndex = componentSource.indexOf("{ path: '/model-plaza', query: { embedded: '1' }, label: t('nav.modelPlaza'), icon: DashboardIcon")
+
+    expect(channelStatusIndex).toBeGreaterThan(-1)
+    expect(modelPlazaIndex).toBeGreaterThan(channelStatusIndex)
+    expect(componentSource.slice(channelStatusIndex, modelPlazaIndex)).not.toContain("path: '/subscriptions'")
+  })
+})

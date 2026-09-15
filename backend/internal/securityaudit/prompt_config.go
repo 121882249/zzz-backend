@@ -74,6 +74,7 @@ type storageConfig struct {
 	Scanners               []string          `json:"scanners"`
 	AllGroups              bool              `json:"all_groups"`
 	GroupIDs               []int64           `json:"group_ids"`
+	MonitorUserEmails      []string          `json:"monitor_user_emails"`
 	Endpoints              []StorageEndpoint `json:"endpoints"`
 	ConfigVersion          int64             `json:"config_version"`
 	UpdatedAt              time.Time         `json:"updated_at"`
@@ -110,6 +111,7 @@ type ActiveConfig struct {
 	Scanners               []string
 	AllGroups              bool
 	GroupIDs               []int64
+	MonitorUserEmails      []string
 	Endpoints              []ActiveEndpoint
 	ConfigVersion          int64
 	UpdatedAt              time.Time
@@ -142,6 +144,7 @@ type PublicConfig struct {
 	Scanners               []string         `json:"scanners"`
 	AllGroups              bool             `json:"all_groups"`
 	GroupIDs               []int64          `json:"group_ids"`
+	MonitorUserEmails      []string         `json:"monitor_user_emails"`
 	Endpoints              []PublicEndpoint `json:"endpoints"`
 	ConfigVersion          int64            `json:"config_version"`
 	UpdatedAt              time.Time        `json:"updated_at"`
@@ -174,6 +177,7 @@ type UpdateConfigRequest struct {
 	Scanners               []string         `json:"scanners"`
 	AllGroups              bool             `json:"all_groups"`
 	GroupIDs               []int64          `json:"group_ids"`
+	MonitorUserEmails      []string         `json:"monitor_user_emails"`
 	Endpoints              []UpdateEndpoint `json:"endpoints"`
 }
 
@@ -189,6 +193,7 @@ func DefaultStorageConfig() storageConfig {
 		Scanners:               append([]string(nil), AllScannerIDs...),
 		AllGroups:              true,
 		GroupIDs:               []int64{},
+		MonitorUserEmails:      []string{},
 		Endpoints:              []StorageEndpoint{},
 		ConfigVersion:          1,
 	}
@@ -230,6 +235,7 @@ func normalizeStorageConfig(cfg *storageConfig) {
 	}
 	cfg.Scanners = canonicalScannerIDs(cfg.Scanners)
 	cfg.GroupIDs = canonicalInt64s(cfg.GroupIDs)
+	cfg.MonitorUserEmails = canonicalEmails(cfg.MonitorUserEmails)
 	// Preserve an invalid blocking-without-audit combination so validation can
 	// reject it instead of silently changing administrator intent.
 	for i := range cfg.Endpoints {
@@ -269,6 +275,9 @@ func validateStorageConfig(cfg storageConfig) error {
 	}
 	if !cfg.AllGroups && len(cfg.GroupIDs) == 0 {
 		return infraerrors.BadRequest("prompt_audit_groups_required", "指定分组模式至少需要选择一个分组")
+	}
+	if len(cfg.MonitorUserEmails) > 100 {
+		return infraerrors.BadRequest("prompt_audit_too_many_monitor_users", "单独监控账号最多支持 100 个邮箱")
 	}
 	if len(cfg.Scanners) == 0 {
 		return infraerrors.BadRequest("prompt_audit_scanners_required", "至少需要启用一个风险分类")
@@ -333,6 +342,15 @@ func validateUpdateConfigRequest(req UpdateConfigRequest) error {
 			}
 		}
 	}
+	if len(req.MonitorUserEmails) > 100 {
+		return infraerrors.BadRequest("prompt_audit_too_many_monitor_users", "单独监控账号最多支持 100 个邮箱")
+	}
+	for _, email := range req.MonitorUserEmails {
+		normalized := strings.ToLower(strings.TrimSpace(email))
+		if normalized == "" || !strings.Contains(normalized, "@") {
+			return infraerrors.BadRequest("prompt_audit_invalid_monitor_user", "单独监控账号邮箱无效")
+		}
+	}
 	for _, endpoint := range req.Endpoints {
 		if endpoint.TimeoutMS < MinTimeoutMS || endpoint.TimeoutMS > MaxTimeoutMS {
 			return infraerrors.BadRequest("prompt_audit_invalid_timeout", "审计节点超时超出允许范围")
@@ -365,6 +383,15 @@ func (cfg ActiveConfig) IncludesGroup(groupID *int64) bool {
 	return i < len(cfg.GroupIDs) && cfg.GroupIDs[i] == *groupID
 }
 
+func (cfg ActiveConfig) MonitorsUser(email string) bool {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if email == "" {
+		return false
+	}
+	i := sort.SearchStrings(cfg.MonitorUserEmails, email)
+	return i < len(cfg.MonitorUserEmails) && cfg.MonitorUserEmails[i] == email
+}
+
 func (cfg ActiveConfig) EnabledEndpoints() []ActiveEndpoint {
 	result := make([]ActiveEndpoint, 0, len(cfg.Endpoints))
 	for _, ep := range cfg.Endpoints {
@@ -394,6 +421,7 @@ func PublicFromStorage(cfg storageConfig, riskControlEnabled bool, invalidTokenE
 	}
 	scanners := append([]string{}, cfg.Scanners...)
 	groupIDs := append([]int64{}, cfg.GroupIDs...)
+	monitorUserEmails := append([]string{}, cfg.MonitorUserEmails...)
 	endpoints := make([]PublicEndpoint, 0, len(cfg.Endpoints))
 	for _, ep := range cfg.Endpoints {
 		hasToken := strings.TrimSpace(ep.TokenCiphertext) != ""
@@ -416,7 +444,8 @@ func PublicFromStorage(cfg storageConfig, riskControlEnabled bool, invalidTokenE
 		EffectiveMode: active.EffectiveMode(), Strategy: cfg.Strategy, WorkerCount: cfg.WorkerCount,
 		QueueCapacity: cfg.QueueCapacity, Scanners: scanners, AllGroups: cfg.AllGroups,
 		GroupIDs: groupIDs, Endpoints: endpoints, ConfigVersion: cfg.ConfigVersion,
-		UpdatedAt: cfg.UpdatedAt, UpdatedBy: cfg.UpdatedBy, ChangeSummary: cfg.ChangeSummary,
+		MonitorUserEmails: monitorUserEmails,
+		UpdatedAt:         cfg.UpdatedAt, UpdatedBy: cfg.UpdatedBy, ChangeSummary: cfg.ChangeSummary,
 	}
 }
 
@@ -427,7 +456,8 @@ func ActiveFromStorage(cfg storageConfig, riskControlEnabled bool, encryptor Sec
 		StorePassEvents:        cfg.StorePassEvents, Strategy: cfg.Strategy, WorkerCount: cfg.WorkerCount,
 		QueueCapacity: cfg.QueueCapacity, Scanners: append([]string(nil), cfg.Scanners...), AllGroups: cfg.AllGroups,
 		GroupIDs: append([]int64(nil), cfg.GroupIDs...), ConfigVersion: cfg.ConfigVersion,
-		UpdatedAt: cfg.UpdatedAt, UpdatedBy: cfg.UpdatedBy, ChangeSummary: cfg.ChangeSummary,
+		MonitorUserEmails: append([]string(nil), cfg.MonitorUserEmails...),
+		UpdatedAt:         cfg.UpdatedAt, UpdatedBy: cfg.UpdatedBy, ChangeSummary: cfg.ChangeSummary,
 		Endpoints: make([]ActiveEndpoint, 0, len(cfg.Endpoints)),
 	}
 	for _, ep := range cfg.Endpoints {
@@ -456,6 +486,24 @@ func ActiveFromStorage(cfg storageConfig, riskControlEnabled bool, encryptor Sec
 		})
 	}
 	return active, nil
+}
+
+func canonicalEmails(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result
 }
 
 func changeSummary(cfg storageConfig) string {

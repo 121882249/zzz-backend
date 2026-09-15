@@ -57,6 +57,23 @@ func TestListPlazaGroups_GroupCentricAggregation(t *testing.T) {
 	require.Equal(t, "claude-sonnet", out[0].Models[1].Name)
 }
 
+func TestListPlazaGroups_AppliesGroupModelAllowlist(t *testing.T) {
+	channels := []Channel{
+		plazaPricedChannel(1, "images", []int64{65}, PlatformOpenAI,
+			"gpt-image-2", "gpt-image-2.5-sunburst"),
+	}
+	groups := []Group{{
+		ID: 65, Name: "images", Platform: PlatformOpenAI, RateMultiplier: 1,
+		ModelAllowlist: GroupModelAllowlist{Enabled: true, Models: []string{"gpt-image-2.5-*"}},
+	}}
+
+	out, err := newPlazaService(channels, groups, nil).ListGroups(context.Background())
+
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+	require.Equal(t, []string{"gpt-image-2.5-sunburst"}, []string{out[0].Models[0].Name})
+}
+
 func TestWithDefaultMaxReasoningEffortMultiplier_Fable51(t *testing.T) {
 	base := &ChannelModelPricing{BillingMode: BillingModeToken}
 	got := withDefaultMaxReasoningEffortMultiplier(base, "claude-fable-5-1")

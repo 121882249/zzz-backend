@@ -31,6 +31,9 @@ const (
 	updateCacheKey = "update_check_cache"
 	updateCacheTTL = 1200 // 20 minutes
 	githubRepo     = "Wei-Shaw/sub2api"
+	// TokenPro releases keep a short operator-facing revision name while this
+	// value records the upstream Sub2API release already merged into the build.
+	tokenProUpstreamVersion = "0.2.5"
 
 	// Security: allowed download domains for updates
 	allowedDownloadHost = "github.com"
@@ -79,13 +82,14 @@ func NewUpdateService(cache UpdateCache, githubClient GitHubReleaseClient, versi
 
 // UpdateInfo contains update information
 type UpdateInfo struct {
-	CurrentVersion string       `json:"current_version"`
-	LatestVersion  string       `json:"latest_version"`
-	HasUpdate      bool         `json:"has_update"`
-	ReleaseInfo    *ReleaseInfo `json:"release_info,omitempty"`
-	Cached         bool         `json:"cached"`
-	Warning        string       `json:"warning,omitempty"`
-	BuildType      string       `json:"build_type"` // "source" or "release"
+	CurrentVersion         string       `json:"current_version"`
+	CurrentUpstreamVersion string       `json:"current_upstream_version"`
+	LatestVersion          string       `json:"latest_version"`
+	HasUpdate              bool         `json:"has_update"`
+	ReleaseInfo            *ReleaseInfo `json:"release_info,omitempty"`
+	Cached                 bool         `json:"cached"`
+	Warning                string       `json:"warning,omitempty"`
+	BuildType              string       `json:"build_type"` // "source" or "release"
 }
 
 // ReleaseInfo contains GitHub release details
@@ -147,11 +151,12 @@ func (s *UpdateService) CheckUpdate(ctx context.Context, force bool) (*UpdateInf
 			return cached, nil
 		}
 		return &UpdateInfo{
-			CurrentVersion: s.currentVersion,
-			LatestVersion:  s.currentVersion,
-			HasUpdate:      false,
-			Warning:        err.Error(),
-			BuildType:      s.buildType,
+			CurrentVersion:         s.currentVersion,
+			CurrentUpstreamVersion: s.currentUpstreamVersion(),
+			LatestVersion:          s.currentUpstreamVersion(),
+			HasUpdate:              false,
+			Warning:                err.Error(),
+			BuildType:              s.buildType,
 		}, nil
 	}
 
@@ -379,7 +384,7 @@ func (s *UpdateService) fetchRollbackCandidates(ctx context.Context) ([]*GitHubR
 			continue
 		}
 		// Only versions strictly older than current (also excludes current itself)
-		if compareVersions(v, s.currentVersion) >= 0 {
+		if compareVersions(v, s.currentUpstreamVersion()) >= 0 {
 			continue
 		}
 		seen[v] = true
@@ -417,9 +422,10 @@ func (s *UpdateService) fetchLatestRelease(ctx context.Context) (*UpdateInfo, er
 	}
 
 	return &UpdateInfo{
-		CurrentVersion: s.currentVersion,
-		LatestVersion:  latestVersion,
-		HasUpdate:      compareVersions(s.currentVersion, latestVersion) < 0,
+		CurrentVersion:         s.currentVersion,
+		CurrentUpstreamVersion: s.currentUpstreamVersion(),
+		LatestVersion:          latestVersion,
+		HasUpdate:              compareVersions(s.currentUpstreamVersion(), latestVersion) < 0,
 		ReleaseInfo: &ReleaseInfo{
 			Name:        release.Name,
 			Body:        release.Body,
@@ -613,13 +619,28 @@ func (s *UpdateService) getFromCache(ctx context.Context) (*UpdateInfo, error) {
 	}
 
 	return &UpdateInfo{
-		CurrentVersion: s.currentVersion,
-		LatestVersion:  cached.Latest,
-		HasUpdate:      compareVersions(s.currentVersion, cached.Latest) < 0,
-		ReleaseInfo:    cached.ReleaseInfo,
-		Cached:         true,
-		BuildType:      s.buildType,
+		CurrentVersion:         s.currentVersion,
+		CurrentUpstreamVersion: s.currentUpstreamVersion(),
+		LatestVersion:          cached.Latest,
+		HasUpdate:              compareVersions(s.currentUpstreamVersion(), cached.Latest) < 0,
+		ReleaseInfo:            cached.ReleaseInfo,
+		Cached:                 true,
+		BuildType:              s.buildType,
 	}, nil
+}
+
+// currentUpstreamVersion exposes the Sub2API release contained in this build.
+// TokenPro uses its own operator-facing revision, so comparing that revision
+// directly with Sub2API semver would hide or invent update notifications.
+func (s *UpdateService) currentUpstreamVersion() string {
+	v := strings.TrimPrefix(strings.TrimSpace(s.currentVersion), "v")
+	if strings.HasPrefix(v, "TokenPro-R") {
+		return tokenProUpstreamVersion
+	}
+	if idx := strings.IndexByte(v, '-'); idx != -1 {
+		return v[:idx]
+	}
+	return v
 }
 
 func (s *UpdateService) saveToCache(ctx context.Context, info *UpdateInfo) {
@@ -655,13 +676,25 @@ func compareVersions(current, latest string) int {
 
 func parseVersion(v string) [3]int {
 	v = strings.TrimPrefix(v, "v")
-	if idx := strings.IndexByte(v, '-'); idx != -1 {
+	if strings.HasPrefix(v, "TokenPro-R") {
+		v = tokenProUpstreamVersion
+	} else if idx := strings.IndexByte(v, '-'); idx != -1 {
 		v = v[:idx]
 	}
 	parts := strings.Split(v, ".")
 	result := [3]int{0, 0, 0}
 	for i := 0; i < len(parts) && i < 3; i++ {
-		if parsed, err := strconv.Atoi(parts[i]); err == nil {
+		// Custom release builds append a suffix to the patch component, for
+		// example 0.1.172-tokenpro. Compare the numeric semver core so an
+		// operator build based on the latest release is not treated as 0.1.0.
+		end := 0
+		for end < len(parts[i]) && parts[i][end] >= '0' && parts[i][end] <= '9' {
+			end++
+		}
+		if end == 0 {
+			continue
+		}
+		if parsed, err := strconv.Atoi(parts[i][:end]); err == nil {
 			result[i] = parsed
 		}
 	}

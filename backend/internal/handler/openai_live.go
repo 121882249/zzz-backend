@@ -30,11 +30,11 @@ func (h *OpenAIGatewayHandler) Live(c *gin.Context) {
 		h.errorResponse(c, http.StatusInternalServerError, "api_error", "User context not found")
 		return
 	}
-	if apiKey.Group == nil || (apiKey.Group.Platform != service.PlatformOpenAI && apiKey.Group.Platform != service.PlatformComposite) {
+	if !apiKey.IsGlobal() && (apiKey.Group == nil || (apiKey.Group.Platform != service.PlatformOpenAI && apiKey.Group.Platform != service.PlatformComposite)) {
 		h.errorResponse(c, http.StatusNotFound, "not_found_error", "Live is not supported for this platform")
 		return
 	}
-	if !liveEnabledForAPIKey(apiKey) {
+	if !apiKey.IsGlobal() && !liveEnabledForAPIKey(apiKey) {
 		h.errorResponse(c, http.StatusForbidden, "permission_error", "Live is not enabled for this group")
 		return
 	}
@@ -44,6 +44,18 @@ func (h *OpenAIGatewayHandler) Live(c *gin.Context) {
 		return
 	}
 	model := strings.TrimSpace(gjson.GetBytes(request.Session, "model").String())
+	if apiKey.IsGlobal() {
+		resolvedKey, resolveErr := resolveGlobalAPIKeyForModel(c, h.globalGroupResolver, apiKey, subject.UserID, model)
+		if resolveErr != nil {
+			h.errorResponse(c, http.StatusServiceUnavailable, "no_available_group", "当前模型没有可用分组或有效订阅。")
+			return
+		}
+		apiKey = resolvedKey
+	}
+	if !liveEnabledForAPIKey(apiKey) {
+		h.errorResponse(c, http.StatusForbidden, "permission_error", "Live is not enabled for this group")
+		return
+	}
 	if !compositeTargetPlatformAllowed(c, apiKey, model, service.PlatformOpenAI) {
 		h.errorResponse(c, http.StatusNotFound, "not_found_error", "Live only supports OpenAI models for Composite groups")
 		return
@@ -97,10 +109,8 @@ func (h *OpenAIGatewayHandler) Live(c *gin.Context) {
 		return
 	}
 
-	userRelease, acquired, err := h.concurrencyHelper.TryAcquireUserSlot(
-		c.Request.Context(),
-		subject.UserID,
-		subject.Concurrency,
+	userRelease, acquired, err := h.concurrencyHelper.TryAcquireUserSlotWithAPIKey(
+		c.Request.Context(), apiKey, subject.UserID, subject.Concurrency,
 	)
 	if err != nil {
 		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Live concurrency unavailable")

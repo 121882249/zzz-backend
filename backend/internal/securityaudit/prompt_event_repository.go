@@ -15,17 +15,35 @@ import (
 )
 
 type EventFilter struct {
-	Decision   string     `json:"decision,omitempty"`
-	RiskLevel  string     `json:"risk_level,omitempty"`
-	Endpoint   string     `json:"endpoint,omitempty"`
-	GroupID    *int64     `json:"group_id,omitempty"`
-	UserID     *int64     `json:"user_id,omitempty"`
-	APIKeyID   *int64     `json:"api_key_id,omitempty"`
-	RequestID  string     `json:"request_id,omitempty"`
-	PromptHash string     `json:"prompt_hash,omitempty"`
-	Keyword    string     `json:"keyword,omitempty"`
-	StartAt    *time.Time `json:"start_at,omitempty"`
-	EndAt      *time.Time `json:"end_at,omitempty"`
+	Decision              string     `json:"decision,omitempty"`
+	RiskLevel             string     `json:"risk_level,omitempty"`
+	Endpoint              string     `json:"endpoint,omitempty"`
+	GroupID               *int64     `json:"group_id,omitempty"`
+	UserID                *int64     `json:"user_id,omitempty"`
+	APIKeyID              *int64     `json:"api_key_id,omitempty"`
+	RequestID             string     `json:"request_id,omitempty"`
+	PromptHash            string     `json:"prompt_hash,omitempty"`
+	Keyword               string     `json:"keyword,omitempty"`
+	StartAt               *time.Time `json:"start_at,omitempty"`
+	EndAt                 *time.Time `json:"end_at,omitempty"`
+	ScannerBackend        string     `json:"-"`
+	ExcludeScannerBackend string     `json:"-"`
+}
+
+type ContentMonitorItem struct {
+	ID        int64     `json:"id"`
+	UserEmail string    `json:"user_email"`
+	Model     string    `json:"model"`
+	Content   string    `json:"content"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type ContentMonitorPage struct {
+	Items    []ContentMonitorItem `json:"items"`
+	Total    int64                `json:"total"`
+	Page     int                  `json:"page"`
+	PageSize int                  `json:"page_size"`
+	Pages    int                  `json:"pages"`
 }
 
 type EventPage struct {
@@ -100,6 +118,76 @@ func (r *PostgreSQLRepository) ListEvents(ctx context.Context, filter EventFilte
 		pages = int((total + int64(pageSize) - 1) / int64(pageSize))
 	}
 	return &EventPage{Items: items, Total: total, Page: page, PageSize: pageSize, Pages: pages}, nil
+}
+
+func (r *PostgreSQLRepository) ListMonitoringEvents(ctx context.Context, email string, page, pageSize int) (*ContentMonitorPage, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	email = strings.ToLower(strings.TrimSpace(email))
+	where := ` WHERE e.scanner_backend='account-monitor'`
+	args := make([]any, 0, 3)
+	if email != "" {
+		args = append(args, email)
+		where += fmt.Sprintf(" AND LOWER(e.user_email_snapshot)=$%d", len(args))
+	}
+	var total int64
+	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM prompt_audit_events e`+where, args...).Scan(&total); err != nil {
+		return nil, err
+	}
+	args = append(args, pageSize, (page-1)*pageSize)
+	rows, err := r.db.QueryContext(ctx, `SELECT e.id,e.user_email_snapshot,e.model,e.full_prompt,e.created_at
+		FROM prompt_audit_events e`+where+fmt.Sprintf(` ORDER BY e.created_at DESC,e.id DESC LIMIT $%d OFFSET $%d`, len(args)-1, len(args)), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	items := make([]ContentMonitorItem, 0, pageSize)
+	for rows.Next() {
+		var item ContentMonitorItem
+		if err := rows.Scan(&item.ID, &item.UserEmail, &item.Model, &item.Content, &item.CreatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	pages := 0
+	if total > 0 {
+		pages = int((total + int64(pageSize) - 1) / int64(pageSize))
+	}
+	return &ContentMonitorPage{Items: items, Total: total, Page: page, PageSize: pageSize, Pages: pages}, nil
+}
+
+func (r *PostgreSQLRepository) DeleteMonitoringEvents(ctx context.Context) (*DeleteResult, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	rows, err := tx.QueryContext(ctx, "DELETE FROM prompt_audit_events WHERE scanner_backend='account-monitor' RETURNING job_id")
+	if err != nil {
+		return nil, err
+	}
+	jobIDs, err := scanReturnedJobIDs(rows)
+	if err != nil {
+		return nil, err
+	}
+	deletedJobs, err := deleteOrphanJobs(ctx, tx, jobIDs)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &DeleteResult{DeletedEvents: int64(len(jobIDs)), DeletedJobs: deletedJobs, JobIDs: canonicalInt64s(jobIDs)}, nil
 }
 
 func (r *PostgreSQLRepository) GetEvent(ctx context.Context, id int64) (*Event, error) {
@@ -251,6 +339,8 @@ func canonicalEventFilter(filter EventFilter) EventFilter {
 	filter.RequestID = strings.TrimSpace(filter.RequestID)
 	filter.PromptHash = strings.ToLower(strings.TrimSpace(filter.PromptHash))
 	filter.Keyword = strings.TrimSpace(filter.Keyword)
+	filter.ScannerBackend = strings.TrimSpace(filter.ScannerBackend)
+	filter.ExcludeScannerBackend = strings.TrimSpace(filter.ExcludeScannerBackend)
 	if filter.StartAt != nil {
 		value := filter.StartAt.UTC()
 		filter.StartAt = &value
@@ -306,6 +396,12 @@ func buildEventWhere(filter EventFilter, firstIndex int) (string, []any) {
 	}
 	if filter.EndAt != nil {
 		add(" AND e.created_at <= $%d", filter.EndAt.UTC())
+	}
+	if filter.ScannerBackend != "" {
+		add(" AND e.scanner_backend=$%d", filter.ScannerBackend)
+	}
+	if filter.ExcludeScannerBackend != "" {
+		add(" AND e.scanner_backend<>$%d", filter.ExcludeScannerBackend)
 	}
 	return strings.Join(clauses, ""), args
 }

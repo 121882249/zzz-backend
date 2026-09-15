@@ -547,6 +547,7 @@ export default {
         lastActive: 'Last Active',
         lastUsed: 'Last Used',
         created: 'Created',
+        createdIp: 'Registration IP',
         actions: 'Actions'
       },
       today: 'Today',
