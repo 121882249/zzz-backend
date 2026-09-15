@@ -89,7 +89,7 @@ try:
     while state()["generation_calls"] == 0 and time.monotonic() < deadline:
         time.sleep(0.05)
     assert state()["generation_calls"] == 1, state()
-    call("turn/steer", {"threadId": first, "expectedTurnId": turn, "input": [{"type": "text", "text": "add a red collar"}]})
+    call("turn/steer", {"threadId": first, "expectedTurnId": turn, "input": [{"type": "text", "text": "second image"}]})
     wait(first, turn)
     source = next(home.glob("generated_images/**/*.png"))
     edit = thread()
@@ -98,7 +98,7 @@ try:
         {"type": "localImage", "path": str(source)},
     ]})["turn"]["id"]
     wait(edit, edited_turn)
-    wait(first, start(first, "change the background to blue"))
+    wait(first, start(first, "third image"))
     a, b = thread(), thread(model_b)
     ta, tb = start(a, "IDENTICAL_PROMPT"), start(b, "IDENTICAL_PROMPT")
     wait(a, ta)

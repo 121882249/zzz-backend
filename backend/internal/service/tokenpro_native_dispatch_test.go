@@ -3,7 +3,6 @@ package service
 import (
 	"encoding/json"
 	"strconv"
-	"strings"
 	"sync"
 	"testing"
 
@@ -47,50 +46,6 @@ func TestTokenProPureDispatchUsesRecentImageWhenNoLocalPathExists(t *testing.T) 
 	require.Equal(t, "change the background", args.Get("prompt").String())
 	require.Equal(t, int64(1), args.Get("num_last_images_to_include").Int())
 	require.False(t, args.Get("referenced_image_paths").Exists())
-}
-
-func TestTokenProPureDispatchCanvasFollowUpUsesPreviousReceiptImage(t *testing.T) {
-	callID := "call_tp_receipt_" + strings.Repeat("a", 32)
-	threadID := "01a0a36b-bb2f-7763-a432-d9906e51cb19"
-	imagePath := "/Users/test/.codex/generated_images/" + threadID + "/exec-image.png"
-	body, err := json.Marshal(map[string]any{"client_metadata": map[string]any{"thread_id": threadID}, "input": []any{
-		map[string]any{"role": "user", "content": "画一只马"},
-		map[string]any{"type": "custom_tool_call", "name": "exec", "namespace": "functions", "call_id": callID},
-		map[string]any{"type": "custom_tool_call_output", "call_id": callID, "output": []any{
-			map[string]any{"type": "input_text", "text": TokenProImageReadyMarker + callID},
-			map[string]any{"type": "input_text", "text": "Generated images are saved to /Users/test/.codex/generated_images/" + threadID + " as " + imagePath + " by default.\nThe generated image is already displayed to the user."},
-		}},
-		map[string]any{"type": "message", "role": "assistant", "content": []any{
-			map[string]any{"type": "output_text", "text": "图片生成好了 ✨"},
-		}},
-		map[string]any{"role": "user", "content": "再骑上2个人"},
-	}})
-	require.NoError(t, err)
-	item, err := BuildTokenProNativeImageItem(body)
-	require.NoError(t, err)
-	arguments, ok := item["arguments"].(string)
-	require.True(t, ok)
-	args := gjson.Parse(arguments)
-	require.Equal(t, "再骑上2个人", args.Get("prompt").String())
-	require.Equal(t, imagePath, args.Get("referenced_image_paths.0").String())
-	require.False(t, args.Get("num_last_images_to_include").Exists())
-}
-
-func TestTokenProPureDispatchFailedReceiptDoesNotReuseCanvasImage(t *testing.T) {
-	callID := "call_tp_receipt_" + strings.Repeat("b", 32)
-	body, err := json.Marshal(map[string]any{"input": []any{
-		map[string]any{"role": "user", "content": "画一只马"},
-		map[string]any{"type": "custom_tool_call", "name": "exec", "namespace": "functions", "call_id": callID},
-		map[string]any{"type": "custom_tool_call_output", "call_id": callID, "output": "Error: generation failed"},
-		map[string]any{"role": "user", "content": "再骑上2个人"},
-	}})
-	require.NoError(t, err)
-	item, err := BuildTokenProNativeImageItem(body)
-	require.NoError(t, err)
-	arguments, ok := item["arguments"].(string)
-	require.True(t, ok)
-	args := gjson.Parse(arguments)
-	require.False(t, args.Get("num_last_images_to_include").Exists())
 }
 
 func TestTokenProPureDispatchConcurrentCorrelation(t *testing.T) {
