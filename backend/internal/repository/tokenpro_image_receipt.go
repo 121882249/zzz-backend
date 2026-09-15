@@ -10,7 +10,8 @@ import (
 )
 
 func (s *redisImageTurnStore) PrepareCall(ctx context.Context, key string, call service.TokenProImageCall) (service.TokenProImageCall, error) {
-	if !service.ValidTokenProImageReceiptCall(call.CallID) || call.RequestHash == "" || call.PromptHash == "" {
+	if !service.ValidTokenProImageReceiptCall(call.CallID) || call.RequestHash == "" || call.PromptHash == "" ||
+		(call.Action != "generate" && call.Action != "edit") {
 		return call, service.ErrImageTurnConflict
 	}
 	call.State = "pending"
@@ -37,15 +38,19 @@ return ARGV[1]`, []string{key + ":receipt:active"}, string(data), call.RequestHa
 	return call, err
 }
 
-func (s *redisImageTurnStore) ClaimCall(ctx context.Context, key, promptHash string) (string, error) {
+func (s *redisImageTurnStore) ClaimCall(ctx context.Context, key, promptHash, action string) (string, error) {
+	if action != "generate" && action != "edit" {
+		return "", service.ErrImageTurnConflict
+	}
 	value, err := s.client.Eval(ctx, `
 local old=redis.call('GET',KEYS[1])
 if not old then return '' end
 local call=cjson.decode(old)
-if call.prompt_hash~=ARGV[1] or call.state~='pending' then return 'conflict' end
+local stored_action=call.action or 'generate'
+if call.prompt_hash~=ARGV[1] or stored_action~=ARGV[2] or call.state~='pending' then return 'conflict' end
 call.state='running'
 redis.call('SET',KEYS[1],cjson.encode(call),'KEEPTTL')
-return call.call_id`, []string{key + ":receipt:active"}, promptHash).Text()
+return call.call_id`, []string{key + ":receipt:active"}, promptHash, action).Text()
 	if err != nil {
 		return "", err
 	}

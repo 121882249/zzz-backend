@@ -24,6 +24,7 @@ type TokenProImageCall struct {
 	CallID      string `json:"call_id"`
 	RequestHash string `json:"request_hash"`
 	PromptHash  string `json:"prompt_hash"`
+	Action      string `json:"action"`
 	State       string `json:"state"`
 }
 
@@ -31,7 +32,7 @@ type TokenProImageCall struct {
 // and turn stores without receipt support retain the old native tool protocol.
 type TokenProImageCallStore interface {
 	PrepareCall(context.Context, string, TokenProImageCall) (TokenProImageCall, error)
-	ClaimCall(context.Context, string, string) (string, error)
+	ClaimCall(context.Context, string, string, string) (string, error)
 	FinishCall(context.Context, string, string, bool) error
 	CallResult(context.Context, string, string) (string, error)
 }
@@ -86,8 +87,12 @@ func TokenProImageReceiptStore(c *gin.Context, key *APIKey) (TokenProImageCallSt
 func PrepareTokenProImageReceipt(ctx context.Context, store TokenProImageCallStore, key string, body []byte, item gin.H) (gin.H, error) {
 	args := gjson.Parse(fmt.Sprint(item["arguments"]))
 	prompt := args.Get("prompt").String()
+	action := "generate"
+	if args.Get("referenced_image_paths").IsArray() || args.Get("num_last_images_to_include").Int() > 0 {
+		action = "edit"
+	}
 	call := TokenProImageCall{CallID: tokenProDispatchID("call_tp_receipt_"), RequestHash: TokenProImageReceiptHash(body),
-		PromptHash: TokenProImageReceiptHash([]byte(prompt)), State: "pending"}
+		PromptHash: TokenProImageReceiptHash([]byte(prompt)), Action: action, State: "pending"}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	call, err := store.PrepareCall(ctx, key, call)
@@ -97,7 +102,10 @@ func PrepareTokenProImageReceipt(ctx context.Context, store TokenProImageCallSto
 	if !ValidTokenProImageReceiptCall(call.CallID) {
 		return nil, ErrImageTurnConflict
 	}
-	encodedArgs, _ := json.Marshal(gin.H{"prompt": prompt})
+	encodedArgs := []byte(fmt.Sprint(item["arguments"]))
+	if !json.Valid(encodedArgs) {
+		return nil, ErrImageTurnConflict
+	}
 	marker, _ := json.Marshal(TokenProImageReadyMarker + call.CallID)
 	// The native handler emits the full image event and saves the original. Do
 	// not call generatedImage(): that would append the image to model follow-up.
@@ -214,8 +222,8 @@ func VerifyTokenProImageReceipt(ctx context.Context, store TokenProImageCallStor
 // Claim only a prepared receipt execution. Ordinary native images have no
 // receipt record and keep their existing behavior. Duplicate claims are denied.
 func ClaimTokenProImageReceipt(c *gin.Context, key *APIKey, parsed *OpenAIImagesRequest) (func(bool) error, error) {
-	if key == nil || !key.IsGlobal() || !TokenProPureImageGroup(key.Group) || parsed == nil ||
-		parsed.Endpoint != "/v1/images/generations" || parsed.Multipart || parsed.Stream {
+	if key == nil || !key.IsGlobal() || !TokenProPureImageGroup(key.Group) || parsed == nil || parsed.Stream ||
+		(parsed.Endpoint != "/v1/images/generations" && parsed.Endpoint != "/v1/images/edits") {
 		return nil, nil
 	}
 	v, _ := c.Get(TokenProImageReceiptContextKey)
@@ -229,7 +237,11 @@ func ClaimTokenProImageReceipt(c *gin.Context, key *APIKey, parsed *OpenAIImages
 	}
 	turnKey := TokenProImageTurnKey(key, binding.TurnID)
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
-	callID, err := store.ClaimCall(ctx, turnKey, TokenProImageReceiptHash([]byte(parsed.Prompt)))
+	action := "generate"
+	if parsed.IsEdits() {
+		action = "edit"
+	}
+	callID, err := store.ClaimCall(ctx, turnKey, TokenProImageReceiptHash([]byte(parsed.Prompt)), action)
 	cancel()
 	if err != nil || callID == "" {
 		return nil, err

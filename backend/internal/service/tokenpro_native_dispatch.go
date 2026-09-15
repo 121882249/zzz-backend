@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
+	"regexp"
 	"strings"
 )
+
+var tokenProAttachedImagePathPattern = regexp.MustCompile(`<image\b[^>]*\bpath="([^"]+)"`)
 
 // A stateless Codex-only tool dispatcher. It never generates image data or bills inference.
 func tokenProDispatchID(prefix string) string {
@@ -36,6 +39,8 @@ func BuildTokenProNativeImageItem(body []byte) (gin.H, error) {
 	}
 	var prompt string
 	var pending string
+	var imagePaths []string
+	imageInputs := 0
 	items := input.Array()
 	lastUser := 0
 	for index, item := range items {
@@ -45,7 +50,7 @@ func BuildTokenProNativeImageItem(body []byte) (gin.H, error) {
 	}
 	for _, item := range items[lastUser:] {
 		if item.Get("role").String() == "user" {
-			prompt, pending = "", ""
+			prompt, pending, imagePaths, imageInputs = "", "", nil, 0
 			if item.Get("content").Type == gjson.String {
 				prompt = item.Get("content").String()
 			}
@@ -54,10 +59,22 @@ func BuildTokenProNativeImageItem(body []byte) (gin.H, error) {
 				contents = item.Get("content").Array()
 			}
 			for _, content := range contents {
-				if content.Get("type").String() != "input_text" {
-					return nil, fmt.Errorf("native image dispatch currently supports new images only; image inputs must use Images edits")
+				switch content.Get("type").String() {
+				case "input_text":
+					text := content.Get("text").String()
+					for _, match := range tokenProAttachedImagePathPattern.FindAllStringSubmatch(text, -1) {
+						if len(match) == 2 && strings.TrimSpace(match[1]) != "" {
+							imagePaths = append(imagePaths, match[1])
+						}
+					}
+					if cleaned := tokenProNativeImagePromptText(text); cleaned != "" {
+						prompt += cleaned + "\n"
+					}
+				case "input_image":
+					imageInputs++
+				default:
+					return nil, fmt.Errorf("unsupported native image input type: %s", content.Get("type").String())
 				}
-				prompt += content.Get("text").String() + "\n"
 			}
 		}
 		if item.Get("type").String() == "function_call" && item.Get("name").String() == "imagegen" && strings.HasPrefix(item.Get("call_id").String(), "call_tp_pure_") {
@@ -73,8 +90,53 @@ func BuildTokenProNativeImageItem(body []byte) (gin.H, error) {
 	if strings.TrimSpace(prompt) == "" {
 		return nil, fmt.Errorf("missing image prompt")
 	}
-	args, _ := json.Marshal(gin.H{"prompt": strings.TrimSpace(prompt)})
+	if imageInputs > 5 {
+		return nil, fmt.Errorf("native image editing supports at most 5 image inputs")
+	}
+	argsMap := gin.H{"prompt": strings.TrimSpace(prompt)}
+	if imageInputs > 0 {
+		imagePaths = uniqueTokenProImagePaths(imagePaths)
+		if len(imagePaths) >= imageInputs {
+			argsMap["referenced_image_paths"] = imagePaths[:imageInputs]
+		} else {
+			argsMap["num_last_images_to_include"] = imageInputs
+		}
+	}
+	args, _ := json.Marshal(argsMap)
 	return gin.H{"type": "function_call", "id": tokenProDispatchID("fc_"), "call_id": tokenProDispatchID("call_tp_pure_"), "namespace": "image_gen", "name": "imagegen", "arguments": string(args)}, nil
+}
+
+func tokenProNativeImagePromptText(text string) string {
+	if index := strings.LastIndex(text, "## My request:"); index >= 0 {
+		text = text[index+len("## My request:"):]
+	}
+	lines := strings.Split(text, "\n")
+	kept := lines[:0]
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "<image ") || trimmed == "</image>" {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.TrimSpace(strings.Join(kept, "\n"))
+}
+
+func uniqueTokenProImagePaths(paths []string) []string {
+	seen := make(map[string]struct{}, len(paths))
+	unique := make([]string, 0, len(paths))
+	for _, path := range paths {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			continue
+		}
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		unique = append(unique, path)
+	}
+	return unique
 }
 
 func tokenProNativeImageResultText(output gjson.Result) string {

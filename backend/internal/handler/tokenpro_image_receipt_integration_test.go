@@ -52,8 +52,9 @@ func TestTokenProReceiptRealCodex(t *testing.T) {
 	store := repository.NewTokenProImageTurnStore(client)
 	var mu sync.Mutex
 	var requestSizes []int
+	var requestImageInputs []int
 	var hashes []string
-	var generationCalls, waitCalls, receiptDispatches int
+	var generationCalls, editCalls, waitCalls, receiptDispatches int
 	key := &service.APIKey{ID: 1, UserID: 1, Key: "fixture", KeyType: service.APIKeyTypeGlobal}
 	r := gin.New()
 	r.Use(func(c *gin.Context) { c.Set(string(middleware2.ContextKeyAPIKey), key); c.Next() })
@@ -86,6 +87,7 @@ func TestTokenProReceiptRealCodex(t *testing.T) {
 			}
 		}
 		requestSizes = append(requestSizes, len(body))
+		requestImageInputs = append(requestImageInputs, bytes.Count(body, []byte(`"type":"input_image"`)))
 		if bytes.Contains(body, []byte(`call_tp_wait_`)) {
 			waitCalls++
 		}
@@ -100,22 +102,53 @@ func TestTokenProReceiptRealCodex(t *testing.T) {
 			mu.Unlock()
 		}
 	})
-	r.POST("/v1/images/generations", func(c *gin.Context) {
+	serveImage := func(c *gin.Context, endpoint string) {
 		resolved := bind(c)
 		if resolved == nil {
 			return
 		}
-		body, _ := io.ReadAll(c.Request.Body)
-		prompt := gjson.GetBytes(body, "prompt").String()
-		finish, err := service.ClaimTokenProImageReceipt(c, resolved, &service.OpenAIImagesRequest{Endpoint: "/v1/images/generations", Prompt: prompt})
+		prompt := ""
+		multipartRequest := strings.HasPrefix(c.GetHeader("Content-Type"), "multipart/form-data")
+		if endpoint == "/v1/images/edits" && multipartRequest {
+			if formErr := c.Request.ParseMultipartForm(20 << 20); formErr != nil {
+				c.JSON(400, gin.H{"error": gin.H{"message": "invalid edit multipart"}})
+				return
+			}
+			prompt = c.Request.FormValue("prompt")
+			images := 0
+			fields := make([]string, 0, len(c.Request.MultipartForm.File))
+			for field, files := range c.Request.MultipartForm.File {
+				fields = append(fields, field)
+				if field != "image" && !strings.HasPrefix(field, "image[") {
+					continue
+				}
+				images += len(files)
+			}
+			if images == 0 {
+				c.JSON(400, gin.H{"error": gin.H{"message": "missing edit image; fields=" + strings.Join(fields, ",")}})
+				return
+			}
+		} else {
+			body, _ := io.ReadAll(c.Request.Body)
+			prompt = gjson.GetBytes(body, "prompt").String()
+			if endpoint == "/v1/images/edits" && len(gjson.GetBytes(body, "images").Array()) == 0 {
+				c.JSON(400, gin.H{"error": gin.H{"message": "missing JSON edit image"}})
+				return
+			}
+		}
+		finish, err := service.ClaimTokenProImageReceipt(c, resolved, &service.OpenAIImagesRequest{Endpoint: endpoint, Prompt: prompt, Multipart: multipartRequest})
 		if err != nil || finish == nil {
 			c.JSON(409, gin.H{"error": gin.H{"message": "receipt not prepared"}})
 			return
 		}
 		defer func() { require.NoError(t, finish(false)) }()
 		mu.Lock()
-		generationCalls++
-		seed := uint32(generationCalls)
+		if endpoint == "/v1/images/edits" {
+			editCalls++
+		} else {
+			generationCalls++
+		}
+		seed := uint32(generationCalls + editCalls)
 		mu.Unlock()
 		time.Sleep(1200 * time.Millisecond)
 		if strings.TrimSpace(prompt) == "FAIL" {
@@ -142,11 +175,13 @@ func TestTokenProReceiptRealCodex(t *testing.T) {
 		// the handler records completion, as on the real ForwardImages path.
 		time.Sleep(50 * time.Millisecond)
 		require.NoError(t, finish(true))
-	})
+	}
+	r.POST("/v1/images/generations", func(c *gin.Context) { serveImage(c, "/v1/images/generations") })
+	r.POST("/v1/images/edits", func(c *gin.Context) { serveImage(c, "/v1/images/edits") })
 	r.GET("/probe", func(c *gin.Context) {
 		mu.Lock()
 		defer mu.Unlock()
-		c.JSON(200, gin.H{"sizes": requestSizes, "hashes": hashes, "generation_calls": generationCalls,
+		c.JSON(200, gin.H{"sizes": requestSizes, "image_inputs": requestImageInputs, "hashes": hashes, "generation_calls": generationCalls, "edit_calls": editCalls,
 			"wait_calls": waitCalls, "receipt_dispatches": receiptDispatches})
 	})
 	server := httptest.NewServer(r)
@@ -162,15 +197,20 @@ func TestTokenProReceiptRealCodex(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	require.Equal(t, 6, generationCalls)
-	require.Len(t, hashes, 5)
-	require.Greater(t, receiptDispatches, 5)
+	require.Equal(t, 1, editCalls)
+	require.Len(t, hashes, 6)
+	require.Greater(t, receiptDispatches, 6)
 	require.Greater(t, waitCalls, 0, "long-running executions must use wait, not claim failure")
-	for _, size := range requestSizes {
-		require.Less(t, size, 100000, "no generated image bytes should be uploaded")
+	for index, size := range requestSizes {
+		if requestImageInputs[index] == 0 {
+			require.Less(t, size, 100000, "generated image bytes must not be uploaded during text-only receipt continuation")
+		} else {
+			require.Equal(t, 1, requestImageInputs[index], "an edit may carry its one source image, never the generated result again")
+		}
 	}
 	if path := os.Getenv("TOKENPRO_RECEIPT_REPORT"); path != "" {
 		data, _ := json.MarshalIndent(gin.H{"sizes": requestSizes, "generation_calls": generationCalls,
-			"saved_image_count": len(hashes), "wait_calls": waitCalls, "receipt_dispatches": receiptDispatches}, "", "  ")
+			"edit_calls": editCalls, "saved_image_count": len(hashes), "wait_calls": waitCalls, "receipt_dispatches": receiptDispatches}, "", "  ")
 		require.NoError(t, os.WriteFile(path, data, 0600))
 	}
 }

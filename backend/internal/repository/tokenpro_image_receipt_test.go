@@ -24,7 +24,7 @@ func TestImageReceiptStoreLifecycle(t *testing.T) {
 	require.True(t, ok)
 	ctx := context.Background()
 	key := service.TokenProImageTurnKey(&service.APIKey{ID: 7, UserID: 8, Key: "fixture"}, "turn")
-	call := service.TokenProImageCall{CallID: "call_tp_receipt_" + strings.Repeat("a", 32), RequestHash: "req-A", PromptHash: "prompt"}
+	call := service.TokenProImageCall{CallID: "call_tp_receipt_" + strings.Repeat("a", 32), RequestHash: "req-A", PromptHash: "prompt", Action: "generate"}
 	prepared, err := a.PrepareCall(ctx, key, call)
 	require.NoError(t, err)
 	require.Equal(t, "pending", prepared.State)
@@ -36,7 +36,9 @@ func TestImageReceiptStoreLifecycle(t *testing.T) {
 	retry.RequestHash = "req-B"
 	_, err = b.PrepareCall(ctx, key, retry)
 	require.ErrorIs(t, err, service.ErrImageTurnConflict)
-	_, err = a.ClaimCall(ctx, key, "wrong-prompt")
+	_, err = a.ClaimCall(ctx, key, "wrong-prompt", "generate")
+	require.ErrorIs(t, err, service.ErrImageTurnConflict)
+	_, err = a.ClaimCall(ctx, key, "prompt", "edit")
 	require.ErrorIs(t, err, service.ErrImageTurnConflict)
 	var winners atomic.Int32
 	var wg sync.WaitGroup
@@ -44,7 +46,7 @@ func TestImageReceiptStoreLifecycle(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			id, claimErr := b.ClaimCall(ctx, key, "prompt")
+			id, claimErr := b.ClaimCall(ctx, key, "prompt", "generate")
 			if claimErr == nil && id == call.CallID {
 				winners.Add(1)
 			}
@@ -60,11 +62,11 @@ func TestImageReceiptStoreLifecycle(t *testing.T) {
 	require.Equal(t, "succeeded", state)
 	_, err = b.CallResult(ctx, key+"other-key-or-turn", call.CallID)
 	require.ErrorIs(t, err, service.ErrImageTurnMissing)
-	_, err = b.ClaimCall(ctx, key, "prompt")
+	_, err = b.ClaimCall(ctx, key, "prompt", "generate")
 	require.ErrorIs(t, err, service.ErrImageTurnConflict)
 	_, err = a.PrepareCall(ctx, key, retry)
 	require.NoError(t, err, "a new user request may start after the preceding generation finished")
-	_, err = b.ClaimCall(ctx, key, "prompt")
+	_, err = b.ClaimCall(ctx, key, "prompt", "generate")
 	require.NoError(t, err)
 	require.NoError(t, b.FinishCall(ctx, key, retry.CallID, false))
 	state, err = a.CallResult(ctx, key, retry.CallID)
@@ -76,7 +78,7 @@ func TestImageReceiptStoreLifecycle(t *testing.T) {
 	r.FastForward(31 * time.Minute)
 	_, err = a.CallResult(ctx, key, call.CallID)
 	require.ErrorIs(t, err, service.ErrImageTurnMissing)
-	id, err := a.ClaimCall(ctx, "legacy-turn-without-receipts", "prompt")
+	id, err := a.ClaimCall(ctx, "legacy-turn-without-receipts", "prompt", "generate")
 	require.NoError(t, err)
 	require.Empty(t, id)
 }

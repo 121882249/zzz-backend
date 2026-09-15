@@ -17,6 +17,37 @@ func TestTokenProPureDispatchRejectsInvalidInputs(t *testing.T) {
 	}
 }
 
+func TestTokenProPureDispatchBuildsNativeImageEdit(t *testing.T) {
+	body := []byte(`{"input":[{"role":"user","content":[` +
+		`{"type":"input_text","text":"# Files mentioned by the user:\n\n## source.png: /tmp/source.png\n\n## My request:\n带上墨镜\n"},` +
+		`{"type":"input_text","text":"<image name=[Image #1] path=\"/tmp/source.png\">"},` +
+		`{"type":"input_image","image_url":"data:image/png;base64,AQID"},` +
+		`{"type":"input_text","text":"</image>"}` +
+		`]}]}`)
+	item, err := BuildTokenProNativeImageItem(body)
+	require.NoError(t, err)
+	arguments, ok := item["arguments"].(string)
+	require.True(t, ok)
+	args := gjson.Parse(arguments)
+	require.Equal(t, "带上墨镜", args.Get("prompt").String())
+	require.Equal(t, "/tmp/source.png", args.Get("referenced_image_paths.0").String())
+	require.False(t, args.Get("num_last_images_to_include").Exists())
+}
+
+func TestTokenProPureDispatchUsesRecentImageWhenNoLocalPathExists(t *testing.T) {
+	item, err := BuildTokenProNativeImageItem([]byte(`{"input":[{"role":"user","content":[` +
+		`{"type":"input_text","text":"change the background"},` +
+		`{"type":"input_image","image_url":"https://example.com/source.png"}` +
+		`]}]}`))
+	require.NoError(t, err)
+	arguments, ok := item["arguments"].(string)
+	require.True(t, ok)
+	args := gjson.Parse(arguments)
+	require.Equal(t, "change the background", args.Get("prompt").String())
+	require.Equal(t, int64(1), args.Get("num_last_images_to_include").Int())
+	require.False(t, args.Get("referenced_image_paths").Exists())
+}
+
 func TestTokenProPureDispatchConcurrentCorrelation(t *testing.T) {
 	const count = 64
 	ids := make(chan string, count)

@@ -91,6 +91,13 @@ try:
     assert state()["generation_calls"] == 1, state()
     call("turn/steer", {"threadId": first, "expectedTurnId": turn, "input": [{"type": "text", "text": "second image"}]})
     wait(first, turn)
+    source = next(home.glob("generated_images/**/*.png"))
+    edit = thread()
+    edited_turn = call("turn/start", {"threadId": edit, "input": [
+        {"type": "text", "text": "add sunglasses"},
+        {"type": "localImage", "path": str(source)},
+    ]})["turn"]["id"]
+    wait(edit, edited_turn)
     wait(first, start(first, "third image"))
     a, b = thread(), thread(model_b)
     ta, tb = start(a, "IDENTICAL_PROMPT"), start(b, "IDENTICAL_PROMPT")
@@ -101,16 +108,21 @@ try:
     snapshot = state()
     images = list(home.glob("generated_images/**/*.png"))
     actual = sorted(hashlib.sha256(file.read_bytes()).hexdigest() for file in images)
-    assert actual == sorted(snapshot["hashes"]) and len(actual) == 5, snapshot
+    assert actual == sorted(snapshot["hashes"]) and len(actual) == 6, snapshot
     completed = [e["params"]["item"] for e in events if e.get("method") == "item/completed" and e.get("params", {}).get("item", {}).get("type") == "imageGeneration"]
-    assert len([i for i in completed if i.get("status") == "completed"]) == 5
+    assert len([i for i in completed if i.get("status") == "completed"]) == 6
     assert len([i for i in completed if i.get("status") == "failed"]) == 1
     failure_text = " ".join(str(e.get("params", {}).get("item", {}).get("text", "")) for e in events
                             if e.get("method") == "item/completed" and e.get("params", {}).get("threadId") == failure)
     assert "生成好了" not in failure_text and any(word in failure_text for word in ("没能生成", "未能正常", "失败")), failure_text
-    assert max(snapshot["sizes"]) < 100000, snapshot
+    for size, image_inputs in zip(snapshot["sizes"], snapshot["image_inputs"]):
+        if image_inputs == 0:
+            assert size < 100000, snapshot
+        else:
+            assert image_inputs == 1, snapshot
     print(json.dumps({"status": "PASS", "images_verified": len(actual), "largest_upload": max(snapshot["sizes"]),
-                      "generation_calls": snapshot["generation_calls"], "wait_calls": snapshot["wait_calls"], "home": str(home)}))
+                      "generation_calls": snapshot["generation_calls"], "edit_calls": snapshot["edit_calls"],
+                      "wait_calls": snapshot["wait_calls"], "home": str(home)}))
 finally:
     p.terminate()
     try:
