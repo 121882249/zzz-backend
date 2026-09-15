@@ -102,6 +102,7 @@ func TokenProDirectRoute(stores ...service.TokenProImageTurnStore) gin.HandlerFu
 				}
 				imageRoute = tokenProDirectModelPrefix + strconv.FormatInt(route.GroupID, 10) + "-" + base64.RawURLEncoding.EncodeToString([]byte(route.Model))
 				c.Set(service.TokenProImageSessionContextKey, route.ThreadID)
+				c.Set(service.TokenProImageReceiptContextKey, &service.TokenProImageReceiptContext{Store: turnStore, TurnID: imageTurnID})
 			}
 		}
 		resolve := func(model string) (int64, string, bool, error) {

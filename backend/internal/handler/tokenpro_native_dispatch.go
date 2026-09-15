@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -22,9 +23,24 @@ func (h *OpenAIGatewayHandler) dispatchTokenProNativeImage(c *gin.Context, apiKe
 		!service.TokenProPureImageGroup(apiKey.Group) {
 		return false
 	}
-	item, err := service.BuildTokenProNativeImageItem(body)
+	store, turnKey := service.TokenProImageReceiptStore(c, apiKey)
+	item, handled, err := service.BuildTokenProImageReceiptContinuation(body, func(callID string) error {
+		return service.VerifyTokenProImageReceipt(c.Request.Context(), store, turnKey, callID)
+	})
+	if !handled {
+		item, err = service.BuildTokenProNativeImageItem(body)
+		if err == nil && item["type"] == "function_call" && store != nil && service.TokenProSupportsImageReceipt(body) {
+			item, err = service.PrepareTokenProImageReceipt(c.Request.Context(), store, turnKey, body, item)
+		}
+	}
 	if err != nil {
-		h.handleStreamingAwareError(c, http.StatusBadRequest, "native_image_dispatch_error", err.Error(), *streamStarted)
+		status := http.StatusBadRequest
+		if errors.Is(err, service.ErrImageReceiptNotReady) {
+			status = http.StatusServiceUnavailable
+		} else if errors.Is(err, service.ErrImageTurnConflict) {
+			status = http.StatusConflict
+		}
+		h.handleStreamingAwareError(c, status, "native_image_dispatch_error", err.Error(), *streamStarted)
 		return true
 	}
 	id := "resp_" + strings.ReplaceAll(uuid.NewString(), "-", "")
@@ -32,6 +48,9 @@ func (h *OpenAIGatewayHandler) dispatchTokenProNativeImage(c *gin.Context, apiKe
 		"usage": gin.H{"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}}
 	c.Header("Cache-Control", "no-store")
 	c.Header("X-TokenPro-Native-Dispatch", "v1")
+	if handled || item["type"] == "custom_tool_call" {
+		c.Header("X-TokenPro-Image-Receipt", "text-v1")
+	}
 	if !stream {
 		c.JSON(http.StatusOK, response)
 		return true

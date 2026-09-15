@@ -116,6 +116,22 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		h.openAISecurityAuditError(c, decision)
 		return
 	}
+	finishReceipt, receiptErr := service.ClaimTokenProImageReceipt(c, apiKey, parsed)
+	if receiptErr != nil {
+		if errors.Is(receiptErr, service.ErrImageTurnConflict) {
+			h.errorResponse(c, http.StatusConflict, "native_image_receipt_conflict", "This image execution is already running or completed. No additional image was generated.")
+		} else {
+			h.errorResponse(c, http.StatusServiceUnavailable, "native_image_receipt_unavailable", "Image execution state is temporarily unavailable. No additional image was generated.")
+		}
+		return
+	}
+	if finishReceipt != nil {
+		defer func() {
+			if err := finishReceipt(false); err != nil {
+				reqLog.Warn("openai.images.receipt_finish_failed", zap.Error(err))
+			}
+		}()
+	}
 	imageReleaseFunc, acquired := h.acquireImageGenerationSlot(c, streamStarted)
 	if !acquired {
 		return
@@ -268,6 +284,11 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 			}()
 			return h.gatewayService.ForwardImages(requestCtx, c, account, body, parsed, channelMapping.MappedModel)
 		}()
+		if result != nil && result.ImageCount > 0 && finishReceipt != nil {
+			if receiptErr := finishReceipt(true); receiptErr != nil {
+				reqLog.Warn("openai.images.receipt_finish_failed", zap.Error(receiptErr))
+			}
+		}
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()
 		upstreamLatencyMs, _ := getContextInt64(c, service.OpsUpstreamLatencyMsKey)
 		responseLatencyMs := forwardDurationMs
