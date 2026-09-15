@@ -84,6 +84,35 @@ func TestTokenProPureDispatchOptInOnly(t *testing.T) {
 	}
 }
 
+func TestTokenProCompletedImageDispatch(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.6-sol","input":[{"role":"user","content":"draw"},{"type":"function_call","namespace":"image_gen","name":"imagegen","call_id":"call_a"},{"type":"function_call_output","call_id":"call_a","output":[{"type":"input_image","image_url":"data:image/png;base64,YQ=="},{"type":"input_text","text":"Saved to /tmp/generated_images/a.png"}]}]}`)
+	for _, stream := range []bool{false, true} {
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+		c.Set(service.TokenProTextImageDeliveryContextKey, true)
+		started := false
+		h := &OpenAIGatewayHandler{}
+		handled := h.dispatchTokenProCompletedImage(c, "gpt-5.6-sol", body, stream, &started)
+		require.True(t, handled)
+		require.Equal(t, "text-v1", rec.Header().Get("X-TokenPro-Image-Completion"))
+		require.Contains(t, rec.Body.String(), "图片生成好了")
+		require.Contains(t, rec.Body.String(), `"total_tokens":0`)
+		require.Equal(t, stream, started)
+	}
+}
+
+func TestTokenProCompletedImageDispatchRequiresDeliveryBinding(t *testing.T) {
+	body := []byte(`{"input":[{"role":"user","content":"draw"},{"type":"function_call","namespace":"image_gen","name":"imagegen","call_id":"call_a"},{"type":"function_call_output","call_id":"call_a","output":[{"type":"input_image","image_url":"data:image/png;base64,YQ=="}]}]}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	started := false
+	h := &OpenAIGatewayHandler{}
+	require.False(t, h.dispatchTokenProCompletedImage(c, "gpt-5.6-sol", body, false, &started))
+	require.Empty(t, rec.Body.String())
+}
+
 func TestTokenProPureDispatchGroupDescriptionField(t *testing.T) {
 	for _, tc := range []struct {
 		name, platform, groupName, description string

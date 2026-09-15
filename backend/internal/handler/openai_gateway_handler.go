@@ -635,6 +635,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	if !nativeV2 && h.dispatchTokenProNativeImage(c, apiKey, reqModel, requestPlatform, body, reqStream, &streamStarted) {
 		return
 	}
+	if !nativeV2 && h.dispatchTokenProCompletedImage(c, reqModel, body, reqStream, &streamStarted) {
+		return
+	}
 	c.Request = c.Request.WithContext(service.WithOpenAIGuardianParentAffinity(
 		c.Request.Context(), c, sessionHashBody, reqModel,
 	))

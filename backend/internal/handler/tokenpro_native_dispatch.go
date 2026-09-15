@@ -43,26 +43,50 @@ func (h *OpenAIGatewayHandler) dispatchTokenProNativeImage(c *gin.Context, apiKe
 		h.handleStreamingAwareError(c, status, "native_image_dispatch_error", err.Error(), *streamStarted)
 		return true
 	}
-	id := "resp_" + strings.ReplaceAll(uuid.NewString(), "-", "")
-	response := gin.H{"id": id, "object": "response", "model": model, "status": "completed", "output": []any{item},
-		"usage": gin.H{"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}}
-	c.Header("Cache-Control", "no-store")
 	c.Header("X-TokenPro-Native-Dispatch", "v1")
 	if handled || item["type"] == "custom_tool_call" {
 		c.Header("X-TokenPro-Image-Receipt", "text-v1")
 	}
+	h.writeTokenProSyntheticResponse(c, model, item, stream, streamStarted)
+	return true
+}
+
+// A normal GPT turn has already paid for its planning response and the native
+// Images endpoint has already billed the delivered image. When the client sends
+// that successful tool result back, finish locally instead of selecting another
+// text account and charging a second inference for a fixed acknowledgement.
+func (h *OpenAIGatewayHandler) dispatchTokenProCompletedImage(c *gin.Context, model string, body []byte, stream bool, streamStarted *bool) bool {
+	if !service.TokenProNativeImageDelivery(c) || !isBareOpenAIResponsesPath(c) || service.IsOpenAIResponsesCompactPath(c) {
+		return false
+	}
+	item, ok := service.BuildTokenProCompletedImageMessage(body)
+	if !ok {
+		return false
+	}
+	c.Header("X-TokenPro-Image-Completion", "text-v1")
+	h.writeTokenProSyntheticResponse(c, model, item, stream, streamStarted)
+	return true
+}
+
+func (h *OpenAIGatewayHandler) writeTokenProSyntheticResponse(c *gin.Context, model string, item gin.H, stream bool, streamStarted *bool) {
+	if _, exists := item["id"]; !exists {
+		item["id"] = "msg_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	}
+	id := "resp_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	response := gin.H{"id": id, "object": "response", "model": model, "status": "completed", "output": []any{item},
+		"usage": gin.H{"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}}
+	c.Header("Cache-Control", "no-store")
 	if !stream {
 		c.JSON(http.StatusOK, response)
-		return true
+		return
 	}
 	c.Header("Content-Type", "text/event-stream")
 	*streamStarted = true
 	for _, event := range []gin.H{{"type": "response.output_item.done", "output_index": 0, "item": item}, {"type": "response.completed", "response": response}} {
 		data, _ := json.Marshal(event)
 		if _, err := fmt.Fprintf(c.Writer, "data: %s\n\n", data); err != nil {
-			return true
+			return
 		}
 	}
 	c.Writer.Flush()
-	return true
 }

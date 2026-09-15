@@ -37,6 +37,49 @@ func TestTokenProDisplayedImagePathsScope(t *testing.T) {
 	}
 }
 
+func TestBuildTokenProCompletedImageMessage(t *testing.T) {
+	imageCall := func(id string) map[string]any {
+		return map[string]any{"type": "function_call", "name": "imagegen", "namespace": "image_gen", "call_id": id}
+	}
+	imageOutput := func(id, imageURL string) map[string]any {
+		return map[string]any{"type": "function_call_output", "call_id": id, "output": []any{
+			map[string]any{"type": "input_image", "image_url": imageURL},
+			map[string]any{"type": "input_text", "text": "Saved to /tmp/generated_images/a.png"},
+		}}
+	}
+	user := func(text string) map[string]any { return map[string]any{"role": "user", "content": text} }
+	otherCall := map[string]any{"type": "function_call", "name": "exec", "namespace": "functions", "call_id": "shell"}
+
+	for _, tc := range []struct {
+		name  string
+		items []any
+		want  bool
+	}{
+		{"one image", []any{user("draw"), imageCall("a"), imageOutput("a", "data:image/png;base64,YQ==")}, true},
+		{"string output", []any{user("draw"), imageCall("a"), map[string]any{"type": "function_call_output", "call_id": "a", "output": `[{"type":"input_image","image_url":"data:image/png;base64,YQ=="}]`}}, true},
+		{"parallel images", []any{user("draw two"), imageCall("a"), imageCall("b"), imageOutput("a", "data:image/png;base64,YQ=="), imageOutput("b", "data:image/webp;base64,Yg==")}, true},
+		{"historical image", []any{user("draw"), imageCall("a"), imageOutput("a", "data:image/png;base64,YQ=="), user("explain it")}, false},
+		{"unfinished image", []any{user("draw"), imageCall("a")}, false},
+		{"failed image", []any{user("draw"), imageCall("a"), map[string]any{"type": "function_call_output", "call_id": "a", "output": "generation failed"}}, false},
+		{"empty data uri", []any{user("draw"), imageCall("a"), imageOutput("a", "data:image/png;base64,")}, false},
+		{"mixed tool", []any{user("draw"), imageCall("a"), imageOutput("a", "data:image/png;base64,YQ=="), otherCall}, false},
+		{"unknown output", []any{user("draw"), imageCall("a"), imageOutput("a", "data:image/png;base64,YQ=="), map[string]any{"type": "custom_tool_call_output", "call_id": "shell", "output": "ok"}}, false},
+		{"assistant already replied", []any{user("draw"), imageCall("a"), imageOutput("a", "data:image/png;base64,YQ=="), map[string]any{"type": "message", "role": "assistant", "content": "done"}}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body, err := json.Marshal(map[string]any{"input": tc.items})
+			require.NoError(t, err)
+			item, ok := BuildTokenProCompletedImageMessage(body)
+			require.Equal(t, tc.want, ok)
+			if tc.want {
+				encoded, err := json.Marshal(item)
+				require.NoError(t, err)
+				require.Contains(t, string(encoded), "图片生成好了")
+			}
+		})
+	}
+}
+
 func TestTokenProImageReplySplitStream(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
