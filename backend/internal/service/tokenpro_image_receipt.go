@@ -169,7 +169,7 @@ func BuildTokenProImageReceiptContinuation(body []byte, verify func(string) erro
 	if rootIndex < lastUser {
 		return nil, false, nil
 	}
-	text := "图片未能正常返回，请重新生成。"
+	var text string
 	if strings.Contains(outputText, TokenProImageReadyMarker+root) {
 		if verify == nil {
 			return nil, true, ErrImageReceiptNotReady
