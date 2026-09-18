@@ -73,6 +73,7 @@ func RegisterUserRoutes(
 		}
 
 		// API Key管理
+		authenticated.GET("/global-key", h.APIKey.GetGlobal)
 		keys := authenticated.Group("/keys")
 		{
 			keys.GET("", h.APIKey.List)
