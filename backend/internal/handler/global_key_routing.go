@@ -14,6 +14,7 @@ import (
 )
 
 const tokenProGroupIDHeader = "X-TokenPro-Group-Id"
+const tokenProGlobalGroupResolvedContextKey = "tokenpro.global_group_resolved"
 
 // ResolveGlobalKeyForRoute resolves a global key before route-level platform
 // dispatch. The regular handlers repeat this request-scoped resolution after
@@ -78,12 +79,10 @@ func resolveGlobalAPIKeyForModel(
 		return apiKey, nil
 	}
 	// Route-level dispatch and the concrete handler may both resolve a global
-	// key. Reuse the already validated request-scoped group on the second pass.
-	if apiKey.Group != nil && apiKey.GroupID != nil {
+	// key. Only a marker created in this request proves that the group was
+	// validated. Persisted legacy group_id data on a global key is never trusted.
+	if resolved, exists := c.Get(tokenProGlobalGroupResolvedContextKey); exists && resolved == true && apiKey.Group != nil && apiKey.GroupID != nil {
 		return apiKey, nil
-	}
-	if gatewayService == nil {
-		return nil, service.ErrNoAvailableAccounts
 	}
 	if rawGroupID == "" {
 		return nil, service.ErrGlobalGroupRequired
@@ -91,6 +90,9 @@ func resolveGlobalAPIKeyForModel(
 	parsed, parseErr := strconv.ParseInt(rawGroupID, 10, 64)
 	if parseErr != nil || parsed <= 0 {
 		return nil, service.ErrGlobalGroupRequired
+	}
+	if gatewayService == nil {
+		return nil, service.ErrNoAvailableAccounts
 	}
 	resolved, err := gatewayService.ResolveGlobalGroupForModelWithUserAndGroup(
 		c.Request.Context(), apiKey.User, userID, "", nativeImageAuthorizationModel(c, model), &parsed, nil,
@@ -103,6 +105,7 @@ func resolveGlobalAPIKeyForModel(
 	}
 	requestKey := cloneAPIKeyWithGroup(apiKey, resolved.Group)
 	c.Set(string(middleware2.ContextKeyAPIKey), requestKey)
+	c.Set(tokenProGlobalGroupResolvedContextKey, true)
 	// Downstream pricing/profit-control code reads the authenticated group from
 	// ctxkey.Group, so keep the resolved group request-scoped as well. The
 	// middleware's cached API key is never mutated.

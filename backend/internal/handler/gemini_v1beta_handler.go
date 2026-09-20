@@ -80,6 +80,13 @@ func (h *GatewayHandler) GeminiV1BetaListModels(c *gin.Context) {
 		c.JSON(http.StatusOK, gemini.FallbackModelsList())
 		return
 	}
+	// A global key has no fixed group until a concrete model is requested.
+	// Return the native fallback catalog instead of attempting a nil-group
+	// upstream lookup; generation requests still resolve a group per model.
+	if apiKey.IsGlobal() {
+		c.JSON(http.StatusOK, gemini.FallbackModelsList())
+		return
+	}
 
 	account, err := h.geminiCompatService.SelectAccountForAIStudioEndpoints(c.Request.Context(), apiKey.GroupID)
 	if err != nil {

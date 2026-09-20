@@ -315,11 +315,11 @@ const { t } = i18n
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
+const user = computed(() => authStore.user)
 const paymentStore = usePaymentStore()
 const subscriptionStore = useSubscriptionStore()
 const appStore = useAppStore()
 
-const user = computed(() => authStore.user)
 const activeSubscriptions = computed(() => subscriptionStore.activeSubscriptions)
 
 function getDaysRemaining(expiresAt: string): number {

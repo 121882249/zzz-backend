@@ -171,6 +171,11 @@ const mountBulkDeleteView = () => mount(UsersView, {
   }
 })
 
+const IpGeoCellStub = {
+  props: ['ip'],
+  template: '<button data-test="ip-geo-cell">{{ ip }} · 获取地区</button>'
+}
+
 describe('admin UsersView', () => {
   beforeEach(() => {
     vi.useRealTimers()

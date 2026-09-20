@@ -24,7 +24,7 @@ func TestTokenProPureDispatchAfterAdmission(t *testing.T) {
 		{"allowed-sse", true, true, true, true, true, 200},
 		{"unauthenticated", false, true, true, true, false, 401},
 		{"image-disabled", true, true, false, true, false, 403},
-		{"unresolved-global-group", true, false, true, true, false, 503},
+		{"unresolved-global-group", true, false, true, true, false, 400},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			gin.SetMode(gin.TestMode)
@@ -44,6 +44,7 @@ func TestTokenProPureDispatchAfterAdmission(t *testing.T) {
 			if tc.group {
 				key.GroupID = &groupID
 				key.Group = &service.Group{ID: 65, Platform: service.PlatformOpenAI, Description: "生图", AllowImageGeneration: tc.allow, Status: service.StatusActive}
+				c.Set(tokenProGlobalGroupResolvedContextKey, true)
 			}
 			if tc.auth {
 				c.Set(string(middleware2.ContextKeyAPIKey), key)
