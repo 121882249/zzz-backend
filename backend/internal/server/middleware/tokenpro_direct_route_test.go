@@ -47,6 +47,27 @@ func TestTokenProDirectRouteRestoresModelAndPinsGroup(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, w.Code)
 }
 
+func TestDecodeTokenProDirectModelSupportsLegacyAndReadableRoutes(t *testing.T) {
+	const model = "gpt-5.6-luna"
+	legacy := "tp-g57-" + base64.RawURLEncoding.EncodeToString([]byte(model))
+	for _, route := range []string{legacy, "tp-g57-" + model} {
+		groupID, publicModel, matched := decodeTokenProDirectModel(route)
+		require.True(t, matched)
+		require.Equal(t, int64(57), groupID)
+		require.Equal(t, model, publicModel)
+	}
+
+	for _, route := range []string{
+		"tp-g0-gpt-5.6-luna",
+		"tp-g57-",
+		"tp-g57-model with spaces",
+		"tp-g57-model?unsafe=true",
+	} {
+		_, _, matched := decodeTokenProDirectModel(route)
+		require.False(t, matched, route)
+	}
+}
+
 func TestTokenProNativeModeRequiresRoutedGlobalRequest(t *testing.T) {
 	for _, tc := range []struct {
 		name, model, keyType, path string

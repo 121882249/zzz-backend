@@ -200,6 +200,8 @@ export default {
     mySubscriptions: 'My Subscriptions',
     buySubscription: 'Recharge / Subscription',
     downloadApp: 'Download Connector',
+    recharge: 'Recharge',
+    subscribe: 'Subscription',
     docs: 'Docs',
     myOrders: 'My Orders',
     orderManagement: 'Orders',

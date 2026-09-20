@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -349,13 +350,32 @@ func decodeTokenProDirectModel(model string) (int64, string, bool) {
 	if err != nil || groupID <= 0 {
 		return 0, "", false
 	}
-	decoded, err := base64.RawURLEncoding.DecodeString(rest[separator+1:])
-	if err != nil || !utf8.Valid(decoded) {
+	payload := rest[separator+1:]
+	// Keep the original Base64URL route fully compatible with installed clients
+	// and saved conversations. New clients use the readable model name directly.
+	if decoded, decodeErr := base64.RawURLEncoding.DecodeString(payload); decodeErr == nil && utf8.Valid(decoded) {
+		if publicModel := strings.TrimSpace(string(decoded)); validTokenProPublicModel(publicModel) {
+			return groupID, publicModel, true
+		}
+	}
+	if !validTokenProPublicModel(payload) {
 		return 0, "", false
 	}
-	publicModel := strings.TrimSpace(string(decoded))
-	if publicModel == "" || len(publicModel) > 512 {
-		return 0, "", false
+	return groupID, payload, true
+}
+
+func validTokenProPublicModel(model string) bool {
+	if model == "" || len(model) > 512 || strings.TrimSpace(model) != model {
+		return false
 	}
-	return groupID, publicModel, true
+	for index, char := range model {
+		if unicode.IsLetter(char) || unicode.IsDigit(char) {
+			continue
+		}
+		if index > 0 && strings.ContainsRune("._:/-", char) {
+			continue
+		}
+		return false
+	}
+	return true
 }
