@@ -635,6 +635,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	if !nativeV2 && h.dispatchTokenProNativeImage(c, apiKey, reqModel, requestPlatform, body, reqStream, &streamStarted) {
 		return
 	}
+	if !nativeV2 && service.TokenProNativeImageDelivery(c) && !service.TokenProNativeImages(c) && h.finishTokenProImageContinuation(c, reqModel, body, reqStream, &streamStarted) {
+		return
+	}
 	c.Request = c.Request.WithContext(service.WithOpenAIGuardianParentAffinity(
 		c.Request.Context(), c, sessionHashBody, reqModel,
 	))
@@ -3186,6 +3189,39 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		}
 	}
 
+}
+
+func (h *OpenAIGatewayHandler) finishTokenProImageContinuation(c *gin.Context, model string, body []byte, stream bool, streamStarted *bool) bool {
+	item, completed := service.BuildTokenProCompletedImageMessage(body)
+	if !completed {
+		return false
+	}
+	response := gin.H{
+		"id":     "resp_" + strings.ReplaceAll(uuid.NewString(), "-", ""),
+		"object": "response",
+		"model":  model,
+		"status": "completed",
+		"output": []any{item},
+		"usage":  gin.H{"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+	}
+	c.Header("Cache-Control", "no-store")
+	c.Header("X-TokenPro-Image-Completion", "text-v1")
+	if !stream {
+		c.JSON(http.StatusOK, response)
+		return true
+	}
+	c.Header("Content-Type", "text/event-stream")
+	*streamStarted = true
+	first := gin.H{"type": "response.output_item.done", "output_index": 0, "item": item}
+	second := gin.H{"type": "response.completed", "response": response}
+	for _, event := range []gin.H{first, second} {
+		data, _ := json.Marshal(event)
+		if _, err := fmt.Fprintf(c.Writer, "data: %s\n\n", data); err != nil {
+			return true
+		}
+	}
+	c.Writer.Flush()
+	return true
 }
 
 func (h *OpenAIGatewayHandler) recoverResponsesPanic(c *gin.Context, streamStarted *bool) {
