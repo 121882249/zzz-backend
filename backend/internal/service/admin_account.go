@@ -919,6 +919,20 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 			return err
 		}
 	}
+	if _, exists := updates[openAIResponseModelRewriteEnabledKey]; exists {
+		account, err := s.accountRepo.GetByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		if !account.IsOpenAI() {
+			delete(updates, openAIResponseModelRewriteEnabledKey)
+		}
+		if value, ok := updates[openAIResponseModelRewriteEnabledKey]; ok {
+			if _, valid := value.(bool); !valid {
+				return infraerrors.BadRequest("INVALID_ACCOUNT_EXTRA", "openai_response_model_rewrite_enabled must be a boolean")
+			}
+		}
+	}
 	if len(updates) == 0 {
 		return nil
 	}

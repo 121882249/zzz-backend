@@ -664,7 +664,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			}
 			// Replace model in response if needed.
 			// Fast path: most events do not contain model field values.
-			if needModelReplace && mappedModel != "" && strings.Contains(line, mappedModel) {
+			if account != nil && account.IsOpenAIResponseModelRewriteEnabled() {
+				line = s.rewriteOpenAIResponseModelInSSELine(line, originalModel)
+			} else if needModelReplace && mappedModel != "" && strings.Contains(line, mappedModel) {
 				line = s.replaceModelInSSELine(line, mappedModel, originalModel)
 			}
 			startsClientOutput := forceFlushFailedEvent || openAIStreamDataStartsClientOutput(data, eventType)
@@ -1097,6 +1099,18 @@ func (s *OpenAIGatewayService) replaceModelInSSELine(line, fromModel, toModel st
 	}
 
 	return line
+}
+
+func (s *OpenAIGatewayService) rewriteOpenAIResponseModelInSSELine(line, toModel string) string {
+	data, ok := extractOpenAISSEDataLine(line)
+	if !ok || data == "" || data == "[DONE]" {
+		return line
+	}
+	updated := s.rewriteOpenAIResponseModelFields([]byte(data), toModel)
+	if string(updated) == data {
+		return line
+	}
+	return "data: " + string(updated)
 }
 
 // correctToolCallsInResponseBody 修正响应体中的工具调用
@@ -1633,7 +1647,9 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 	logOpenAISuccessMissingUsage(ctx, c, account, resp, usage, "json", false)
 
 	// Replace model in response if needed
-	if originalModel != mappedModel {
+	if account != nil && account.IsOpenAIResponseModelRewriteEnabled() {
+		body = s.rewriteOpenAIResponseModelFields(body, originalModel)
+	} else if originalModel != mappedModel {
 		body = s.replaceModelInResponseBody(body, mappedModel, originalModel)
 	}
 	body, err = restoreGrokResponsesClientToolPayload(c, body)
@@ -1751,7 +1767,13 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 		restoredBody = restoreCodexToolNamesFromContext(c, restoredBody)
 		body = restoredBody
 	} else {
-		if originalModel != mappedModel {
+		if account != nil && account.IsOpenAIResponseModelRewriteEnabled() {
+			lines := strings.Split(bodyText, "\n")
+			for i := range lines {
+				lines[i] = s.rewriteOpenAIResponseModelInSSELine(lines[i], originalModel)
+			}
+			bodyText = strings.Join(lines, "\n")
+		} else if originalModel != mappedModel {
 			bodyText = s.replaceModelInSSEBody(bodyText, mappedModel, originalModel)
 		}
 		body = []byte(bodyText)

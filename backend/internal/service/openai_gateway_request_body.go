@@ -805,6 +805,24 @@ func (s *OpenAIGatewayService) replaceModelInResponseBody(body []byte, fromModel
 	return body
 }
 
+func (s *OpenAIGatewayService) rewriteOpenAIResponseModelFields(body []byte, toModel string) []byte {
+	if strings.TrimSpace(toModel) == "" || !gjson.ValidBytes(body) {
+		return body
+	}
+	updated := body
+	if gjson.GetBytes(updated, "model").Type == gjson.String {
+		if next, err := sjson.SetBytes(updated, "model", toModel); err == nil {
+			updated = next
+		}
+	}
+	if gjson.GetBytes(updated, "response.model").Type == gjson.String {
+		if next, err := sjson.SetBytes(updated, "response.model", toModel); err == nil {
+			updated = next
+		}
+	}
+	return updated
+}
+
 func getOpenAIReasoningEffortFromReqBody(reqBody map[string]any, requestedModel string) (value string, present bool) {
 	if reqBody == nil {
 		return "", false

@@ -87,6 +87,9 @@ type Account struct {
 type OpenAIEndpointCapability string
 
 const openAILongContextBillingEnabledKey = "openai_long_context_billing_enabled"
+const openAIResponseModelRewriteEnabledKey = "openai_response_model_rewrite_enabled"
+
+const OpenAIResponseModelRewriteEnabledExtraKey = openAIResponseModelRewriteEnabledKey
 
 const (
 	OpenAIEndpointCapabilityChatCompletions OpenAIEndpointCapability = "chat_completions"
@@ -1301,6 +1304,18 @@ func (a *Account) IsOpenAILongContextBillingEnabled() bool {
 		return false
 	}
 	enabled, ok := a.Extra[openAILongContextBillingEnabledKey].(bool)
+	return ok && enabled
+}
+
+// IsOpenAIResponseModelRewriteEnabled reports whether this OpenAI account
+// should rewrite upstream-declared model names before returning the response
+// to the client. The original upstream model is still observed for admin
+// usage auditing before this rewrite runs.
+func (a *Account) IsOpenAIResponseModelRewriteEnabled() bool {
+	if a == nil || !a.IsOpenAI() || a.Extra == nil {
+		return false
+	}
+	enabled, ok := a.Extra[openAIResponseModelRewriteEnabledKey].(bool)
 	return ok && enabled
 }
 

@@ -1995,7 +1995,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			trimmedData := strings.TrimSpace(data)
 			rawEventType := effectiveOpenAISSEEventType(dataBytes, pendingSSEEventType)
 			observer.ObserveOpenAI(dataBytes, rawEventType)
-			if needModelReplace && strings.Contains(data, mappedModel) {
+			if account != nil && account.IsOpenAIResponseModelRewriteEnabled() {
+				line = s.rewriteOpenAIResponseModelInSSELine(line, originalModel)
+			} else if needModelReplace && strings.Contains(data, mappedModel) {
 				line = s.replaceModelInSSELine(line, mappedModel, originalModel)
 				if replacedData, replaced := extractOpenAISSEDataLine(line); replaced {
 					dataBytes = []byte(replacedData)
@@ -2310,7 +2312,9 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 	if contentType == "" {
 		contentType = "application/json"
 	}
-	if originalModel != "" && mappedModel != "" && originalModel != mappedModel {
+	if account != nil && account.IsOpenAIResponseModelRewriteEnabled() {
+		body = s.rewriteOpenAIResponseModelFields(body, originalModel)
+	} else if originalModel != "" && mappedModel != "" && originalModel != mappedModel {
 		body = s.replaceModelInResponseBody(body, mappedModel, originalModel)
 	}
 	body, err = restoreOpenAIResponsesNamespacePayload(c, body)
@@ -2372,7 +2376,9 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c
 		}
 		finalResponse = supplementCompactionItemFromSSE(c, finalResponse, bodyText)
 		body = finalResponse
-		if originalModel != "" && mappedModel != "" && originalModel != mappedModel {
+		if account != nil && account.IsOpenAIResponseModelRewriteEnabled() {
+			body = s.rewriteOpenAIResponseModelFields(body, originalModel)
+		} else if originalModel != "" && mappedModel != "" && originalModel != mappedModel {
 			body = s.replaceModelInResponseBody(body, mappedModel, originalModel)
 		}
 		// Correct tool calls in final response
@@ -2384,7 +2390,13 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c
 		restoredBody = restoreCodexToolNamesFromContext(c, restoredBody)
 		body = restoredBody
 	} else {
-		if originalModel != "" && mappedModel != "" && originalModel != mappedModel {
+		if account != nil && account.IsOpenAIResponseModelRewriteEnabled() {
+			lines := strings.Split(bodyText, "\n")
+			for i := range lines {
+				lines[i] = s.rewriteOpenAIResponseModelInSSELine(lines[i], originalModel)
+			}
+			bodyText = strings.Join(lines, "\n")
+		} else if originalModel != "" && mappedModel != "" && originalModel != mappedModel {
 			bodyText = s.replaceModelInSSEBody(bodyText, mappedModel, originalModel)
 		}
 		body = []byte(bodyText)

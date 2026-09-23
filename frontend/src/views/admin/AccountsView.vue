@@ -456,7 +456,7 @@
     <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
     <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
-    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" />
+    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" @toggle-response-model-rewrite="handleToggleResponseModelRewrite" />
     <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
     <ImportDataModal :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
     <BulkEditAccountModal
@@ -2251,6 +2251,20 @@ const handleProbeUpstreamBilling = async (account: Account) => {
 const handleAccountUpdated = (updatedAccount: Account) => {
   patchAccountInList(updatedAccount)
   enterAutoRefreshSilentWindow()
+}
+const handleToggleResponseModelRewrite = async (account: Account) => {
+  const enabled = !Boolean((account.extra as Record<string, unknown> | undefined)?.openai_response_model_rewrite_enabled)
+  try {
+    const updated = await adminAPI.accounts.update(account.id, {
+      extra: { openai_response_model_rewrite_enabled: enabled }
+    })
+    patchAccountInList(updated)
+    enterAutoRefreshSilentWindow()
+    appStore.showSuccess(t(enabled ? 'admin.accounts.responseModelRewriteEnabled' : 'admin.accounts.responseModelRewriteDisabled'))
+  } catch (error: any) {
+    console.error('Failed to toggle response model rewrite:', error)
+    appStore.showError(error?.response?.data?.message || t('admin.accounts.responseModelRewriteFailed'))
+  }
 }
 const formatExportTimestamp = () => {
   const now = new Date()
