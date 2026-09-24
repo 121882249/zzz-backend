@@ -8,11 +8,18 @@
     <header class="border-b border-gray-200 px-4 py-4 sm:px-6 dark:border-dark-800">
       <nav class="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 sm:gap-4">
         <div class="flex min-w-0 flex-1 items-center gap-3">
-          <img :src="brandLogo" alt="TokenPro" class="h-9 w-9 shrink-0 rounded-lg object-cover" />
+          <img :src="siteLogo" alt="TokenPro" class="h-9 w-9 shrink-0 rounded-lg object-cover" />
           <span class="min-w-0 truncate text-base font-semibold">{{ brandName }}</span>
         </div>
         <div class="flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2">
           <LocaleSwitcher />
+          <a
+            v-if="docUrl"
+            :href="docUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="inline-flex min-h-10 items-center px-2 text-sm text-gray-500 hover:text-gray-900 dark:text-dark-400 dark:hover:text-white"
+          >{{ t('home.viewDocs') }}</a>
           <button class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 dark:text-dark-400 dark:hover:bg-dark-800" :title="isDark ? t('home.switchToLight') : t('home.switchToDark')" @click="toggleTheme">
             <Icon v-if="isDark" name="sun" size="md" />
             <Icon v-else name="moon" size="md" />
@@ -24,7 +31,7 @@
     </header>
     <main class="flex min-w-0 flex-1 items-center justify-center px-4 py-16 sm:px-6">
       <div class="min-w-0 max-w-2xl text-center">
-        <img :src="brandLogo" alt="TokenPro" class="mx-auto mb-6 h-20 w-20 rounded-2xl object-cover" />
+        <img :src="siteLogo" alt="TokenPro" class="mx-auto mb-6 h-20 w-20 rounded-2xl object-cover" />
         <h1 class="[overflow-wrap:anywhere] text-3xl font-bold md:text-4xl">{{ brandName }}</h1>
         <p class="mt-4 whitespace-pre-wrap [overflow-wrap:anywhere] text-base text-gray-600 dark:text-dark-300">{{ siteSubtitle }}</p>
         <router-link data-testid="compact-primary-action" :to="isAuthenticated ? dashboardPath : '/register'" class="mt-8 inline-flex min-h-10 items-center justify-center rounded-lg bg-primary-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-primary-700">{{ isAuthenticated ? t('home.goToDashboard') : t('home.getStarted') }}</router-link>
@@ -38,11 +45,18 @@
     <header class="cosmic-header">
       <nav class="cosmic-nav" aria-label="Primary navigation">
         <router-link to="/" class="brand-lockup" aria-label="TokenPro home">
-          <img :src="brandLogo" alt="" class="brand-mark" />
+          <img :src="siteLogo" alt="" class="brand-mark" />
           <span>{{ brandName }}</span>
         </router-link>
         <div class="header-actions">
           <LocaleSwitcher />
+          <a
+            v-if="docUrl"
+            :href="docUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-sm text-slate-300 transition-colors hover:text-white"
+          >{{ t('home.viewDocs') }}</a>
           <span class="header-divider" aria-hidden="true"></span>
           <button class="theme-button" :title="isDark ? t('home.switchToLight') : t('home.switchToDark')" @click="toggleTheme">
             <Icon v-if="isDark" name="sun" size="md" />
@@ -167,12 +181,15 @@ import { useI18n } from 'vue-i18n'
 import { useAuthStore, useAppStore } from '@/stores'
 import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { sanitizeUrl } from '@/utils/url'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
 const appStore = useAppStore()
 const brandLogo = '/brand/tokenpro-orbit.webp'
 const brandName = 'TokenPro.work'
+const siteLogo = computed(() => sanitizeUrl(appStore.cachedPublicSettings?.site_logo || appStore.siteLogo || brandLogo, { allowRelative: true, allowDataUrl: true }))
+const docUrl = computed(() => sanitizeUrl(appStore.cachedPublicSettings?.doc_url || appStore.docUrl || ''))
 const siteSubtitle = computed(() => appStore.cachedPublicSettings?.site_subtitle || 'AI API Gateway Platform')
 const homeContent = computed(() => appStore.cachedPublicSettings?.home_content || '')
 const hasHomeContent = computed(() => homeContent.value.trim().length > 0)

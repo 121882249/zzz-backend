@@ -69,13 +69,27 @@ describe('PlazaModelPricingTable', () => {
     expect(text).toContain('0.1471x')
   })
 
-  it('shows the Max reasoning billing multiplier', () => {
+  it('shows all configured reasoning multipliers in level order', () => {
     const model = tokenModel()
-    model.pricing!.max_reasoning_effort_multiplier = 3
+    model.pricing!.reasoning_effort_multipliers = { max: 3, none: 0.5, high: 1.5 }
     const wrapper = mountTable([model], 1)
 
-    expect(wrapper.text()).toContain('modelPlaza.table.maxReasoningMultiplierBadge')
-    expect(wrapper.find('[title="modelPlaza.table.maxReasoningMultiplierHint"]').exists()).toBe(true)
+    const badges = wrapper.findAll('[data-reasoning-effort]')
+    expect(badges.map(badge => badge.attributes('data-reasoning-effort'))).toEqual(['none', 'high', 'max'])
+    expect(badges.every(badge => badge.attributes('title') === 'modelPlaza.table.reasoningMultiplierHint')).toBe(true)
+    expect(wrapper.text()).toContain('modelPlaza.table.reasoningMultiplierBadge')
+  })
+
+  it('does not show automatic reasoning charges for an unconfigured Fable model', () => {
+    const wrapper = mountTable([tokenModel({ name: 'claude-fable-5-1' })], 1)
+    expect(wrapper.find('[data-reasoning-effort]').exists()).toBe(false)
+  })
+
+  it('omits invalid or unsupported multipliers from display', () => {
+    const model = tokenModel()
+    model.pricing!.reasoning_effort_multipliers = { max: 0, high: Infinity, unknown: 2, low: 1 }
+    const wrapper = mountTable([model], 1)
+    expect(wrapper.findAll('[data-reasoning-effort]').map(badge => badge.attributes('data-reasoning-effort'))).toEqual(['low'])
   })
 
   it('倍率 ≠ 1 时价格列为折后实付价,官方价列保持原价', () => {
@@ -395,19 +409,19 @@ describe('PlazaModelPricingTable', () => {
     })
 
     const text = mountTable([model], 1).text()
-    expect(text).toContain('$20.00')
-    expect(text).toContain('$75.00')
-    expect(text).toContain('$25.00')
-    expect(text).toContain('$4.00')
+    expect(text).toContain('¥20.00')
+    expect(text).toContain('¥75.00')
+    expect(text).toContain('¥25.00')
+    expect(text).toContain('¥4.00')
     model.pricing!.intervals.unshift({
       ...model.pricing!.intervals[0], min_tokens: 0, max_tokens: 272000,
       tier_label: '<=272K', cache_write_multiplier: null, cache_read_multiplier: null
     })
     const cells = mountTable([model], 1).findAll('tbody td')
-    expect(cells[3].text()).toContain('$12.50')
-    expect(cells[3].text()).toContain('$2.00')
-    expect(cells[3].text()).toContain('$25.00')
-    expect(cells[3].text()).toContain('$4.00')
+    expect(cells[3].text()).toContain('¥12.50')
+    expect(cells[3].text()).toContain('¥2.00')
+    expect(cells[3].text()).toContain('¥25.00')
+    expect(cells[3].text()).toContain('¥4.00')
   })
 
   it('生图独立倍率开启时,按图价格 × 独立倍率,不乘分组倍率;倍率列展示独立倍率', () => {
