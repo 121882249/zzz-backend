@@ -86,17 +86,17 @@ func TestCompareVersionsUsesNumericCoreForCustomBuilds(t *testing.T) {
 func TestUpdateServiceReportsTokenProUpstreamVersion(t *testing.T) {
 	svc := NewUpdateService(
 		&updateServiceCacheStub{},
-		&updateServiceGitHubClientStub{release: &GitHubRelease{TagName: "v0.2.7", Name: "v0.2.7"}},
-		"TokenPro-R69-v0.2.7",
+		&updateServiceGitHubClientStub{release: &GitHubRelease{TagName: "v0.2.9", Name: "v0.2.9"}},
+		"TokenPro-R70-v0.2.9",
 		"release",
 	)
 
 	info, err := svc.CheckUpdate(context.Background(), true)
 
 	require.NoError(t, err)
-	require.Equal(t, "TokenPro-R69-v0.2.7", info.CurrentVersion)
-	require.Equal(t, "0.2.7", info.CurrentUpstreamVersion)
-	require.Equal(t, "0.2.7", info.LatestVersion)
+	require.Equal(t, "TokenPro-R70-v0.2.9", info.CurrentVersion)
+	require.Equal(t, "0.2.9", info.CurrentUpstreamVersion)
+	require.Equal(t, "0.2.9", info.LatestVersion)
 	require.False(t, info.HasUpdate)
 }
 
