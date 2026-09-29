@@ -33,7 +33,7 @@ const (
 	githubRepo     = "Wei-Shaw/sub2api"
 	// TokenPro releases keep a short operator-facing revision name while this
 	// value records the upstream Sub2API release already merged into the build.
-	tokenProUpstreamVersion = "0.2.9"
+	tokenProUpstreamVersion = "0.2.10"
 
 	// Security: allowed download domains for updates
 	allowedDownloadHost = "github.com"
@@ -635,12 +635,26 @@ func (s *UpdateService) getFromCache(ctx context.Context) (*UpdateInfo, error) {
 func (s *UpdateService) currentUpstreamVersion() string {
 	v := strings.TrimPrefix(strings.TrimSpace(s.currentVersion), "v")
 	if strings.HasPrefix(v, "TokenPro-R") {
-		return tokenProUpstreamVersion
+		return tokenProBuildUpstreamVersion(v)
 	}
 	if idx := strings.IndexByte(v, '-'); idx != -1 {
 		return v[:idx]
 	}
 	return v
+}
+
+// tokenProBuildUpstreamVersion extracts the upstream Sub2API semver embedded
+// in a TokenPro build version such as TokenPro-R74-v0.2.10. Older custom
+// builds did not include that suffix, so retain the release baseline fallback.
+func tokenProBuildUpstreamVersion(v string) string {
+	lower := strings.ToLower(v)
+	if idx := strings.LastIndex(lower, "-v"); idx >= 0 && idx+2 < len(v) {
+		candidate := v[idx+2:]
+		if parsed := parseVersion(candidate); parsed != [3]int{} {
+			return candidate
+		}
+	}
+	return tokenProUpstreamVersion
 }
 
 func (s *UpdateService) saveToCache(ctx context.Context, info *UpdateInfo) {
@@ -677,7 +691,7 @@ func compareVersions(current, latest string) int {
 func parseVersion(v string) [3]int {
 	v = strings.TrimPrefix(v, "v")
 	if strings.HasPrefix(v, "TokenPro-R") {
-		v = tokenProUpstreamVersion
+		v = tokenProBuildUpstreamVersion(v)
 	} else if idx := strings.IndexByte(v, '-'); idx != -1 {
 		v = v[:idx]
 	}

@@ -101,6 +101,22 @@ func TestUpdateServiceReportsTokenProUpstreamVersion(t *testing.T) {
 	require.False(t, info.HasUpdate)
 }
 
+func TestUpdateServiceReportsEmbeddedTokenProUpstreamVersion(t *testing.T) {
+	svc := NewUpdateService(
+		&updateServiceCacheStub{},
+		&updateServiceGitHubClientStub{release: &GitHubRelease{TagName: "v0.2.10", Name: "v0.2.10"}},
+		"TokenPro-R74-v0.2.10",
+		"release",
+	)
+
+	info, err := svc.CheckUpdate(context.Background(), true)
+
+	require.NoError(t, err)
+	require.Equal(t, "0.2.10", info.CurrentUpstreamVersion)
+	require.Equal(t, "0.2.10", info.LatestVersion)
+	require.False(t, info.HasUpdate)
+}
+
 func newRollbackTestService(current string, releases []*GitHubRelease) *UpdateService {
 	return NewUpdateService(
 		&updateServiceCacheStub{},
