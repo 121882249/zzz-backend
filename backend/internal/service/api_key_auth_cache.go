@@ -9,6 +9,7 @@ type APIKeyAuthSnapshot struct {
 	UserID      int64                    `json:"user_id"`
 	GroupID     *int64                   `json:"group_id,omitempty"`
 	Name        string                   `json:"name"`
+	KeyType     string                   `json:"key_type"`
 	Status      string                   `json:"status"`
 	IPWhitelist []string                 `json:"ip_whitelist,omitempty"`
 	IPBlacklist []string                 `json:"ip_blacklist,omitempty"`

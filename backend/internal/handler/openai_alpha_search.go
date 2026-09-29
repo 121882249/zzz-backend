@@ -26,11 +26,11 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 	requestStart := time.Now()
 
 	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
-	if !ok || apiKey.Group == nil {
+	if !ok {
 		h.errorResponse(c, http.StatusUnauthorized, "authentication_error", "Invalid API key")
 		return
 	}
-	if apiKey.Group.Platform != service.PlatformOpenAI && apiKey.Group.Platform != service.PlatformComposite {
+	if !apiKey.IsGlobal() && (apiKey.Group == nil || (apiKey.Group.Platform != service.PlatformOpenAI && apiKey.Group.Platform != service.PlatformComposite)) {
 		h.errorResponse(c, http.StatusNotFound, "not_found_error", "Codex alpha search is only available for OpenAI and Composite groups")
 		return
 	}
@@ -75,6 +75,25 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 		return
 	}
 	requestedModel := strings.TrimSpace(modelResult.String())
+	// Global keys are resolved from the requested model before validating the
+	// concrete group. Their middleware representation intentionally has no
+	// group, so checking apiKey.Group earlier would incorrectly return 401.
+	if apiKey.IsGlobal() {
+		resolvedKey, resolveErr := resolveGlobalAPIKeyForModel(c, h.globalGroupResolver, apiKey, subject.UserID, requestedModel)
+		if resolveErr != nil {
+			respondGlobalKeyRoutingError(c, resolveErr, h.errorResponse)
+			return
+		}
+		apiKey = resolvedKey
+	}
+	if apiKey.Group == nil {
+		h.errorResponse(c, http.StatusUnauthorized, "authentication_error", "Invalid API key")
+		return
+	}
+	if apiKey.Group.Platform != service.PlatformOpenAI && apiKey.Group.Platform != service.PlatformComposite {
+		h.errorResponse(c, http.StatusNotFound, "not_found_error", "Codex alpha search is only available for OpenAI and Composite groups")
+		return
+	}
 	if !compositeTargetPlatformAllowed(c, apiKey, requestedModel, service.PlatformOpenAI) {
 		h.errorResponse(c, http.StatusNotFound, "not_found_error", "Codex alpha search only supports OpenAI models for Composite groups")
 		return
@@ -92,7 +111,7 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 	service.SetOpsLatencyMs(c, service.OpsAuthLatencyMsKey, time.Since(requestStart).Milliseconds())
 
-	userRelease, acquired := h.acquireResponsesUserSlot(c, subject.UserID, subject.Concurrency, false, &streamStarted, reqLog)
+	userRelease, acquired := h.acquireResponsesUserSlot(c, apiKey, subject.UserID, subject.Concurrency, false, &streamStarted, reqLog)
 	if !acquired {
 		return
 	}

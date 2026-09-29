@@ -328,6 +328,11 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  function acceptAuthResponse(response: AuthResponse): void {
+    clearAuth({ preservePendingAuthSession: true })
+    setAuthFromResponse(response)
+  }
+
   /**
    * User registration
    * @param userData - Registration data (username, email, password)
@@ -506,6 +511,7 @@ export const useAuthStore = defineStore('auth', () => {
     loginWithPasskey,
     login2FA,
     register,
+    acceptAuthResponse,
     setToken,
     logout,
     checkAuth,

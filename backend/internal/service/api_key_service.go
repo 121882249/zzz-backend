@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"html"
 	"math"
@@ -35,7 +36,11 @@ var (
 	// ErrAPIKeyExpired        = infraerrors.Forbidden("API_KEY_EXPIRED", "api key has expired")
 	ErrAPIKeyExpired = infraerrors.Forbidden("API_KEY_EXPIRED", "api key 已过期")
 	// ErrAPIKeyQuotaExhausted = infraerrors.TooManyRequests("API_KEY_QUOTA_EXHAUSTED", "api key quota exhausted")
-	ErrAPIKeyQuotaExhausted = infraerrors.TooManyRequests("API_KEY_QUOTA_EXHAUSTED", "api key 额度已用完")
+	ErrAPIKeyQuotaExhausted        = infraerrors.TooManyRequests("API_KEY_QUOTA_EXHAUSTED", "api key 额度已用完")
+	ErrGlobalAPIKeyGroupImmutable  = infraerrors.BadRequest("GLOBAL_API_KEY_GROUP_IMMUTABLE", "global API key cannot be bound to a group")
+	ErrGlobalAPIKeyImmutable       = infraerrors.Forbidden("GLOBAL_API_KEY_IMMUTABLE", "TokenPro global API key can only be reset")
+	ErrGlobalAPIKeyDeleteForbidden = infraerrors.Forbidden("GLOBAL_API_KEY_DELETE_FORBIDDEN", "TokenPro global API key cannot be deleted")
+	ErrGlobalAPIKeyRequired        = infraerrors.BadRequest("GLOBAL_API_KEY_REQUIRED", "only the TokenPro global API key can be regenerated")
 
 	// Rate limit errors
 	ErrAPIKeyRateLimit5hExceeded = infraerrors.TooManyRequests("API_KEY_RATE_5H_EXCEEDED", "api key 5小时限额已用完")
@@ -61,6 +66,7 @@ const (
 // 若编辑 Key 时无条件整行回写，并发累计的配额与限流计数就会被旧快照覆盖。
 // 因此调用方必须显式声明要改的列。
 type APIKeyUpdateFields struct {
+	Key       bool
 	Name      bool
 	Status    bool
 	Quota     bool
@@ -119,6 +125,13 @@ type APIKeyRepository interface {
 	IncrementRateLimitUsage(ctx context.Context, id int64, cost float64) error
 	ResetRateLimitWindows(ctx context.Context, id int64) error
 	GetRateLimitData(ctx context.Context, id int64) (*APIKeyRateLimitData, error)
+}
+
+// globalAPIKeyRepository is intentionally optional to keep APIKeyRepository
+// test doubles and third-party implementations source-compatible while the
+// global-key migration rolls out.
+type globalAPIKeyRepository interface {
+	GetGlobalByUserID(ctx context.Context, userID int64) (*APIKey, error)
 }
 
 type apiKeyAllByUserIDLister interface {
@@ -535,6 +548,7 @@ func (s *APIKeyService) Create(ctx context.Context, userID int64, req CreateAPIK
 		UserID:      userID,
 		Key:         key,
 		Name:        html.EscapeString(req.Name),
+		KeyType:     APIKeyTypeGroup,
 		GroupID:     req.GroupID,
 		Status:      StatusActive,
 		IPWhitelist: req.IPWhitelist,
@@ -560,6 +574,41 @@ func (s *APIKeyService) Create(ctx context.Context, userID int64, req CreateAPIK
 	s.compileAPIKeyIPRules(apiKey)
 
 	return apiKey, nil
+}
+
+// EnsureGlobalKey returns the user's system TokenPro key, creating it once if
+// necessary. The database partial unique index makes concurrent calls
+// idempotent; on a uniqueness race the already-created key is loaded.
+func (s *APIKeyService) EnsureGlobalKey(ctx context.Context, userID int64) (*APIKey, error) {
+	repo, ok := s.apiKeyRepo.(globalAPIKeyRepository)
+	if !ok {
+		return nil, fmt.Errorf("global api key repository is not available")
+	}
+	if key, err := repo.GetGlobalByUserID(ctx, userID); err == nil {
+		return key, nil
+	} else if !errors.Is(err, ErrAPIKeyNotFound) {
+		return nil, err
+	}
+	keyValue, err := s.GenerateKey()
+	if err != nil {
+		return nil, fmt.Errorf("generate global api key: %w", err)
+	}
+	key := &APIKey{
+		UserID:  userID,
+		Key:     keyValue,
+		Name:    "TokenPro",
+		KeyType: APIKeyTypeGlobal,
+		Status:  StatusActive,
+	}
+	if err := s.apiKeyRepo.Create(ctx, key); err != nil {
+		if existing, getErr := repo.GetGlobalByUserID(ctx, userID); getErr == nil {
+			return existing, nil
+		}
+		return nil, fmt.Errorf("create global api key: %w", err)
+	}
+	s.InvalidateAuthCacheByKey(ctx, key.Key)
+	s.compileAPIKeyIPRules(key)
+	return key, nil
 }
 
 // List 获取用户的API Key列表
@@ -769,6 +818,9 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req 
 	if apiKey.UserID != userID {
 		return nil, ErrInsufficientPerms
 	}
+	if apiKey.IsGlobal() {
+		return nil, ErrGlobalAPIKeyImmutable
+	}
 
 	// 验证 IP 白名单格式
 	if req.IPWhitelist != nil && len(*req.IPWhitelist) > 0 {
@@ -798,6 +850,9 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req 
 	}
 
 	if req.GroupID != nil {
+		if apiKey.IsGlobal() {
+			return nil, ErrGlobalAPIKeyGroupImmutable
+		}
 		// 验证分组权限
 		user, err := s.userRepo.GetByID(ctx, userID)
 		if err != nil {
@@ -915,14 +970,17 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req 
 
 // Delete 删除API Key
 func (s *APIKeyService) Delete(ctx context.Context, id int64, userID int64) error {
-	key, ownerID, err := s.apiKeyRepo.GetKeyAndOwnerID(ctx, id)
+	apiKey, err := s.apiKeyRepo.GetByID(ctx, id)
 	if err != nil {
 		return fmt.Errorf("get api key: %w", err)
 	}
 
 	// 验证当前用户是否为该 API Key 的所有者
-	if ownerID != userID {
+	if apiKey.UserID != userID {
 		return ErrInsufficientPerms
+	}
+	if apiKey.IsGlobal() {
+		return ErrGlobalAPIKeyDeleteForbidden
 	}
 
 	// 事务内:写审计 + 软删除(tombstone)。
@@ -934,10 +992,41 @@ func (s *APIKeyService) Delete(ctx context.Context, id int64, userID int64) erro
 	if s.cache != nil {
 		_ = s.cache.DeleteCreateAttemptCount(ctx, userID)
 	}
-	s.InvalidateAuthCacheByKey(ctx, key)
+	s.InvalidateAuthCacheByKey(ctx, apiKey.Key)
 	s.lastUsedTouchL1.Delete(id)
 
 	return nil
+}
+
+// RegenerateGlobalKey replaces the credential value of the system TokenPro key.
+// The row identity and its user-scoped routing semantics are preserved.
+func (s *APIKeyService) RegenerateGlobalKey(ctx context.Context, id int64, userID int64) (*APIKey, error) {
+	apiKey, err := s.apiKeyRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get api key: %w", err)
+	}
+	if apiKey.UserID != userID {
+		return nil, ErrInsufficientPerms
+	}
+	if !apiKey.IsGlobal() {
+		return nil, ErrGlobalAPIKeyRequired
+	}
+
+	oldKey := apiKey.Key
+	newKey, err := s.GenerateKey()
+	if err != nil {
+		return nil, err
+	}
+	apiKey.Key = newKey
+	// Enforce the global-key invariant even if legacy data was inconsistent.
+	apiKey.GroupID = nil
+	if err := s.apiKeyRepo.Update(ctx, apiKey, APIKeyUpdateFields{Key: true, GroupID: true}); err != nil {
+		return nil, fmt.Errorf("regenerate global api key: %w", err)
+	}
+
+	s.InvalidateAuthCacheByKey(ctx, oldKey)
+	s.InvalidateAuthCacheByKey(ctx, newKey)
+	return apiKey, nil
 }
 
 // ValidateKey 验证API Key是否有效（用于认证中间件）

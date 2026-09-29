@@ -31,6 +31,7 @@ export function configToDraft(config: PromptAuditConfig): PromptAuditDraft {
   return {
     ...cloneData(config),
     group_ids: [...(config.group_ids ?? [])],
+    monitor_user_emails: [...(config.monitor_user_emails ?? [])],
     scanners: [...(config.scanners ?? [])],
     endpoints: (config.endpoints ?? []).map((endpoint) => ({
       ...endpoint,
@@ -70,6 +71,7 @@ export function buildUpdateRequest(draft: PromptAuditDraft): PromptAuditUpdateRe
     scanners: [...draft.scanners],
     all_groups: draft.all_groups,
     group_ids: draft.all_groups ? [] : [...draft.group_ids].sort((a, b) => a - b),
+    monitor_user_emails: [...draft.monitor_user_emails].map((email) => email.trim().toLowerCase()).filter(Boolean).sort(),
     endpoints: draft.endpoints.map((endpoint) => ({
       id: endpoint.id.trim(),
       name: endpoint.name.trim(),

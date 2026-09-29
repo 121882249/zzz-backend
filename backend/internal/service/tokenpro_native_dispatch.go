@@ -1,0 +1,169 @@
+package service
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"regexp"
+	"strings"
+
+	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
+)
+
+var tokenProAttachedImagePathPattern = regexp.MustCompile(`<image\b[^>]*\bpath="([^"]+)"`)
+
+// A stateless Codex-only tool dispatcher. It never generates image data or bills inference.
+func tokenProDispatchID(prefix string) string {
+	var bytes [16]byte
+	if _, err := rand.Read(bytes[:]); err != nil {
+		panic(err)
+	}
+	return prefix + hex.EncodeToString(bytes[:])
+}
+
+func BuildTokenProNativeImageItem(body []byte) (gin.H, error) {
+	if !gjson.ValidBytes(body) {
+		return nil, fmt.Errorf("invalid JSON")
+	}
+	if gjson.GetBytes(body, "previous_response_id").String() != "" {
+		return nil, fmt.Errorf("native image dispatch requires full input history")
+	}
+	input := gjson.GetBytes(body, "input")
+	if input.Type == gjson.String {
+		if strings.TrimSpace(input.String()) == "" {
+			return nil, fmt.Errorf("missing image prompt")
+		}
+		args, _ := json.Marshal(gin.H{"prompt": input.String()})
+		return gin.H{"type": "function_call", "id": tokenProDispatchID("fc_"), "call_id": tokenProDispatchID("call_tp_pure_"), "namespace": "image_gen", "name": "imagegen", "arguments": string(args)}, nil
+	}
+	var prompt string
+	var pending string
+	var imagePaths []string
+	imageInputs := 0
+	items := input.Array()
+	lastUser := 0
+	for index, item := range items {
+		if item.Get("role").String() == "user" {
+			lastUser = index
+		}
+	}
+	for _, item := range items[lastUser:] {
+		if item.Get("role").String() == "user" {
+			prompt, pending, imagePaths, imageInputs = "", "", nil, 0
+			if item.Get("content").Type == gjson.String {
+				prompt = item.Get("content").String()
+			}
+			var contents []gjson.Result
+			if item.Get("content").IsArray() {
+				contents = item.Get("content").Array()
+			}
+			for _, content := range contents {
+				switch content.Get("type").String() {
+				case "input_text":
+					text := content.Get("text").String()
+					for _, match := range tokenProAttachedImagePathPattern.FindAllStringSubmatch(text, -1) {
+						if len(match) == 2 && strings.TrimSpace(match[1]) != "" {
+							imagePaths = append(imagePaths, match[1])
+						}
+					}
+					if cleaned := tokenProNativeImagePromptText(text); cleaned != "" {
+						prompt += cleaned + "\n"
+					}
+				case "input_image":
+					imageInputs++
+				default:
+					return nil, fmt.Errorf("unsupported native image input type: %s", content.Get("type").String())
+				}
+			}
+		}
+		if item.Get("type").String() == "function_call" && item.Get("name").String() == "imagegen" && strings.HasPrefix(item.Get("call_id").String(), "call_tp_pure_") {
+			pending = item.Get("call_id").String()
+		}
+		if item.Get("type").String() == "function_call_output" && pending != "" && item.Get("call_id").String() == pending {
+			return gin.H{"type": "message", "id": tokenProDispatchID("msg_"), "role": "assistant", "status": "completed", "content": []any{gin.H{"type": "output_text", "text": tokenProNativeImageResultText(item.Get("output")), "annotations": []any{}}}}, nil
+		}
+	}
+	if pending != "" {
+		return nil, fmt.Errorf("missing matching native image tool output")
+	}
+	if strings.TrimSpace(prompt) == "" {
+		return nil, fmt.Errorf("missing image prompt")
+	}
+	if imageInputs > 5 {
+		return nil, fmt.Errorf("native image editing supports at most 5 image inputs")
+	}
+	argsMap := gin.H{"prompt": strings.TrimSpace(prompt)}
+	if imageInputs > 0 {
+		imagePaths = uniqueTokenProImagePaths(imagePaths)
+		if len(imagePaths) >= imageInputs {
+			argsMap["referenced_image_paths"] = imagePaths[:imageInputs]
+		} else {
+			argsMap["num_last_images_to_include"] = imageInputs
+		}
+	}
+	args, _ := json.Marshal(argsMap)
+	return gin.H{"type": "function_call", "id": tokenProDispatchID("fc_"), "call_id": tokenProDispatchID("call_tp_pure_"), "namespace": "image_gen", "name": "imagegen", "arguments": string(args)}, nil
+}
+
+func tokenProNativeImagePromptText(text string) string {
+	if index := strings.LastIndex(text, "## My request:"); index >= 0 {
+		text = text[index+len("## My request:"):]
+	}
+	lines := strings.Split(text, "\n")
+	kept := lines[:0]
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "<image ") || trimmed == "</image>" {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.TrimSpace(strings.Join(kept, "\n"))
+}
+
+func uniqueTokenProImagePaths(paths []string) []string {
+	seen := make(map[string]struct{}, len(paths))
+	unique := make([]string, 0, len(paths))
+	for _, path := range paths {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			continue
+		}
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		unique = append(unique, path)
+	}
+	return unique
+}
+
+func tokenProNativeImageResultText(output gjson.Result) string {
+	if output.IsArray() {
+		for _, part := range output.Array() {
+			if part.Get("type").String() == "input_image" && strings.TrimSpace(part.Get("image_url").String()) != "" {
+				return "图片生成好了 ✨"
+			}
+		}
+	}
+
+	message := output.Raw
+	if output.Type == gjson.String {
+		message = output.String()
+	}
+	message = strings.ToLower(message)
+	switch {
+	case strings.Contains(message, "timeout"), strings.Contains(message, "timed out"), strings.Contains(message, "超时"):
+		return "图片生成超时了，请重新发起。"
+	case strings.Contains(message, "rate limit"), strings.Contains(message, "overload"), strings.Contains(message, "busy"), strings.Contains(message, "繁忙"):
+		return "生图服务有点忙，请稍后再试。"
+	case strings.Contains(message, "content policy"), strings.Contains(message, "moderation"), strings.Contains(message, "safety"), strings.Contains(message, "审核"):
+		return "这次请求未通过检查，请调整图片描述后再试。"
+	case strings.Contains(message, "error"), strings.Contains(message, "fail"), strings.Contains(message, "失败"):
+		return "这次没能生成图片，请稍后再试。"
+	default:
+		return "图片未能正常返回，请重新生成。"
+	}
+}

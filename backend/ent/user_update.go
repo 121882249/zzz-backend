@@ -185,6 +185,20 @@ func (_u *UserUpdate) SetNillableStatus(v *string) *UserUpdate {
 	return _u
 }
 
+// SetCreatedIP sets the "created_ip" field.
+func (_u *UserUpdate) SetCreatedIP(v string) *UserUpdate {
+	_u.mutation.SetCreatedIP(v)
+	return _u
+}
+
+// SetNillableCreatedIP sets the "created_ip" field if the given value is not nil.
+func (_u *UserUpdate) SetNillableCreatedIP(v *string) *UserUpdate {
+	if v != nil {
+		_u.SetCreatedIP(*v)
+	}
+	return _u
+}
+
 // SetUsername sets the "username" field.
 func (_u *UserUpdate) SetUsername(v string) *UserUpdate {
 	_u.mutation.SetUsername(v)
@@ -983,6 +997,11 @@ func (_u *UserUpdate) check() error {
 			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "User.status": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.CreatedIP(); ok {
+		if err := user.CreatedIPValidator(v); err != nil {
+			return &ValidationError{Name: "created_ip", err: fmt.Errorf(`ent: validator failed for field "User.created_ip": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.Username(); ok {
 		if err := user.UsernameValidator(v); err != nil {
 			return &ValidationError{Name: "username", err: fmt.Errorf(`ent: validator failed for field "User.username": %w`, err)}
@@ -1046,6 +1065,9 @@ func (_u *UserUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(user.FieldStatus, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.CreatedIP(); ok {
+		_spec.SetField(user.FieldCreatedIP, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.Username(); ok {
 		_spec.SetField(user.FieldUsername, field.TypeString, value)
@@ -1878,6 +1900,20 @@ func (_u *UserUpdateOne) SetNillableStatus(v *string) *UserUpdateOne {
 	return _u
 }
 
+// SetCreatedIP sets the "created_ip" field.
+func (_u *UserUpdateOne) SetCreatedIP(v string) *UserUpdateOne {
+	_u.mutation.SetCreatedIP(v)
+	return _u
+}
+
+// SetNillableCreatedIP sets the "created_ip" field if the given value is not nil.
+func (_u *UserUpdateOne) SetNillableCreatedIP(v *string) *UserUpdateOne {
+	if v != nil {
+		_u.SetCreatedIP(*v)
+	}
+	return _u
+}
+
 // SetUsername sets the "username" field.
 func (_u *UserUpdateOne) SetUsername(v string) *UserUpdateOne {
 	_u.mutation.SetUsername(v)
@@ -2689,6 +2725,11 @@ func (_u *UserUpdateOne) check() error {
 			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "User.status": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.CreatedIP(); ok {
+		if err := user.CreatedIPValidator(v); err != nil {
+			return &ValidationError{Name: "created_ip", err: fmt.Errorf(`ent: validator failed for field "User.created_ip": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.Username(); ok {
 		if err := user.UsernameValidator(v); err != nil {
 			return &ValidationError{Name: "username", err: fmt.Errorf(`ent: validator failed for field "User.username": %w`, err)}
@@ -2769,6 +2810,9 @@ func (_u *UserUpdateOne) sqlSave(ctx context.Context) (_node *User, err error) {
 	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(user.FieldStatus, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.CreatedIP(); ok {
+		_spec.SetField(user.FieldCreatedIP, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.Username(); ok {
 		_spec.SetField(user.FieldUsername, field.TypeString, value)

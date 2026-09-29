@@ -140,6 +140,13 @@ func (r *userRepository) create(ctx context.Context, userIn *service.User, guard
 		}
 	}
 
+	createdIP := strings.TrimSpace(userIn.CreatedIP)
+	if createdIP == "" {
+		if binding := service.SessionBindingFromContext(ctx); binding != nil {
+			createdIP = strings.TrimSpace(binding.IP)
+		}
+	}
+
 	created, err := txClient.User.Create().
 		SetEmail(userIn.Email).
 		SetUsername(userIn.Username).
@@ -149,6 +156,7 @@ func (r *userRepository) create(ctx context.Context, userIn *service.User, guard
 		SetBalance(userIn.Balance).
 		SetConcurrency(userIn.Concurrency).
 		SetStatus(userIn.Status).
+		SetCreatedIP(createdIP).
 		SetSignupSource(userSignupSourceOrDefault(userIn.SignupSource)).
 		SetNillableLastLoginAt(userIn.LastLoginAt).
 		SetNillableLastActiveAt(userIn.LastActiveAt).
@@ -1535,6 +1543,7 @@ func applyUserEntityToService(dst *service.User, src *dbent.User) {
 	dst.SignupSource = src.SignupSource
 	dst.LastLoginAt = src.LastLoginAt
 	dst.LastActiveAt = src.LastActiveAt
+	dst.CreatedIP = src.CreatedIP
 	dst.CreatedAt = src.CreatedAt
 	dst.UpdatedAt = src.UpdatedAt
 }

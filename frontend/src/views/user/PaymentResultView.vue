@@ -47,10 +47,14 @@
               <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.baseAmount') }}</span>
               <span class="font-medium text-gray-900 dark:text-white">{{ formatGatewayAmount(baseAmount) }}</span>
             </div>
-            <div v-if="hasAmountFields(order) && order.fee_rate > 0" class="flex justify-between">
+			<div v-if="hasAmountFields(order) && order.fee_rate > 0" class="flex justify-between">
               <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.fee') }} ({{ order.fee_rate }}%)</span>
-              <span class="font-medium text-gray-900 dark:text-white">{{ formatGatewayAmount(feeAmount) }}</span>
+			  <span class="font-medium text-gray-900 dark:text-white">{{ formatGatewayAmount(percentageFeeAmount) }}</span>
             </div>
+			<div v-if="hasAmountFields(order) && fixedFee > 0" class="flex justify-between">
+			  <span class="text-gray-500 dark:text-gray-400">{{ t('payment.fixedFee') }}</span>
+			  <span class="font-medium text-gray-900 dark:text-white">{{ formatGatewayAmount(fixedFee) }}</span>
+			</div>
             <div v-if="hasAmountFields(order)" class="flex justify-between">
               <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.payAmount') }}</span>
               <span class="font-bold text-primary-600 dark:text-primary-400">{{ formatGatewayAmount(order.pay_amount) }}</span>
@@ -144,21 +148,29 @@ let statusRefreshTimer: ReturnType<typeof setTimeout> | null = null
 let userBalanceRefreshStarted = false
 const refreshAttempts = ref(0)
 
-/** 充值金额 = pay_amount / (1 + fee_rate/100)，fee_rate=0 时等于 pay_amount */
+/** Prefer the immutable server-side pricing snapshot; reconstruct legacy orders. */
 const baseAmount = computed(() => {
   if (!hasAmountFields(order.value)) return 0
+	if (typeof order.value.base_amount === 'number') return order.value.base_amount
   const feeRate = Number(order.value.fee_rate) || 0
   if (feeRate <= 0) return order.value.pay_amount ?? 0
   return Math.round((order.value.pay_amount / (1 + feeRate / 100)) * 100) / 100
 })
 
-/** 手续费 = pay_amount - baseAmount */
 const feeAmount = computed(() => {
   if (!hasAmountFields(order.value)) return 0
+	if (typeof order.value.fee_amount === 'number') return order.value.fee_amount
   const feeRate = Number(order.value.fee_rate) || 0
   if (feeRate <= 0) return 0
   return Math.round((order.value.pay_amount - baseAmount.value) * 100) / 100
 })
+
+const fixedFee = computed(() => {
+	if (!hasAmountFields(order.value)) return 0
+	return Math.max(0, Number(order.value.fixed_fee) || 0)
+})
+
+const percentageFeeAmount = computed(() => Math.max(0, feeAmount.value - fixedFee.value))
 
 const localeCode = computed(() => {
   const raw = i18n.locale as unknown

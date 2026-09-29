@@ -147,6 +147,30 @@ func (h *APIKeyHandler) List(c *gin.Context) {
 	response.Paginated(c, out, result.Total, page, pageSize)
 }
 
+// GetGlobal returns the authenticated user's system TokenPro key. The service
+// repairs a missing key idempotently so desktop clients do not have to infer a
+// system credential from the paginated, user-managed key collection.
+// GET /api/v1/global-key
+func (h *APIKeyHandler) GetGlobal(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+
+	key, err := h.apiKeyService.EnsureGlobalKey(c.Request.Context(), subject.UserID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	// This response contains a live credential and must never be stored by an
+	// intermediary or browser cache.
+	c.Header("Cache-Control", "no-store")
+	c.Header("Pragma", "no-cache")
+	response.Success(c, dto.APIKeyFromService(key))
+}
+
 // GetByID handles getting a single API key
 // GET /api/v1/api-keys/:id
 func (h *APIKeyHandler) GetByID(c *gin.Context) {
@@ -315,6 +339,29 @@ func (h *APIKeyHandler) Delete(c *gin.Context) {
 	}
 
 	response.Success(c, gin.H{"message": "API key deleted successfully"})
+}
+
+// Regenerate handles rotating the credential value of a user's global TokenPro key.
+// POST /api/v1/keys/:id/regenerate
+func (h *APIKeyHandler) Regenerate(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+
+	keyID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid key ID")
+		return
+	}
+
+	key, err := h.apiKeyService.RegenerateGlobalKey(c.Request.Context(), keyID, subject.UserID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, dto.APIKeyFromService(key))
 }
 
 // GetAvailableGroups 获取用户可以绑定的分组列表

@@ -14,6 +14,8 @@ import {
 } from '@/api/admin/system'
 import { getPublicSettings as fetchPublicSettingsAPI } from '@/api/auth'
 
+const VERSION_CACHE_TTL_MS = 10 * 60 * 1000
+
 export const useAppStore = defineStore('app', () => {
   // ==================== State ====================
 
@@ -39,10 +41,12 @@ export const useAppStore = defineStore('app', () => {
   const versionLoaded = ref<boolean>(false)
   const versionLoading = ref<boolean>(false)
   const currentVersion = ref<string>('')
+  const currentUpstreamVersion = ref<string>('')
   const latestVersion = ref<string>('')
   const hasUpdate = ref<boolean>(false)
   const buildType = ref<string>('source')
   const releaseInfo = ref<ReleaseInfo | null>(null)
+  let versionLastCheckedAt = 0
 
   // Auto-incrementing ID for toasts
   let toastIdCounter = 0
@@ -232,6 +236,7 @@ export const useAppStore = defineStore('app', () => {
     loading.value = false
     loadingCount.value = 0
     toasts.value = []
+    versionLastCheckedAt = 0
   }
 
   // ==================== Version Management ====================
@@ -242,9 +247,14 @@ export const useAppStore = defineStore('app', () => {
    */
   async function fetchVersion(force = false): Promise<VersionInfo | null> {
     // Return cached data if available and not forcing refresh
-    if (versionLoaded.value && !force) {
+    if (
+      versionLoaded.value &&
+      !force &&
+      Date.now() - versionLastCheckedAt < VERSION_CACHE_TTL_MS
+    ) {
       return {
         current_version: currentVersion.value,
+        current_upstream_version: currentUpstreamVersion.value,
         latest_version: latestVersion.value,
         has_update: hasUpdate.value,
         build_type: buildType.value,
@@ -262,11 +272,32 @@ export const useAppStore = defineStore('app', () => {
     try {
       const data = await checkUpdatesAPI(force)
       currentVersion.value = data.current_version
+      currentUpstreamVersion.value = data.current_upstream_version || data.current_version
       latestVersion.value = data.latest_version
       hasUpdate.value = data.has_update
       buildType.value = data.build_type || 'source'
       releaseInfo.value = data.release_info || null
       versionLoaded.value = true
+      versionLastCheckedAt = Date.now()
+      if (data.has_update && data.latest_version) {
+        const notificationKey = `tokenpro:upstream-update:${data.latest_version}`
+        let alreadyNotified = false
+        try {
+          alreadyNotified = sessionStorage.getItem(notificationKey) === '1'
+          if (!alreadyNotified) sessionStorage.setItem(notificationKey, '1')
+        } catch {
+          // Storage may be unavailable in privacy mode; still show the notice.
+        }
+        if (!alreadyNotified) {
+          showToast(
+            'warning',
+            i18n.global.t('version.upstreamUpdateAvailable', {
+              current: data.current_upstream_version || data.current_version,
+              latest: data.latest_version
+            })
+          )
+        }
+      }
       return data
     } catch (error) {
       console.error('Failed to fetch version:', error)
@@ -282,6 +313,7 @@ export const useAppStore = defineStore('app', () => {
   function clearVersionCache(): void {
     versionLoaded.value = false
     hasUpdate.value = false
+    versionLastCheckedAt = 0
   }
 
   // ==================== Public Settings Management ====================
@@ -458,6 +490,7 @@ export const useAppStore = defineStore('app', () => {
     versionLoaded,
     versionLoading,
     currentVersion,
+    currentUpstreamVersion,
     latestVersion,
     hasUpdate,
     buildType,

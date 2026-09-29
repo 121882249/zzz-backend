@@ -107,6 +107,33 @@ describe('PaymentResultView', () => {
     vi.useRealTimers()
   })
 
+  it('renders the immutable base, percentage fee, and fixed fee snapshot', async () => {
+	routeState.query = { resume_token: 'resume-priced' }
+	resolveOrderPublicByResumeToken.mockResolvedValue({
+	  data: {
+		...orderFactory('PAID'),
+		currency: 'HKD',
+		amount: 85,
+		base_amount: 10,
+		pay_amount: 12.34,
+		fee_rate: 3.4,
+		fixed_fee: 2,
+		fee_amount: 2.34,
+		balance_recharge_multiplier: 8.5,
+	  },
+	})
+
+	const wrapper = mount(PaymentResultView, {
+	  global: { stubs: { OrderStatusBadge: true } },
+	})
+	await flushPromises()
+
+	expect(wrapper.text()).toContain(formatPaymentAmount(10, 'HKD'))
+	expect(wrapper.text()).toContain(formatPaymentAmount(0.34, 'HKD'))
+	expect(wrapper.text()).toContain(formatPaymentAmount(2, 'HKD'))
+	expect(wrapper.text()).toContain(formatPaymentAmount(12.34, 'HKD'))
+  })
+
   it('renders a pending state instead of a failure state when the restored order is still pending', async () => {
     routeState.query = {
       resume_token: 'resume-42',

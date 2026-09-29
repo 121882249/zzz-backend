@@ -610,6 +610,14 @@
             </span>
           </template>
 
+          <template #cell-created_ip="{ value }">
+            <div v-if="value">
+              <span class="font-mono text-sm text-gray-600 dark:text-gray-400">{{ value }}</span>
+              <IpGeoCell :ip="value" />
+            </div>
+            <span v-else class="font-mono text-sm text-gray-500 dark:text-dark-400">-</span>
+          </template>
+
           <template #cell-actions="{ row }">
             <div class="flex items-center gap-1">
               <!-- Edit Button -->
@@ -814,6 +822,7 @@ import Pagination from '@/components/common/Pagination.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import GroupBadge from '@/components/common/GroupBadge.vue'
+import IpGeoCell from '@/components/common/IpGeoCell.vue'
 import Select from '@/components/common/Select.vue'
 import { buildApiKeyGroupFilterOptions } from './apiKeyGroupFilterOptions'
 import UserAttributesConfigModal from '@/components/user/UserAttributesConfigModal.vue'
@@ -902,6 +911,7 @@ const allColumns = computed<Column[]>(() => [
   { key: 'last_active_at', label: t('admin.users.columns.lastActive'), sortable: true },
   { key: 'last_used_at', label: t('admin.users.columns.lastUsed'), sortable: true },
   { key: 'created_at', label: t('admin.users.columns.created'), sortable: true },
+  { key: 'created_ip', label: t('admin.users.columns.createdIp'), sortable: false },
   { key: 'actions', label: t('admin.users.columns.actions'), sortable: false }
 ])
 

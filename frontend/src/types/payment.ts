@@ -44,12 +44,15 @@ export interface PaymentConfig {
 export interface MethodLimit {
   currency?: string
   display_name?: string
+	balance_recharge_multiplier?: number
+	subscription_multiplier?: number
   daily_limit: number
   daily_used: number
   daily_remaining: number
   single_min: number
   single_max: number
   fee_rate: number
+	fixed_fee?: number
   available: boolean
 }
 
@@ -68,7 +71,7 @@ export interface CheckoutInfoResponse {
   plans: SubscriptionPlan[]
   balance_disabled: boolean
   balance_recharge_multiplier: number
-  /** Subscription CNY conversion rate (1 USD = X CNY); 0 = disabled, plan price is charged as-is */
+  /** @deprecated Provider methods own subscription conversion. */
   subscription_usd_to_cny_rate: number
   recharge_fee_rate: number
   help_text: string
@@ -86,9 +89,13 @@ export interface PaymentOrder {
   id: number
   user_id: number
   amount: number
+	base_amount?: number
   pay_amount: number
   currency?: string
   fee_rate: number
+	fixed_fee?: number
+	fee_amount?: number
+	balance_recharge_multiplier?: number
   payment_type: string
   out_trade_no: string
   status: OrderStatus
@@ -201,6 +208,7 @@ export interface WechatJSAPIPayload {
 export interface CreateOrderResult {
   order_id: number
   amount: number
+	base_amount?: number
   pay_url?: string
   qr_code?: string
   client_secret?: string
@@ -210,6 +218,9 @@ export interface CreateOrderResult {
   payment_env?: string
   pay_amount: number
   fee_rate: number
+	fixed_fee?: number
+	fee_amount?: number
+	balance_recharge_multiplier?: number
   expires_at: string
   result_type?: CreateOrderResultType
   payment_type?: string

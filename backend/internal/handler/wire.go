@@ -123,6 +123,7 @@ func ProvideGatewayHandler(
 
 func ProvideOpenAIGatewayHandler(
 	gatewayService *service.OpenAIGatewayService,
+	globalGroupResolver *service.GatewayService,
 	pluginManager *service.PluginManager,
 	concurrencyService *service.ConcurrencyService,
 	billingCacheService *service.BillingCacheService,
@@ -141,6 +142,7 @@ func ProvideOpenAIGatewayHandler(
 		usageRecordWorkerPool, errorPassthroughService, contentModerationService, opsService, cfg)
 	h.compositeResolver = compositeResolver
 	h.securityAuditCoordinator = coordinator
+	h.SetGlobalGroupResolver(globalGroupResolver)
 	h.grokMediaEligibilityProber = grokQuotaService
 	return h
 }

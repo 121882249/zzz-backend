@@ -777,8 +777,8 @@ func (s *UsageLogRepoSuite) TestDashboardStats_TodayTotalsAndPerformance() {
 	s.Require().Equal(baseStats.TotalUsers+2, stats.TotalUsers, "TotalUsers mismatch")
 	s.Require().Equal(baseStats.TodayNewUsers+1, stats.TodayNewUsers, "TodayNewUsers mismatch")
 	s.Require().Equal(baseStats.ActiveUsers+1, stats.ActiveUsers, "ActiveUsers mismatch")
-	s.Require().Equal(baseStats.TotalAPIKeys+2, stats.TotalAPIKeys, "TotalAPIKeys mismatch")
-	s.Require().Equal(baseStats.ActiveAPIKeys+1, stats.ActiveAPIKeys, "ActiveAPIKeys mismatch")
+	s.Require().Equal(baseStats.TotalAPIKeys+4, stats.TotalAPIKeys, "TotalAPIKeys mismatch")
+	s.Require().Equal(baseStats.ActiveAPIKeys+3, stats.ActiveAPIKeys, "ActiveAPIKeys mismatch")
 	s.Require().Equal(baseStats.TotalAccounts+4, stats.TotalAccounts, "TotalAccounts mismatch")
 	s.Require().Equal(baseStats.ErrorAccounts+1, stats.ErrorAccounts, "ErrorAccounts mismatch")
 	s.Require().Equal(baseStats.RateLimitAccounts+1, stats.RateLimitAccounts, "RateLimitAccounts mismatch")
@@ -891,7 +891,7 @@ func (s *UsageLogRepoSuite) TestGetUserDashboardStats() {
 
 	stats, err := s.repo.GetUserDashboardStats(s.ctx, user.ID)
 	s.Require().NoError(err, "GetUserDashboardStats")
-	s.Require().Equal(int64(1), stats.TotalAPIKeys)
+	s.Require().Equal(int64(2), stats.TotalAPIKeys)
 	s.Require().Equal(int64(1), stats.TotalRequests)
 }
 

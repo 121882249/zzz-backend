@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
@@ -16,6 +17,9 @@ import (
 // instances and returns limits for each, plus the global widest range.
 // Stripe sub-types (card, link) are aggregated under "stripe".
 func (s *PaymentConfigService) GetAvailableMethodLimits(ctx context.Context) (*MethodLimitsResponse, error) {
+	if err := s.ensureProviderOwnedSettingsMigrated(ctx); err != nil {
+		return nil, fmt.Errorf("migrate provider-owned settings: %w", err)
+	}
 	instances, err := s.entClient.PaymentProviderInstance.Query().
 		Where(paymentproviderinstance.EnabledEQ(true)).All(ctx)
 	if err != nil {
@@ -32,8 +36,16 @@ func (s *PaymentConfigService) GetAvailableMethodLimits(ctx context.Context) (*M
 			continue
 		}
 		ml := pcAggregateMethodLimits(pt, insts)
+		pricing, ok := pcAggregateMethodPricing(pt, insts)
+		if !ok {
+			continue
+		}
 		ml.DisplayName = s.pcAggregateMethodDisplayName(pt, insts)
 		ml.Currency = currency
+		ml.BalanceRechargeMultiplier = pricing.BalanceRechargeMultiplier
+		ml.SubscriptionMultiplier = pricing.SubscriptionMultiplier
+		ml.FeeRate = pricing.FeeRate
+		ml.FixedFee = pricing.FixedFee
 		resp.Methods[ml.PaymentType] = ml
 	}
 	resp.GlobalMin, resp.GlobalMax = pcComputeGlobalRange(resp.Methods)
@@ -77,6 +89,9 @@ func (s *PaymentConfigService) pcApplyEnabledVisibleMethodInstances(ctx context.
 
 // GetMethodLimits returns per-payment-type limits from enabled provider instances.
 func (s *PaymentConfigService) GetMethodLimits(ctx context.Context, types []string) ([]MethodLimits, error) {
+	if err := s.ensureProviderOwnedSettingsMigrated(ctx); err != nil {
+		return nil, fmt.Errorf("migrate provider-owned settings: %w", err)
+	}
 	instances, err := s.entClient.PaymentProviderInstance.Query().
 		Where(paymentproviderinstance.EnabledEQ(true)).All(ctx)
 	if err != nil {
@@ -95,11 +110,90 @@ func (s *PaymentConfigService) GetMethodLimits(ctx context.Context, types []stri
 			continue
 		}
 		ml := pcAggregateMethodLimits(pt, matching)
+		pricing, ok := pcAggregateMethodPricing(pt, matching)
+		if !ok {
+			continue
+		}
 		ml.DisplayName = s.pcAggregateMethodDisplayName(pt, matching)
 		ml.Currency = currency
+		ml.BalanceRechargeMultiplier = pricing.BalanceRechargeMultiplier
+		ml.SubscriptionMultiplier = pricing.SubscriptionMultiplier
+		ml.FeeRate = pricing.FeeRate
+		ml.FixedFee = pricing.FixedFee
 		result = append(result, ml)
 	}
 	return result, nil
+}
+
+// ResolveMethodPricing returns the single effective pricing configuration for
+// a visible method. Multiple enabled instances behind the same method must use
+// identical pricing so checkout never displays one amount and charges another.
+func (s *PaymentConfigService) ResolveMethodPricing(ctx context.Context, paymentType string) (MethodPricing, error) {
+	pricing := defaultMethodPricing()
+	method := NormalizeVisibleMethod(paymentType)
+	if method == "" || s == nil || s.entClient == nil {
+		return pricing, nil
+	}
+	instances, err := s.entClient.PaymentProviderInstance.Query().
+		Where(paymentproviderinstance.EnabledEQ(true)).All(ctx)
+	if err != nil {
+		return pricing, fmt.Errorf("query provider instances: %w", err)
+	}
+	typeInstances := pcGroupByPaymentType(instances)
+	typeInstances = s.pcApplyEnabledVisibleMethodInstances(ctx, typeInstances, instances)
+	matching := typeInstances[method]
+	if len(matching) == 0 {
+		return MethodPricing{}, infraerrors.ServiceUnavailable(
+			"PAYMENT_METHOD_PRICING_NOT_CONFIGURED",
+			"payment method does not have provider-owned commercial settings",
+		).WithMetadata(map[string]string{"payment_type": method})
+	}
+	resolved, ok := pcAggregateMethodPricing(method, matching)
+	if !ok {
+		return MethodPricing{}, infraerrors.ServiceUnavailable(
+			"PAYMENT_METHOD_PRICING_CONFLICT",
+			"payment method has enabled provider instances with different pricing",
+		).WithMetadata(map[string]string{"payment_type": method})
+	}
+	return resolved, nil
+}
+
+func defaultMethodPricing() MethodPricing {
+	return MethodPricing{BalanceRechargeMultiplier: 1, SubscriptionMultiplier: 1}
+}
+
+func pcAggregateMethodPricing(pt string, instances []*dbent.PaymentProviderInstance) (MethodPricing, bool) {
+	if len(instances) == 0 {
+		return MethodPricing{}, false
+	}
+	var aggregate MethodPricing
+	for i, inst := range instances {
+		limits, ok := pcInstanceTypeLimits(inst, pt)
+		if !ok || limits.BalanceMultiplier == nil || limits.SubscriptionMultiplier == nil || limits.FeeRate == nil || limits.FixedFee == nil {
+			return MethodPricing{}, false
+		}
+		current := MethodPricing{
+			BalanceRechargeMultiplier: *limits.BalanceMultiplier,
+			SubscriptionMultiplier:    *limits.SubscriptionMultiplier,
+			FeeRate:                   *limits.FeeRate,
+			FixedFee:                  *limits.FixedFee,
+		}
+		if i == 0 {
+			aggregate = current
+			continue
+		}
+		if !samePricingFloat(aggregate.BalanceRechargeMultiplier, current.BalanceRechargeMultiplier) ||
+			!samePricingFloat(aggregate.SubscriptionMultiplier, current.SubscriptionMultiplier) ||
+			!samePricingFloat(aggregate.FeeRate, current.FeeRate) ||
+			!samePricingFloat(aggregate.FixedFee, current.FixedFee) {
+			return MethodPricing{}, false
+		}
+	}
+	return aggregate, true
+}
+
+func samePricingFloat(a, b float64) bool {
+	return math.Abs(a-b) < 1e-9
 }
 
 func (s *PaymentConfigService) ValidateMethodCurrencyConsistency(ctx context.Context, paymentType string) (string, error) {

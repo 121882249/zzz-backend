@@ -71,6 +71,7 @@ func UserFromServiceAdmin(u *service.User) *AdminUser {
 	return &AdminUser{
 		User:                 *base,
 		Notes:                u.Notes,
+		CreatedIP:            u.CreatedIP,
 		LastUsedAt:           u.LastUsedAt,
 		GroupRates:           u.GroupRates,
 		RestrictPublicGroups: u.RestrictPublicGroups,
@@ -81,11 +82,16 @@ func APIKeyFromService(k *service.APIKey) *APIKey {
 	if k == nil {
 		return nil
 	}
+	keyType := k.KeyType
+	if keyType == "" {
+		keyType = service.APIKeyTypeGroup
+	}
 	out := &APIKey{
 		ID:                 k.ID,
 		UserID:             k.UserID,
 		Key:                k.Key,
 		Name:               k.Name,
+		KeyType:            keyType,
 		GroupID:            k.GroupID,
 		Status:             k.Status,
 		IPWhitelist:        k.IPWhitelist,

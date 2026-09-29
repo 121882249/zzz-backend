@@ -80,6 +80,15 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/auth/desktop',
+    name: 'DesktopAuth',
+    component: () => import('@/views/auth/DesktopAuthView.vue'),
+    meta: {
+      requiresAuth: false,
+      title: 'TokenPro Desktop Login'
+    }
+  },
+  {
     path: '/auth/linuxdo/callback',
     name: 'LinuxDoOAuthCallback',
     component: () => import('@/views/auth/LinuxDoCallbackView.vue'),
@@ -183,6 +192,15 @@ const routes: RouteRecordRaw[] = [
       requiresAuth: false,
       title: 'Model Plaza',
       titleKey: 'modelPlaza.title'
+    }
+  },
+  {
+    path: '/docs',
+    name: 'AgentDocs',
+    component: () => import('@/views/public/AgentDocsView.vue'),
+    meta: {
+      requiresAuth: true,
+      title: 'Agent 快速接入指南'
     }
   },
 
@@ -624,6 +642,19 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/content-monitor',
+    name: 'AdminContentMonitor',
+    component: () => import('@/features/content-monitor/ContentMonitorView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Content Monitor',
+      titleKey: 'admin.contentMonitor.title',
+      descriptionKey: 'admin.contentMonitor.description',
+      requiresRiskControl: true
+    }
+  },
+  {
     path: '/admin/usage',
     name: 'AdminUsage',
     component: () => import('@/views/admin/UsageView.vue'),
@@ -751,8 +782,9 @@ let authInitialized = false
 const navigationLoading = useNavigationLoadingState()
 // 延迟初始化预加载，传入 router 实例
 let routePrefetch: ReturnType<typeof useRoutePrefetch> | null = null
-const BACKEND_MODE_ALLOWED_PATHS = ['/login', '/key-usage', '/setup', '/payment/result', '/payment/airwallex', '/legal']
+const BACKEND_MODE_ALLOWED_PATHS = ['/home', '/login', '/key-usage', '/setup', '/payment/result', '/payment/airwallex', '/legal']
 const BACKEND_MODE_CALLBACK_PATHS = [
+  '/auth/desktop',
   '/auth/callback',
   '/auth/linuxdo/callback',
   '/auth/dingtalk/callback',

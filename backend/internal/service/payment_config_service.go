@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/paymentproviderinstance"
@@ -121,13 +122,24 @@ type UpdatePaymentConfigRequest struct {
 
 // MethodLimits holds per-payment-type limits.
 type MethodLimits struct {
-	PaymentType string  `json:"payment_type"`
-	DisplayName string  `json:"display_name,omitempty"`
-	Currency    string  `json:"currency"`
-	FeeRate     float64 `json:"fee_rate"`
-	DailyLimit  float64 `json:"daily_limit"`
-	SingleMin   float64 `json:"single_min"`
-	SingleMax   float64 `json:"single_max"`
+	PaymentType               string  `json:"payment_type"`
+	DisplayName               string  `json:"display_name,omitempty"`
+	Currency                  string  `json:"currency"`
+	BalanceRechargeMultiplier float64 `json:"balance_recharge_multiplier"`
+	SubscriptionMultiplier    float64 `json:"subscription_multiplier"`
+	FeeRate                   float64 `json:"fee_rate"`
+	FixedFee                  float64 `json:"fixed_fee"`
+	DailyLimit                float64 `json:"daily_limit"`
+	SingleMin                 float64 `json:"single_min"`
+	SingleMax                 float64 `json:"single_max"`
+}
+
+// MethodPricing is the effective checkout pricing owned by one visible method.
+type MethodPricing struct {
+	BalanceRechargeMultiplier float64
+	SubscriptionMultiplier    float64
+	FeeRate                   float64
+	FixedFee                  float64
 }
 
 // MethodLimitsResponse is the full response for the user-facing /limits API.
@@ -198,6 +210,7 @@ type PaymentConfigService struct {
 	entClient     *dbent.Client
 	settingRepo   SettingRepository
 	encryptionKey []byte
+	migrationMu   sync.Mutex
 }
 
 // NewPaymentConfigService creates a new PaymentConfigService.
@@ -216,6 +229,9 @@ func (s *PaymentConfigService) IsPaymentEnabled(ctx context.Context) bool {
 
 // GetPaymentConfig returns the full payment configuration.
 func (s *PaymentConfigService) GetPaymentConfig(ctx context.Context) (*PaymentConfig, error) {
+	if err := s.ensureProviderOwnedSettingsMigrated(ctx); err != nil {
+		return nil, fmt.Errorf("migrate provider-owned settings: %w", err)
+	}
 	keys := []string{
 		SettingPaymentEnabled, SettingMinRechargeAmount, SettingMaxRechargeAmount,
 		SettingDailyRechargeLimit, SettingOrderTimeoutMinutes, SettingMaxPendingOrders,

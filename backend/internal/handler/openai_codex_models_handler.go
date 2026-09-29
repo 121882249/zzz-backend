@@ -25,8 +25,23 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 		return
 	}
 	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
-	if !ok || apiKey.Group == nil {
+	if !ok || apiKey == nil {
 		h.errorResponse(c, http.StatusUnauthorized, "invalid_request_error", "API key group is required")
+		return
+	}
+	if apiKey.IsGlobal() {
+		if h.globalGroupResolver == nil {
+			h.errorResponse(c, http.StatusServiceUnavailable, "no_available_group", "当前模型没有可用分组或有效订阅。")
+			return
+		}
+		modelIDs := h.globalGroupResolver.GetAvailableModels(c.Request.Context(), nil, service.PlatformOpenAI)
+		modelIDs = service.FilterCodexModelIDsForGroup(modelIDs, nil)
+		body, err := service.BuildCodexModelsManifest(modelIDs)
+		if err != nil {
+			h.errorResponse(c, http.StatusInternalServerError, "api_error", "Failed to build Codex models manifest")
+			return
+		}
+		c.Data(http.StatusOK, "application/json", body)
 		return
 	}
 	if apiKey.Group.Platform != service.PlatformOpenAI && apiKey.Group.Platform != service.PlatformComposite {

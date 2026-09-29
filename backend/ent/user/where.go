@@ -105,6 +105,11 @@ func Status(v string) predicate.User {
 	return predicate.User(sql.FieldEQ(FieldStatus, v))
 }
 
+// CreatedIP applies equality check predicate on the "created_ip" field. It's identical to CreatedIPEQ.
+func CreatedIP(v string) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldCreatedIP, v))
+}
+
 // Username applies equality check predicate on the "username" field. It's identical to UsernameEQ.
 func Username(v string) predicate.User {
 	return predicate.User(sql.FieldEQ(FieldUsername, v))
@@ -688,6 +693,71 @@ func StatusEqualFold(v string) predicate.User {
 // StatusContainsFold applies the ContainsFold predicate on the "status" field.
 func StatusContainsFold(v string) predicate.User {
 	return predicate.User(sql.FieldContainsFold(FieldStatus, v))
+}
+
+// CreatedIPEQ applies the EQ predicate on the "created_ip" field.
+func CreatedIPEQ(v string) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldCreatedIP, v))
+}
+
+// CreatedIPNEQ applies the NEQ predicate on the "created_ip" field.
+func CreatedIPNEQ(v string) predicate.User {
+	return predicate.User(sql.FieldNEQ(FieldCreatedIP, v))
+}
+
+// CreatedIPIn applies the In predicate on the "created_ip" field.
+func CreatedIPIn(vs ...string) predicate.User {
+	return predicate.User(sql.FieldIn(FieldCreatedIP, vs...))
+}
+
+// CreatedIPNotIn applies the NotIn predicate on the "created_ip" field.
+func CreatedIPNotIn(vs ...string) predicate.User {
+	return predicate.User(sql.FieldNotIn(FieldCreatedIP, vs...))
+}
+
+// CreatedIPGT applies the GT predicate on the "created_ip" field.
+func CreatedIPGT(v string) predicate.User {
+	return predicate.User(sql.FieldGT(FieldCreatedIP, v))
+}
+
+// CreatedIPGTE applies the GTE predicate on the "created_ip" field.
+func CreatedIPGTE(v string) predicate.User {
+	return predicate.User(sql.FieldGTE(FieldCreatedIP, v))
+}
+
+// CreatedIPLT applies the LT predicate on the "created_ip" field.
+func CreatedIPLT(v string) predicate.User {
+	return predicate.User(sql.FieldLT(FieldCreatedIP, v))
+}
+
+// CreatedIPLTE applies the LTE predicate on the "created_ip" field.
+func CreatedIPLTE(v string) predicate.User {
+	return predicate.User(sql.FieldLTE(FieldCreatedIP, v))
+}
+
+// CreatedIPContains applies the Contains predicate on the "created_ip" field.
+func CreatedIPContains(v string) predicate.User {
+	return predicate.User(sql.FieldContains(FieldCreatedIP, v))
+}
+
+// CreatedIPHasPrefix applies the HasPrefix predicate on the "created_ip" field.
+func CreatedIPHasPrefix(v string) predicate.User {
+	return predicate.User(sql.FieldHasPrefix(FieldCreatedIP, v))
+}
+
+// CreatedIPHasSuffix applies the HasSuffix predicate on the "created_ip" field.
+func CreatedIPHasSuffix(v string) predicate.User {
+	return predicate.User(sql.FieldHasSuffix(FieldCreatedIP, v))
+}
+
+// CreatedIPEqualFold applies the EqualFold predicate on the "created_ip" field.
+func CreatedIPEqualFold(v string) predicate.User {
+	return predicate.User(sql.FieldEqualFold(FieldCreatedIP, v))
+}
+
+// CreatedIPContainsFold applies the ContainsFold predicate on the "created_ip" field.
+func CreatedIPContainsFold(v string) predicate.User {
+	return predicate.User(sql.FieldContainsFold(FieldCreatedIP, v))
 }
 
 // UsernameEQ applies the EQ predicate on the "username" field.

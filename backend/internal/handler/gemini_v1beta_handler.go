@@ -41,7 +41,7 @@ func (h *GatewayHandler) GeminiV1BetaListModels(c *gin.Context) {
 	}
 	// 检查平台：优先使用强制平台（/antigravity 路由），否则要求 gemini 分组
 	forcePlatform, hasForcePlatform := middleware.GetForcePlatformFromContext(c)
-	if !hasForcePlatform && effectiveAPIKeyPlatform(c, apiKey) != service.PlatformGemini {
+	if !hasForcePlatform && !apiKey.IsGlobal() && effectiveAPIKeyPlatform(c, apiKey) != service.PlatformGemini {
 		googleError(c, http.StatusBadRequest, "API key group platform is not gemini")
 		return
 	}
@@ -71,6 +71,20 @@ func (h *GatewayHandler) GeminiV1BetaListModels(c *gin.Context) {
 	}
 	if forcePlatform == service.PlatformAntigravity {
 		c.JSON(http.StatusOK, gemini.ModelsListResponse{Models: filterGeminiModels(agModels)})
+		return
+	}
+	// A global key has no fixed group until a concrete model is requested.
+	// Return the native fallback catalog instead of attempting a nil-group
+	// upstream lookup; generation requests still resolve a group per model.
+	if apiKey.IsGlobal() {
+		c.JSON(http.StatusOK, gemini.FallbackModelsList())
+		return
+	}
+	// A global key has no fixed group until a concrete model is requested.
+	// Return the native fallback catalog instead of attempting a nil-group
+	// upstream lookup; generation requests still resolve a group per model.
+	if apiKey.IsGlobal() {
+		c.JSON(http.StatusOK, gemini.FallbackModelsList())
 		return
 	}
 
@@ -225,7 +239,7 @@ func (h *GatewayHandler) GeminiV1BetaGetModel(c *gin.Context) {
 	}
 	// 检查平台：优先使用强制平台（/antigravity 路由），否则要求 gemini 分组
 	forcePlatform, hasForcePlatform := middleware.GetForcePlatformFromContext(c)
-	if !hasForcePlatform && effectiveAPIKeyPlatform(c, apiKey) != service.PlatformGemini {
+	if !hasForcePlatform && !apiKey.IsGlobal() && effectiveAPIKeyPlatform(c, apiKey) != service.PlatformGemini {
 		googleError(c, http.StatusBadRequest, "API key group platform is not gemini")
 		return
 	}
@@ -243,6 +257,14 @@ func (h *GatewayHandler) GeminiV1BetaGetModel(c *gin.Context) {
 	}
 	if resolvedModel, ok := service.ResolvedUpstreamModelFromContext(c.Request.Context()); ok && strings.TrimSpace(resolvedModel) != "" {
 		modelName = strings.TrimSpace(resolvedModel)
+	}
+	if apiKey.IsGlobal() {
+		resolvedKey, resolveErr := resolveGlobalAPIKeyForModel(c, h.gatewayService, apiKey, apiKey.UserID, modelName)
+		if resolveErr != nil {
+			googleError(c, http.StatusServiceUnavailable, "当前模型没有可用分组或有效订阅。")
+			return
+		}
+		apiKey = resolvedKey
 	}
 
 	// 强制 antigravity 模式：返回 antigravity 模型信息
@@ -300,7 +322,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 	)
 
 	// 检查平台：优先使用强制平台（/antigravity 路由，中间件已设置 request.Context），否则要求 gemini 分组
-	if !middleware.HasForcePlatform(c) {
+	if !middleware.HasForcePlatform(c) && !apiKey.IsGlobal() {
 		if effectiveAPIKeyPlatform(c, apiKey) != service.PlatformGemini {
 			googleError(c, http.StatusBadRequest, "API key group platform is not gemini")
 			return
@@ -320,6 +342,14 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 	}
 	if resolvedModel, ok := service.ResolvedUpstreamModelFromContext(c.Request.Context()); ok && strings.TrimSpace(resolvedModel) != "" {
 		modelName = strings.TrimSpace(resolvedModel)
+	}
+	if apiKey.IsGlobal() {
+		resolvedKey, resolveErr := resolveGlobalAPIKeyForModel(c, h.gatewayService, apiKey, authSubject.UserID, modelName)
+		if resolveErr != nil {
+			googleError(c, http.StatusServiceUnavailable, "当前模型没有可用分组或有效订阅。")
+			return
+		}
+		apiKey = resolvedKey
 	}
 
 	stream := action == "streamGenerateContent"
@@ -367,7 +397,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 	if h.errorPassthroughService != nil {
 		service.BindErrorPassthroughService(c, h.errorPassthroughService)
 	}
-	userReleaseFunc, err := geminiConcurrency.AcquireUserSlotWithWait(c, authSubject.UserID, authSubject.Concurrency, stream, &streamStarted)
+	userReleaseFunc, err := geminiConcurrency.AcquireUserSlotWithWaitForAPIKey(c, apiKey, authSubject.UserID, authSubject.Concurrency, stream, &streamStarted)
 	if err != nil {
 		reqLog.Warn("gemini.user_slot_acquire_failed", zap.Error(err))
 		googleConcurrencyError(c, err, "user")

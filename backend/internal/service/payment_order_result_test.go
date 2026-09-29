@@ -238,15 +238,15 @@ func TestCalculateCreateOrderPayAmountForSubscriptionAppliesFeeAfterCNYConversio
 	}
 }
 
-func TestCalculateCreateOrderPayAmountForSubscriptionKeepsNonCNYPrice(t *testing.T) {
+func TestCalculateCreateOrderPayAmountForSubscriptionUsesProviderMultiplierForUSD(t *testing.T) {
 	t.Parallel()
 
 	amountStr, amount, err := calculateCreateOrderPayAmountForOrderType(9.99, 0, "USD", payment.OrderTypeSubscription, 7.15)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if amountStr != "9.99" || amount != 9.99 {
-		t.Fatalf("subscription USD pay amount = (%q, %v), want (9.99, 9.99)", amountStr, amount)
+	if amountStr != "71.43" || amount != 71.43 {
+		t.Fatalf("subscription USD pay amount = (%q, %v), want (71.43, 71.43)", amountStr, amount)
 	}
 }
 
@@ -331,38 +331,62 @@ func TestComputeValidityDaysSupportsSingularAndPluralUnits(t *testing.T) {
 	}
 }
 
-func TestBuildPaymentSubjectAppliesAffixToSubscriptionPlanProductName(t *testing.T) {
+func TestBuildPaymentSubjectUsesProviderProductSettingsForSubscriptionPlanProductName(t *testing.T) {
 	t.Parallel()
 
 	svc := &PaymentService{}
-	cfg := &PaymentConfig{
-		ProductNamePrefix: "PRE",
-		ProductNameSuffix: "SUF",
+	sel := &payment.InstanceSelection{
+		ProviderKey: payment.TypeStripe,
+		Config: map[string]string{
+			"currency":                         "HKD",
+			providerProductNamePrefixConfigKey: "Tokenpro",
+		},
 	}
 	plan := &dbent.SubscriptionPlan{
 		Name:        "Pro Monthly",
 		ProductName: "Claude Pro",
 	}
 
-	got := svc.buildPaymentSubject(plan, 0, cfg, nil)
-	if got != "PRE Claude Pro SUF" {
-		t.Fatalf("buildPaymentSubject() = %q, want %q", got, "PRE Claude Pro SUF")
+	got := svc.buildPaymentSubject(plan, 0, sel)
+	if got != "Tokenpro Claude Pro HKD" {
+		t.Fatalf("buildPaymentSubject() = %q, want %q", got, "Tokenpro Claude Pro HKD")
 	}
 }
 
-func TestBuildPaymentSubjectAppliesAffixToSubscriptionPlanDefaultName(t *testing.T) {
+func TestBuildPaymentSubjectUsesProviderProductSettingsForSubscriptionPlanDefaultName(t *testing.T) {
 	t.Parallel()
 
 	svc := &PaymentService{}
-	cfg := &PaymentConfig{
-		ProductNamePrefix: "PRE",
-		ProductNameSuffix: "SUF",
+	sel := &payment.InstanceSelection{
+		ProviderKey: payment.TypeStripe,
+		Config: map[string]string{
+			"currency":                         "HKD",
+			providerProductNamePrefixConfigKey: "Tokenpro",
+		},
 	}
 	plan := &dbent.SubscriptionPlan{Name: "Team Monthly"}
 
-	got := svc.buildPaymentSubject(plan, 0, cfg, nil)
-	if got != "PRE Sub2API Subscription Team Monthly SUF" {
-		t.Fatalf("buildPaymentSubject() = %q, want %q", got, "PRE Sub2API Subscription Team Monthly SUF")
+	got := svc.buildPaymentSubject(plan, 0, sel)
+	if got != "Tokenpro Sub2API Subscription Team Monthly HKD" {
+		t.Fatalf("buildPaymentSubject() = %q, want %q", got, "Tokenpro Sub2API Subscription Team Monthly HKD")
+	}
+}
+
+func TestBuildPaymentSubjectUsesProviderProductSettingsForBalance(t *testing.T) {
+	t.Parallel()
+
+	svc := &PaymentService{}
+	sel := &payment.InstanceSelection{
+		ProviderKey: payment.TypeStripe,
+		Config: map[string]string{
+			"currency":                         "HKD",
+			providerProductNamePrefixConfigKey: "Tokenpro",
+		},
+	}
+
+	got := svc.buildPaymentSubject(nil, 10, sel)
+	if got != "Tokenpro 10.00 HKD" {
+		t.Fatalf("buildPaymentSubject() = %q, want %q", got, "Tokenpro 10.00 HKD")
 	}
 }
 

@@ -43,10 +43,16 @@ func (r *apiKeyRepository) activeQuery() *dbent.APIKeyQuery {
 }
 
 func (r *apiKeyRepository) Create(ctx context.Context, key *service.APIKey) error {
+	keyType := key.KeyType
+	if keyType == "" {
+		keyType = service.APIKeyTypeGroup
+		key.KeyType = keyType
+	}
 	builder := r.client.APIKey.Create().
 		SetUserID(key.UserID).
 		SetKey(key.Key).
 		SetName(key.Name).
+		SetKeyType(keyType).
 		SetStatus(key.Status).
 		SetNillableGroupID(key.GroupID).
 		SetNillableLastUsedAt(key.LastUsedAt).
@@ -127,12 +133,30 @@ func (r *apiKeyRepository) GetByKey(ctx context.Context, key string) (*service.A
 	return apiKeyEntityToService(m), nil
 }
 
+// GetGlobalByUserID returns the active system global key for a user. The
+// partial unique index added by the key-type migration guarantees at most one
+// non-deleted global key per user.
+func (r *apiKeyRepository) GetGlobalByUserID(ctx context.Context, userID int64) (*service.APIKey, error) {
+	m, err := r.activeQuery().
+		Where(apikey.UserIDEQ(userID), apikey.KeyTypeEQ(service.APIKeyTypeGlobal)).
+		WithUser().
+		Only(ctx)
+	if err != nil {
+		if dbent.IsNotFound(err) {
+			return nil, service.ErrAPIKeyNotFound
+		}
+		return nil, err
+	}
+	return apiKeyEntityToService(m), nil
+}
+
 func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*service.APIKey, error) {
 	m, err := r.activeQuery().
 		Where(apikey.KeyEQ(key)).
 		Select(
 			apikey.FieldID,
 			apikey.FieldUserID,
+			apikey.FieldKeyType,
 			apikey.FieldGroupID,
 			apikey.FieldName,
 			apikey.FieldStatus,
@@ -258,6 +282,9 @@ func (r *apiKeyRepository) Update(ctx context.Context, key *service.APIKey, fiel
 	builder := client.APIKey.Update().
 		Where(apikey.IDEQ(key.ID), apikey.DeletedAtIsNil()).
 		SetUpdatedAt(now)
+	if fields.Key {
+		builder.SetKey(key.Key)
+	}
 	if fields.Name {
 		builder.SetName(key.Name)
 	}
@@ -466,7 +493,8 @@ func (r *apiKeyRepository) ListByUserID(ctx context.Context, userID int64, param
 	keysQuery := q.
 		WithGroup().
 		Offset(params.Offset()).
-		Limit(params.Limit())
+		Limit(params.Limit()).
+		Order(apiKeyGlobalLastOrder)
 	for _, order := range apiKeyListOrder(params) {
 		keysQuery = keysQuery.Order(order)
 	}
@@ -485,6 +513,16 @@ func (r *apiKeyRepository) ListByUserID(ctx context.Context, userID int64, param
 	}
 
 	return outKeys, paginationResultFromTotal(int64(total), params), nil
+}
+
+// apiKeyGlobalLastOrder keeps the system-managed TokenPro key after ordinary
+// group keys regardless of the user-selected sort. Applying this before
+// OFFSET/LIMIT makes the placement stable across pagination, not just within
+// the currently rendered page.
+func apiKeyGlobalLastOrder(s *entsql.Selector) {
+	s.OrderExpr(entsql.Expr(
+		"CASE WHEN " + s.C(apikey.FieldKeyType) + " = 'global' THEN 1 ELSE 0 END ASC",
+	))
 }
 
 func (r *apiKeyRepository) ListAllByUserID(ctx context.Context, userID int64, filters service.APIKeyListFilters) ([]service.APIKey, error) {
@@ -877,6 +915,7 @@ func apiKeyEntityToService(m *dbent.APIKey) *service.APIKey {
 		UserID:        m.UserID,
 		Key:           m.Key,
 		Name:          m.Name,
+		KeyType:       m.KeyType,
 		Status:        m.Status,
 		IPWhitelist:   m.IPWhitelist,
 		IPBlacklist:   m.IPBlacklist,
@@ -929,6 +968,7 @@ func userEntityToService(u *dbent.User) *service.User {
 		FrozenBalance:              u.FrozenBalance,
 		Concurrency:                u.Concurrency,
 		Status:                     u.Status,
+		CreatedIP:                  u.CreatedIP,
 		SignupSource:               u.SignupSource,
 		LastLoginAt:                u.LastLoginAt,
 		LastActiveAt:               u.LastActiveAt,

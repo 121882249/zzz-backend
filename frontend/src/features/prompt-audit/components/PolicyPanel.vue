@@ -51,6 +51,7 @@
             </label>
           </div>
         </fieldset>
+
       </div>
 
       <div class="space-y-4 rounded-xl border border-gray-200 p-4 dark:border-dark-700/60 dark:bg-dark-900/20 sm:p-5">

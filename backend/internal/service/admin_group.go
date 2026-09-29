@@ -1326,6 +1326,9 @@ func (s *adminServiceImpl) AdminUpdateAPIKeyGroupID(ctx context.Context, keyID i
 		// nil 表示不修改，直接返回
 		return &AdminUpdateAPIKeyGroupIDResult{APIKey: apiKey}, nil
 	}
+	if apiKey.IsGlobal() {
+		return nil, ErrGlobalAPIKeyGroupImmutable
+	}
 
 	if *groupID < 0 {
 		return nil, infraerrors.BadRequest("INVALID_GROUP_ID", "group_id must be non-negative")

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -416,7 +417,13 @@ func (s *paymentConfigSettingRepoStub) Get(context.Context, string) (*Setting, e
 func (s *paymentConfigSettingRepoStub) GetValue(_ context.Context, key string) (string, error) {
 	return s.values[key], nil
 }
-func (s *paymentConfigSettingRepoStub) Set(context.Context, string, string) error { return nil }
+func (s *paymentConfigSettingRepoStub) Set(_ context.Context, key, value string) error {
+	if s.values == nil {
+		s.values = map[string]string{}
+	}
+	s.values[key] = value
+	return nil
+}
 func (s *paymentConfigSettingRepoStub) GetMultiple(_ context.Context, keys []string) (map[string]string, error) {
 	out := make(map[string]string, len(keys))
 	for _, key := range keys {
@@ -439,6 +446,128 @@ func (s *paymentConfigSettingRepoStub) GetAll(context.Context) (map[string]strin
 	return s.values, nil
 }
 func (s *paymentConfigSettingRepoStub) Delete(context.Context, string) error { return nil }
+
+func TestProviderCommercialSettingsMigrationCopiesLegacyValuesOnce(t *testing.T) {
+	ctx := context.Background()
+	client := newPaymentConfigServiceTestClient(t)
+	repo := &paymentConfigSettingRepoStub{values: map[string]string{
+		SettingMinRechargeAmount:        "10",
+		SettingMaxRechargeAmount:        "500",
+		SettingDailyRechargeLimit:       "5000",
+		SettingBalanceRechargeMult:      "10",
+		SettingSubscriptionUSDToCNYRate: "7.15",
+		SettingRechargeFeeRate:          "2.5",
+	}}
+	stripe, err := client.PaymentProviderInstance.Create().
+		SetProviderKey(payment.TypeStripe).
+		SetName("Stripe HKD").
+		SetConfig(`{"currency":"HKD"}`).
+		SetSupportedTypes("card").
+		SetLimits(`{"stripe":{"balanceMultiplier":8.5}}`).
+		SetEnabled(true).
+		Save(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	alipay, err := client.PaymentProviderInstance.Create().
+		SetProviderKey(payment.TypeAlipay).
+		SetName("Alipay").
+		SetConfig(`{}`).
+		SetSupportedTypes(payment.TypeAlipay).
+		SetEnabled(true).
+		Save(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewPaymentConfigService(client, repo, nil)
+	if _, err := svc.GetPaymentConfig(ctx); err != nil {
+		t.Fatal(err)
+	}
+	assertLimits := func(instanceID int64, paymentType string, wantBalance, wantSubscription float64) {
+		t.Helper()
+		instance, err := client.PaymentProviderInstance.Get(ctx, instanceID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var limits payment.InstanceLimits
+		if err := json.Unmarshal([]byte(instance.Limits), &limits); err != nil {
+			t.Fatal(err)
+		}
+		got := limits[paymentType]
+		if got.SingleMin != 10 || got.SingleMax != 500 || got.DailyLimit != 5000 ||
+			got.BalanceMultiplier == nil || *got.BalanceMultiplier != wantBalance ||
+			got.SubscriptionMultiplier == nil || *got.SubscriptionMultiplier != wantSubscription ||
+			got.FeeRate == nil || *got.FeeRate != 2.5 || got.FixedFee == nil || *got.FixedFee != 0 {
+			t.Fatalf("migrated limits = %+v", got)
+		}
+	}
+	assertLimits(stripe.ID, payment.TypeStripe, 8.5, 1)
+	assertLimits(alipay.ID, payment.TypeAlipay, 10, 7.15)
+	if repo.values[settingProviderCommercialSettingsMigratedV1] != "true" {
+		t.Fatal("migration marker was not persisted")
+	}
+}
+
+func TestProviderProductNameSettingsMigrationCopiesLegacyPrefixOnce(t *testing.T) {
+	ctx := context.Background()
+	client := newPaymentConfigServiceTestClient(t)
+	repo := &paymentConfigSettingRepoStub{values: map[string]string{
+		SettingProductNamePrefix:                    "Tokenpro",
+		settingProviderCommercialSettingsMigratedV1: "true",
+	}}
+	stripe, err := client.PaymentProviderInstance.Create().
+		SetProviderKey(payment.TypeStripe).
+		SetName("Stripe HKD").
+		SetConfig(`{"currency":"HKD"}`).
+		SetSupportedTypes("card").
+		SetEnabled(true).
+		Save(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	easyPay, err := client.PaymentProviderInstance.Create().
+		SetProviderKey(payment.TypeEasyPay).
+		SetName("EasyPay").
+		SetConfig(`{}`).
+		SetSupportedTypes(payment.TypeAlipay).
+		SetEnabled(true).
+		Save(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewPaymentConfigService(client, repo, nil)
+	if _, err := svc.GetPaymentConfig(ctx); err != nil {
+		t.Fatal(err)
+	}
+	assertPrefix := func(instanceID int64, want string) {
+		t.Helper()
+		instance, err := client.PaymentProviderInstance.Get(ctx, instanceID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		config, err := svc.decryptConfig(instance.Config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := config[providerProductNamePrefixConfigKey]; got != want {
+			t.Fatalf("provider product prefix = %q, want %q", got, want)
+		}
+	}
+	assertPrefix(stripe.ID, "Tokenpro")
+	assertPrefix(easyPay.ID, "Tokenpro")
+	if repo.values[settingProviderProductNameSettingsMigratedV1] != "true" {
+		t.Fatal("product-name migration marker was not persisted")
+	}
+
+	repo.values[SettingProductNamePrefix] = "Changed"
+	if _, err := svc.GetPaymentConfig(ctx); err != nil {
+		t.Fatal(err)
+	}
+	assertPrefix(stripe.ID, "Tokenpro")
+	assertPrefix(easyPay.ID, "Tokenpro")
+}
 
 func TestUpdatePaymentConfig_PersistsVisibleMethodRouting(t *testing.T) {
 	repo := &paymentConfigSettingRepoStub{values: map[string]string{

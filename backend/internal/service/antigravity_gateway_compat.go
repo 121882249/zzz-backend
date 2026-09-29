@@ -109,6 +109,11 @@ func (s *AntigravityGatewayService) ForwardAsResponses(
 	if err := s.validateAntigravityCompatAccount(c, account); err != nil {
 		return nil, err
 	}
+	strippedBody, _, stripErr := stripOpenAIImageGenerationToolsFromRawPayload(body)
+	if stripErr != nil {
+		return nil, s.writeAntigravityCompatError(c, http.StatusBadRequest, "invalid_request_error", stripErr.Error())
+	}
+	body = strippedBody
 
 	var request apicompat.ResponsesRequest
 	if json.Unmarshal(body, &request) != nil {

@@ -56,13 +56,13 @@ function mountHome(settings: Record<string, unknown> = {}) {
 }
 
 function compactDestination(wrapper: ReturnType<typeof mountHome>) {
-  return wrapper.get('[data-testid="compact-home"]').findComponent(RouterLinkStub).props('to')
+  return linkDestination(wrapper, 'compact-primary-action')
 }
 
-function modelPlazaDestination(wrapper: ReturnType<typeof mountHome>) {
+function linkDestination(wrapper: ReturnType<typeof mountHome>, testId: string) {
   return wrapper
     .findAllComponents(RouterLinkStub)
-    .find((link) => link.props('to') === '/model-plaza')
+    .find((link) => link.attributes('data-testid') === testId)
     ?.props('to')
 }
 
@@ -74,6 +74,10 @@ describe('HomeView compact mode', () => {
     authStore.checkAuth.mockClear()
     appStore.fetchPublicSettings.mockClear()
     localStorage.clear()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ tag_name: 'v1.2.11' }),
+    }))
     vi.spyOn(window, 'matchMedia').mockReturnValue({ matches: false } as MediaQueryList)
   })
 
@@ -100,7 +104,7 @@ describe('HomeView compact mode', () => {
   it('treats whitespace-only custom content as empty and selects compact mode', () => {
     const wrapper = mountHome({ compact_home_enabled: true, home_content: ' \n\t ' })
 
-    expect(wrapper.get('[data-testid="compact-home"]').text()).toContain('Test site')
+    expect(wrapper.get('[data-testid="compact-home"]').text()).toContain('TokenPro')
   })
 
   it.each([undefined, false])('selects the default home when compact mode is %s', (enabled) => {
@@ -111,8 +115,8 @@ describe('HomeView compact mode', () => {
     expect(wrapper.find('.terminal-container').exists()).toBe(true)
   })
 
-  it('links unauthenticated visitors to login', () => {
-    expect(compactDestination(mountHome({ compact_home_enabled: true }))).toBe('/login')
+  it('links unauthenticated visitors to registration from the primary action', () => {
+    expect(compactDestination(mountHome({ compact_home_enabled: true }))).toBe('/register')
   })
 
   it('links authenticated users to their dashboard', () => {
@@ -131,54 +135,67 @@ describe('HomeView compact mode', () => {
     expect(appStore.fetchPublicSettings).not.toHaveBeenCalled()
   })
 
-  it('shows the model plaza link to anonymous visitors when public access is enabled', () => {
-    const wrapper = mountHome({
-      compact_home_enabled: true,
-      model_plaza_enabled: true,
-      model_plaza_require_auth: false,
-    })
-
-    expect(modelPlazaDestination(wrapper)).toBe('/model-plaza')
-  })
-
-  it('hides the model plaza link from anonymous visitors when sign-in is required', () => {
-    const wrapper = mountHome({
-      compact_home_enabled: true,
-      model_plaza_enabled: true,
-      model_plaza_require_auth: true,
-    })
-
-    expect(modelPlazaDestination(wrapper)).toBeUndefined()
-  })
-
-  it('shows the model plaza link to authenticated visitors when sign-in is required', () => {
-    authStore.isAuthenticated = true
-
-    const wrapper = mountHome({
-      compact_home_enabled: true,
-      model_plaza_enabled: true,
-      model_plaza_require_auth: true,
-    })
-
-    expect(modelPlazaDestination(wrapper)).toBe('/model-plaza')
-  })
-
-  it('shows the model plaza link in the default home header', () => {
+  it('keeps product, pricing, docs, community and model-plaza links out of the header', () => {
     const wrapper = mountHome({
       model_plaza_enabled: true,
       model_plaza_require_auth: false,
+      doc_url: 'https://docs.example.com',
     })
 
-    expect(modelPlazaDestination(wrapper)).toBe('/model-plaza')
+    const destinations = wrapper.findAllComponents(RouterLinkStub).map((link) => link.props('to'))
+    expect(destinations).not.toContain('/model-plaza')
+    expect(wrapper.find('a[href="https://docs.example.com"]').exists()).toBe(false)
   })
 
-  it('hides the model plaza link when the feature is disabled', () => {
-    const wrapper = mountHome({
-      compact_home_enabled: true,
-      model_plaza_enabled: false,
-      model_plaza_require_auth: false,
-    })
+  it('shows login and registration together for anonymous visitors', () => {
+    const wrapper = mountHome()
+    expect(linkDestination(wrapper, 'header-login')).toBe('/login')
+    expect(linkDestination(wrapper, 'header-register')).toBe('/register')
+    expect(linkDestination(wrapper, 'hero-primary-action')).toBe('/register')
+  })
 
-    expect(modelPlazaDestination(wrapper)).toBeUndefined()
+  it('links supported desktop builds from the device-aware download dock', async () => {
+    const wrapper = mountHome()
+
+    expect(wrapper.get('[data-testid="download-dock"]').exists()).toBe(true)
+    expect(wrapper.findAll('.download-platform')).toHaveLength(3)
+    await wrapper.get('[data-testid="download-platform-macos"]').trigger('click')
+    expect(wrapper.get('[data-testid="download-builds"]').exists()).toBe(true)
+    expect(wrapper.findAll('.download-build-card')).toHaveLength(2)
+    expect(wrapper.findAll('.download-build-action')).toHaveLength(2)
+    const downloads = wrapper.findAll('a.download-build-action')
+    expect(downloads).toHaveLength(2)
+    expect(downloads[0].attributes('href')).toBe('/downloads/latest/TokenPro-macOS-arm64.dmg')
+    expect(downloads[1].attributes('href')).toBe('/downloads/latest/TokenPro-macOS-x64.dmg')
+    expect(wrapper.get('.download-version').text()).toBe('v1.2.11')
+    expect(wrapper.find('.download-build-copy small').exists()).toBe(false)
+  })
+
+  it('switches the visible build slots with the selected platform', async () => {
+    const wrapper = mountHome()
+
+    await wrapper.get('[data-testid="download-platform-windows"]').trigger('click')
+
+    expect(wrapper.get('[data-testid="download-platform-windows"]').attributes('aria-pressed')).toBe('true')
+    expect(wrapper.get('[data-testid="download-builds"]').text()).toContain('home.cosmic.buildX64')
+    expect(wrapper.get('[data-testid="download-builds"]').text()).not.toContain('home.cosmic.buildArm64')
+    expect(wrapper.find('a[href="/downloads/latest/TokenPro-Windows-x64.exe"]').exists()).toBe(true)
+    expect(wrapper.findAll('.download-build-card')).toHaveLength(1)
+    expect(wrapper.get('.download-build-list').classes()).toContain('download-build-list--single')
+    expect(wrapper.findAll('button.download-build-action')).toHaveLength(0)
+  })
+
+  it('shows an expandable model family beyond the four representative providers', () => {
+    const wrapper = mountHome()
+
+    expect(wrapper.get('[data-testid="hero-more-models"]').text()).toContain('home.cosmic.moreModelFamily')
+    expect(wrapper.findAll('.floating-model')).toHaveLength(5)
+  })
+
+  it('keeps the model family inside the hero instead of repeating a second model section', () => {
+    const wrapper = mountHome()
+
+    expect(wrapper.find('.model-constellation').exists()).toBe(false)
+    expect(wrapper.findAll('.floating-model')).toHaveLength(5)
   })
 })

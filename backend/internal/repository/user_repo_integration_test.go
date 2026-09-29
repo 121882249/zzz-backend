@@ -154,6 +154,24 @@ func (s *UserRepoSuite) TestCreate() {
 	s.Require().Equal("create@test.com", got.Email)
 }
 
+func (s *UserRepoSuite) TestCreateCapturesIPFromSessionBinding() {
+	ctx := service.WithSessionBinding(s.ctx, &service.SessionBinding{IP: "203.0.113.42"})
+	user := &service.User{
+		Email:        "created-ip@test.com",
+		PasswordHash: "test-password-hash",
+		Role:         service.RoleUser,
+		Status:       service.StatusActive,
+		Concurrency:  5,
+	}
+
+	s.Require().NoError(s.repo.Create(ctx, user), "create user with request IP")
+
+	got, err := s.repo.GetByID(s.ctx, user.ID)
+	s.Require().NoError(err)
+	s.Require().Equal("203.0.113.42", user.CreatedIP)
+	s.Require().Equal("203.0.113.42", got.CreatedIP)
+}
+
 func (s *UserRepoSuite) TestGetByID_NotFound() {
 	_, err := s.repo.GetByID(s.ctx, 999999)
 	s.Require().Error(err, "expected error for non-existent ID")

@@ -7,7 +7,9 @@ const PAYMENT_CURRENCY_SYMBOLS: Record<string, string> = {
   EUR: '€',
   GBP: '£',
   JPY: '¥',
-  HKD: 'HK$',
+  // Use the ISO code for Hong Kong dollars. `HK$` is often mistaken for an
+  // extra USD symbol in payment and order screens.
+  HKD: 'HKD ',
   TWD: 'NT$',
   KRW: '₩',
   AUD: 'A$',
@@ -49,7 +51,23 @@ export function formatPaymentAmount(amount: number, currency?: string | null, lo
     return new Intl.NumberFormat(locale || undefined, {
       style: 'currency',
       currency: normalized,
-      currencyDisplay: 'narrowSymbol',
+      currencyDisplay: normalized === 'HKD' ? 'code' : 'symbol',
+      minimumFractionDigits: fractionDigits,
+      maximumFractionDigits: fractionDigits,
+    }).format(Number.isFinite(amount) ? amount : 0)
+  } catch {
+    return `${normalized} ${(Number.isFinite(amount) ? amount : 0).toFixed(fractionDigits)}`
+  }
+}
+
+export function formatPaymentAmountCode(amount: number, currency?: string | null, locale?: string): string {
+  const normalized = normalizePaymentCurrency(currency)
+  const fractionDigits = paymentCurrencyFractionDigits(normalized)
+  try {
+    return new Intl.NumberFormat(locale || undefined, {
+      style: 'currency',
+      currency: normalized,
+      currencyDisplay: 'code',
       minimumFractionDigits: fractionDigits,
       maximumFractionDigits: fractionDigits,
     }).format(Number.isFinite(amount) ? amount : 0)

@@ -57,6 +57,9 @@ func (User) Fields() []ent.Field {
 		field.String("status").
 			MaxLen(20).
 			Default(domain.StatusActive),
+		field.String("created_ip").
+			MaxLen(64).
+			Default(""),
 
 		// Optional profile fields (added later; default '' in DB migration)
 		field.String("username").

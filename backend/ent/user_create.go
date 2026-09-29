@@ -158,6 +158,20 @@ func (_c *UserCreate) SetNillableStatus(v *string) *UserCreate {
 	return _c
 }
 
+// SetCreatedIP sets the "created_ip" field.
+func (_c *UserCreate) SetCreatedIP(v string) *UserCreate {
+	_c.mutation.SetCreatedIP(v)
+	return _c
+}
+
+// SetNillableCreatedIP sets the "created_ip" field if the given value is not nil.
+func (_c *UserCreate) SetNillableCreatedIP(v *string) *UserCreate {
+	if v != nil {
+		_c.SetCreatedIP(*v)
+	}
+	return _c
+}
+
 // SetUsername sets the "username" field.
 func (_c *UserCreate) SetUsername(v string) *UserCreate {
 	_c.mutation.SetUsername(v)
@@ -634,6 +648,10 @@ func (_c *UserCreate) defaults() error {
 		v := user.DefaultStatus
 		_c.mutation.SetStatus(v)
 	}
+	if _, ok := _c.mutation.CreatedIP(); !ok {
+		v := user.DefaultCreatedIP
+		_c.mutation.SetCreatedIP(v)
+	}
 	if _, ok := _c.mutation.Username(); !ok {
 		v := user.DefaultUsername
 		_c.mutation.SetUsername(v)
@@ -724,6 +742,14 @@ func (_c *UserCreate) check() error {
 	if v, ok := _c.mutation.Status(); ok {
 		if err := user.StatusValidator(v); err != nil {
 			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "User.status": %w`, err)}
+		}
+	}
+	if _, ok := _c.mutation.CreatedIP(); !ok {
+		return &ValidationError{Name: "created_ip", err: errors.New(`ent: missing required field "User.created_ip"`)}
+	}
+	if v, ok := _c.mutation.CreatedIP(); ok {
+		if err := user.CreatedIPValidator(v); err != nil {
+			return &ValidationError{Name: "created_ip", err: fmt.Errorf(`ent: validator failed for field "User.created_ip": %w`, err)}
 		}
 	}
 	if _, ok := _c.mutation.Username(); !ok {
@@ -832,6 +858,10 @@ func (_c *UserCreate) createSpec() (*User, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.Status(); ok {
 		_spec.SetField(user.FieldStatus, field.TypeString, value)
 		_node.Status = value
+	}
+	if value, ok := _c.mutation.CreatedIP(); ok {
+		_spec.SetField(user.FieldCreatedIP, field.TypeString, value)
+		_node.CreatedIP = value
 	}
 	if value, ok := _c.mutation.Username(); ok {
 		_spec.SetField(user.FieldUsername, field.TypeString, value)
@@ -1289,6 +1319,18 @@ func (u *UserUpsert) UpdateStatus() *UserUpsert {
 	return u
 }
 
+// SetCreatedIP sets the "created_ip" field.
+func (u *UserUpsert) SetCreatedIP(v string) *UserUpsert {
+	u.Set(user.FieldCreatedIP, v)
+	return u
+}
+
+// UpdateCreatedIP sets the "created_ip" field to the value that was provided on create.
+func (u *UserUpsert) UpdateCreatedIP() *UserUpsert {
+	u.SetExcluded(user.FieldCreatedIP)
+	return u
+}
+
 // SetUsername sets the "username" field.
 func (u *UserUpsert) SetUsername(v string) *UserUpsert {
 	u.Set(user.FieldUsername, v)
@@ -1713,6 +1755,20 @@ func (u *UserUpsertOne) SetStatus(v string) *UserUpsertOne {
 func (u *UserUpsertOne) UpdateStatus() *UserUpsertOne {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdateStatus()
+	})
+}
+
+// SetCreatedIP sets the "created_ip" field.
+func (u *UserUpsertOne) SetCreatedIP(v string) *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.SetCreatedIP(v)
+	})
+}
+
+// UpdateCreatedIP sets the "created_ip" field to the value that was provided on create.
+func (u *UserUpsertOne) UpdateCreatedIP() *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateCreatedIP()
 	})
 }
 
@@ -2344,6 +2400,20 @@ func (u *UserUpsertBulk) SetStatus(v string) *UserUpsertBulk {
 func (u *UserUpsertBulk) UpdateStatus() *UserUpsertBulk {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdateStatus()
+	})
+}
+
+// SetCreatedIP sets the "created_ip" field.
+func (u *UserUpsertBulk) SetCreatedIP(v string) *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.SetCreatedIP(v)
+	})
+}
+
+// UpdateCreatedIP sets the "created_ip" field to the value that was provided on create.
+func (u *UserUpsertBulk) UpdateCreatedIP() *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateCreatedIP()
 	})
 }
 

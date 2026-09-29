@@ -200,6 +200,30 @@ func TestPcGroupByPaymentType(t *testing.T) {
 	})
 }
 
+func TestPcAggregateMethodPricing(t *testing.T) {
+	t.Parallel()
+	instances := []*dbent.PaymentProviderInstance{
+		makeInstance(1, payment.TypeStripe, "card", `{"stripe":{"balanceMultiplier":8.5,"subscriptionMultiplier":7.8,"feeRate":3.4,"fixedFee":2}}`),
+		makeInstance(2, payment.TypeStripe, "card", `{"stripe":{"balanceMultiplier":8.5,"subscriptionMultiplier":7.8,"feeRate":3.4,"fixedFee":2}}`),
+	}
+	got, ok := pcAggregateMethodPricing(payment.TypeStripe, instances)
+	require.True(t, ok)
+	require.Equal(t, MethodPricing{BalanceRechargeMultiplier: 8.5, SubscriptionMultiplier: 7.8, FeeRate: 3.4, FixedFee: 2}, got)
+
+	instances[1].Limits = `{"stripe":{"balanceMultiplier":8.5,"subscriptionMultiplier":7.8,"feeRate":0,"fixedFee":2}}`
+	_, ok = pcAggregateMethodPricing(payment.TypeStripe, instances)
+	require.False(t, ok, "checkout pricing must be unambiguous across load-balanced instances")
+}
+
+func TestPcAggregateMethodPricingDoesNotFallBackToGlobal(t *testing.T) {
+	t.Parallel()
+	got, ok := pcAggregateMethodPricing(payment.TypeAlipay, []*dbent.PaymentProviderInstance{
+		makeInstance(1, payment.TypeAlipay, payment.TypeAlipay, ""),
+	})
+	require.False(t, ok)
+	require.Equal(t, MethodPricing{}, got)
+}
+
 func TestPcAggregateMethodCurrency(t *testing.T) {
 	t.Parallel()
 
@@ -264,6 +288,7 @@ func TestGetAvailableMethodLimitsIncludesEasyPayCustomMethodDisplayName(t *testi
 		SetName("EasyPay Custom").
 		SetConfig(`{"customMethods":"[{\"type\":\"ldc\",\"upstreamType\":\"ldc\",\"displayName\":\"LDC Pay\"}]"}`).
 		SetSupportedTypes("alipay,wxpay,ldc").
+		SetLimits(`{"ldc":{"balanceMultiplier":10,"subscriptionMultiplier":1,"feeRate":0,"fixedFee":0}}`).
 		SetEnabled(true).
 		Save(ctx)
 	require.NoError(t, err)

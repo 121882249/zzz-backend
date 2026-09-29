@@ -124,12 +124,23 @@ func RegisterAdminRoutes(
 
 		// 独立提示词输入审计
 		registerPromptAuditRoutes(admin, h)
+		registerContentMonitorRoutes(admin, h)
 
 		// 邀请返利（专属用户管理）
 		registerAffiliateRoutes(admin, h)
 
 		// 操作审计日志
 		registerAuditLogRoutes(admin, h, stepUpAuth)
+	}
+}
+
+func registerContentMonitorRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	monitor := admin.Group("/content-monitor")
+	{
+		monitor.GET("/config", h.Admin.PromptAudit.GetContentMonitorConfig)
+		monitor.PUT("/config", h.Admin.PromptAudit.UpdateContentMonitorConfig)
+		monitor.GET("/events", h.Admin.PromptAudit.ListContentMonitorEvents)
+		monitor.DELETE("/events", h.Admin.PromptAudit.DeleteContentMonitorEvents)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -52,6 +53,9 @@ type ProviderInstanceResponse struct {
 
 // ListProviderInstancesWithConfig returns provider instances with decrypted config.
 func (s *PaymentConfigService) ListProviderInstancesWithConfig(ctx context.Context) ([]ProviderInstanceResponse, error) {
+	if err := s.ensureProviderOwnedSettingsMigrated(ctx); err != nil {
+		return nil, fmt.Errorf("migrate provider-owned settings: %w", err)
+	}
 	instances, err := s.entClient.PaymentProviderInstance.Query().
 		Order(paymentproviderinstance.BySortOrder()).All(ctx)
 	if err != nil {
@@ -186,6 +190,9 @@ func (s *PaymentConfigService) CreateProviderInstance(ctx context.Context, req C
 	if err := validateProviderRequest(req.ProviderKey, req.Name, typesStr); err != nil {
 		return nil, err
 	}
+	if err := validateProviderLimits(req.Limits, req.ProviderKey, typesStr); err != nil {
+		return nil, err
+	}
 	if req.ProviderKey == payment.TypeEasyPay {
 		if err := validateEasyPayCustomMethods(req.Config, typesStr); err != nil {
 			return nil, err
@@ -289,6 +296,9 @@ func easyPayCustomMethodTypeConflictsWithBuiltin(methodType string) bool {
 // NOTE: This function exceeds 30 lines due to per-field nil-check patch update
 // boilerplate and pending-order safety checks.
 func (s *PaymentConfigService) UpdateProviderInstance(ctx context.Context, id int64, req UpdateProviderInstanceRequest) (*dbent.PaymentProviderInstance, error) {
+	if err := s.ensureProviderOwnedSettingsMigrated(ctx); err != nil {
+		return nil, fmt.Errorf("migrate provider-owned settings: %w", err)
+	}
 	current, err := s.entClient.PaymentProviderInstance.Get(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("load provider instance: %w", err)
@@ -371,6 +381,13 @@ func (s *PaymentConfigService) UpdateProviderInstance(ctx context.Context, id in
 			return nil, err
 		}
 	}
+	finalLimits := current.Limits
+	if req.Limits != nil {
+		finalLimits = *req.Limits
+	}
+	if err := validateProviderLimits(finalLimits, current.ProviderKey, nextSupportedTypes); err != nil {
+		return nil, err
+	}
 	u := s.entClient.PaymentProviderInstance.UpdateOneID(id)
 	if req.Name != nil {
 		u.SetName(*req.Name)
@@ -448,6 +465,57 @@ func (s *PaymentConfigService) UpdateProviderInstance(ctx context.Context, id in
 		u.SetPaymentMode(*req.PaymentMode)
 	}
 	return u.Save(ctx)
+}
+
+func validateProviderLimits(raw, providerKey, supportedTypes string) error {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return infraerrors.BadRequest("VALIDATION_ERROR", "provider commercial settings are required")
+	}
+	var limits payment.InstanceLimits
+	if err := json.Unmarshal([]byte(raw), &limits); err != nil {
+		return infraerrors.BadRequest("VALIDATION_ERROR", "invalid payment limit and pricing configuration")
+	}
+	for paymentType, values := range limits {
+		if strings.TrimSpace(paymentType) == "" {
+			return infraerrors.BadRequest("VALIDATION_ERROR", "payment type is required in limit configuration")
+		}
+		if invalidNonNegativePricingValue(values.SingleMin) ||
+			invalidNonNegativePricingValue(values.SingleMax) ||
+			invalidNonNegativePricingValue(values.DailyLimit) {
+			return infraerrors.BadRequest("VALIDATION_ERROR", "payment limits must be non-negative")
+		}
+		if values.SingleMin > 0 && values.SingleMax > 0 && values.SingleMin > values.SingleMax {
+			return infraerrors.BadRequest("VALIDATION_ERROR", "minimum payment amount cannot exceed maximum payment amount")
+		}
+		if values.BalanceMultiplier != nil && (!isFinitePricingValue(*values.BalanceMultiplier) || *values.BalanceMultiplier <= 0) {
+			return infraerrors.BadRequest("VALIDATION_ERROR", "balance recharge multiplier must be greater than zero")
+		}
+		if values.SubscriptionMultiplier != nil && (!isFinitePricingValue(*values.SubscriptionMultiplier) || *values.SubscriptionMultiplier <= 0) {
+			return infraerrors.BadRequest("VALIDATION_ERROR", "subscription conversion multiplier must be greater than zero")
+		}
+		if values.FeeRate != nil && (!isFinitePricingValue(*values.FeeRate) || *values.FeeRate < 0 || *values.FeeRate > 100) {
+			return infraerrors.BadRequest("VALIDATION_ERROR", "payment fee rate must be between 0 and 100")
+		}
+		if values.FixedFee != nil && invalidNonNegativePricingValue(*values.FixedFee) {
+			return infraerrors.BadRequest("VALIDATION_ERROR", "fixed payment fee must be non-negative")
+		}
+	}
+	for _, paymentType := range providerCommercialPaymentTypes(providerKey, supportedTypes) {
+		values, ok := limits[paymentType]
+		if !ok || values.BalanceMultiplier == nil || values.SubscriptionMultiplier == nil || values.FeeRate == nil || values.FixedFee == nil {
+			return infraerrors.BadRequest("VALIDATION_ERROR", fmt.Sprintf("complete commercial settings are required for payment type %s", paymentType))
+		}
+	}
+	return nil
+}
+
+func invalidNonNegativePricingValue(value float64) bool {
+	return !isFinitePricingValue(value) || value < 0
+}
+
+func isFinitePricingValue(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0)
 }
 
 // GetUserRefundEligibleInstanceIDs returns provider instance IDs that allow user refund.

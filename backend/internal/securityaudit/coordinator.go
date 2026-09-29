@@ -30,6 +30,15 @@ func (c *Coordinator) Check(ctx context.Context, req Request) Decision {
 	if c == nil {
 		return allowDecision(nil, nil)
 	}
+	if monitor, ok := c.prompt.(interface {
+		Monitor(context.Context, Request) error
+	}); ok {
+		if err := monitor.Monitor(ctx, req.Clone()); err != nil {
+			LogWarn("content_monitor_record_failed", map[string]any{
+				"request_id": req.RequestID, "user_id": req.UserID, "status": "failed",
+			})
+		}
+	}
 	mode := ModeOff
 	if c.prompt != nil {
 		mode = c.prompt.EffectiveMode()

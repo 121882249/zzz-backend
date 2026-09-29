@@ -39,8 +39,6 @@ const (
 const (
 	// defaultMaxPendingOrders and defaultOrderTimeoutMin are defined in
 	// payment_config_service.go alongside other payment configuration defaults.
-	paymentGraceMinutes = 5
-
 	defaultPageSize    = 20
 	maxPageSize        = 100
 	topUsersLimit      = 10
@@ -90,8 +88,12 @@ type CreateOrderRequest struct {
 type CreateOrderResponse struct {
 	OrderID                       int64                           `json:"order_id"`
 	Amount                        float64                         `json:"amount"`
+	BaseAmount                    float64                         `json:"base_amount"`
 	PayAmount                     float64                         `json:"pay_amount"`
 	FeeRate                       float64                         `json:"fee_rate"`
+	FixedFee                      float64                         `json:"fixed_fee"`
+	FeeAmount                     float64                         `json:"fee_amount"`
+	BalanceRechargeMultiplier     float64                         `json:"balance_recharge_multiplier"`
 	Status                        string                          `json:"status"`
 	ResultType                    payment.CreatePaymentResultType `json:"result_type,omitempty"`
 	PaymentType                   string                          `json:"payment_type"`
@@ -362,11 +364,6 @@ func psComputeValidityDays(days int, unit string) int {
 	default:
 		return days
 	}
-}
-
-func psStartOfDayUTC(t time.Time) time.Time {
-	y, m, d := t.UTC().Date()
-	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
 }
 
 func applyPagination(pageSize, page int) (size, pg int) {
