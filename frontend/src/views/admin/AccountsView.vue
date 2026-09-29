@@ -2253,7 +2253,7 @@ const handleAccountUpdated = (updatedAccount: Account) => {
   enterAutoRefreshSilentWindow()
 }
 const handleToggleResponseModelRewrite = async (account: Account) => {
-  const enabled = !Boolean((account.extra as Record<string, unknown> | undefined)?.openai_response_model_rewrite_enabled)
+  const enabled = (account.extra as Record<string, unknown> | undefined)?.openai_response_model_rewrite_enabled !== true
   try {
     const updated = await adminAPI.accounts.update(account.id, {
       extra: { openai_response_model_rewrite_enabled: enabled }
