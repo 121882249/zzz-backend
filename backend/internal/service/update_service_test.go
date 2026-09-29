@@ -78,8 +78,9 @@ func TestCompareVersionsUsesNumericCoreForCustomBuilds(t *testing.T) {
 	require.Equal(t, 1, compareVersions("TokenPro-R28", "0.2.0"))
 	require.Equal(t, 1, compareVersions("TokenPro-R28", "0.2.2"))
 	require.Equal(t, 1, compareVersions("TokenPro-R28", "0.2.4"))
-	require.Equal(t, 0, compareVersions("TokenPro-R28", "0.2.7"))
-	require.Equal(t, -1, compareVersions("TokenPro-R28", "0.2.8"))
+	require.Equal(t, 1, compareVersions("TokenPro-R28", "0.2.7"))
+	require.Equal(t, 1, compareVersions("TokenPro-R28", "0.2.8"))
+	require.Equal(t, 0, compareVersions("TokenPro-R28", "0.2.9"))
 	require.Equal(t, 1, compareVersions("TokenPro-R28", "0.1.185"))
 }
 
