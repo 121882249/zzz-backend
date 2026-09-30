@@ -1,6 +1,8 @@
 # TokenPro 二次开发清单
 
-当前分支以 Sub2API `v0.2.9` 为底层版本，并保留以下 TokenPro 功能。此文件用于后续升级时区分上游改动和本项目改动。
+当前分支以 Sub2API `v0.2.11` 为底层版本，并保留以下 TokenPro 功能。此文件用于后续升级时区分上游改动和本项目改动。
+
+本次从 `v0.2.10` 升级到 `v0.2.11` 同步了上游的 GPT-6.1 Sol、Codex 远程模型目录、Claude 原生限额重置、余额模式在途额度预占、API Key 创建频控、Astra Ultrafast 能力识别和 Claude Code 降级分组兼容；TokenPro 全局 Key 路由、分组生图链路和计费/回执二开保留并在冲突点与上游逻辑合并。
 
 ## 1. TokenPro 全局 API Key
 
