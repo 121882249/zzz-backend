@@ -80,6 +80,31 @@ func TestIsModelSupported_OpenAIOAuthExplicitMappingUnchanged(t *testing.T) {
 	require.False(t, account.IsModelSupported("glm-4.7"))
 }
 
+func TestIsModelSupported_OpenAIOAuthImageBridgeAllowsImageModelsOutsideTextMapping(t *testing.T) {
+	account := newOpenAIOAuthAccountForModelTest()
+	account.Credentials = map[string]any{
+		"model_mapping": map[string]any{
+			"gpt-6-luna": "gpt-6-luna",
+		},
+	}
+	account.Extra = map[string]any{featureKeyCodexImageGenerationBridge: true}
+
+	require.True(t, account.IsModelSupported("gpt-image-2.5-sunburst"))
+	require.True(t, account.IsModelSupported("gpt-image-2.5-flare"))
+}
+
+func TestIsModelSupported_OpenAIOAuthImageBridgeDisabledKeepsExplicitWhitelist(t *testing.T) {
+	account := newOpenAIOAuthAccountForModelTest()
+	account.Credentials = map[string]any{
+		"model_mapping": map[string]any{
+			"gpt-6-luna": "gpt-6-luna",
+		},
+	}
+	account.Extra = map[string]any{featureKeyCodexImageGenerationBridge: false}
+
+	require.False(t, account.IsModelSupported("gpt-image-2.5-sunburst"))
+}
+
 func TestIsModelSupported_OpenAIOAuthPassthroughAllowsAll(t *testing.T) {
 	account := newOpenAIOAuthAccountForModelTest()
 	account.Extra = map[string]any{"openai_passthrough": true}
