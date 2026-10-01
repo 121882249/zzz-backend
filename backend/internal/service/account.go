@@ -863,15 +863,12 @@ func (a *Account) IsModelSupported(requestedModel string) bool {
 	if a.IsOpenAIPassthroughEnabled() {
 		return true
 	}
-	// Codex OAuth 的原生图片接口与普通 Codex 文本模型清单是两套能力。
-	// 账号可能保留了仅包含文本模型的显式 model_mapping，但在开启生图
-	// bridge 后仍应允许 gpt-image-* 进入图片调度；真正的图片权限仍由组的
-	// allow_image_generation 和后续图片能力检查控制。未开启 bridge 的账号
-	// 继续遵守显式白名单，避免改变普通账号的路由语义。
-	if a.IsOpenAIOAuth() && IsGPTImageGenerationModel(requestedModel) {
-		if override := a.CodexImageGenerationBridgeOverride(); override != nil && *override {
-			return true
-		}
+	// Codex OAuth/SetupToken 的原生图片接口与普通文本模型清单是两套能力。
+	// 账号的 model_mapping 通常来自文本模型目录，不能把它当成图片接口的
+	// 完整白名单；图片权限仍由分组的 allow_image_generation 和图片能力检查
+	// 控制。这样全局 Key、分组 Key 和图片组都会进入同一条原生图片链路。
+	if a.IsOpenAIOAuthLike() && IsGPTImageGenerationModel(requestedModel) {
+		return true
 	}
 	mapping := a.GetModelMapping()
 	if len(mapping) == 0 {
