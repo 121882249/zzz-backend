@@ -62,6 +62,12 @@ func TestTokenProPureDispatchAfterAdmission(t *testing.T) {
 				require.NotContains(t, rec.Body.String(), "gpt-5.6-luna")
 				if !tc.stream {
 					require.Equal(t, int64(0), gjson.Get(rec.Body.String(), "usage.total_tokens").Int())
+				} else {
+					require.Contains(t, rec.Body.String(), `"type":"response.created"`)
+					require.Contains(t, rec.Body.String(), `"type":"response.output_item.added"`)
+					require.Contains(t, rec.Body.String(), `"type":"response.function_call_arguments.delta"`)
+					require.Contains(t, rec.Body.String(), `"type":"response.function_call_arguments.done"`)
+					require.Contains(t, rec.Body.String(), `"type":"response.completed"`)
 				}
 			} else {
 				require.Empty(t, rec.Header().Get("X-TokenPro-Native-Dispatch"))
