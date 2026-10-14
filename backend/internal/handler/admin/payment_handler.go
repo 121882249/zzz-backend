@@ -161,6 +161,7 @@ type AdminPaymentOrderResult struct {
 	SrcURL                    *string    `json:"src_url,omitempty"`
 	CreatedAt                 time.Time  `json:"created_at"`
 	UpdatedAt                 time.Time  `json:"updated_at"`
+	BonusAmount               float64    `json:"bonus_amount"`
 }
 
 func sanitizeAdminPaymentOrdersForResponse(orders []*dbent.PaymentOrder) []*AdminPaymentOrderResult {
@@ -223,6 +224,7 @@ func sanitizeAdminPaymentOrderForResponse(order *dbent.PaymentOrder) *AdminPayme
 		SrcURL:                    order.SrcURL,
 		CreatedAt:                 order.CreatedAt,
 		UpdatedAt:                 order.UpdatedAt,
+		BonusAmount:               order.BonusAmount,
 	}
 }
 
