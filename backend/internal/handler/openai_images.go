@@ -87,14 +87,10 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 	if resolvedModel, ok := service.ResolvedUpstreamModelFromContext(c.Request.Context()); ok {
 		routingModel = resolvedModel
 	}
-	if driver := service.TokenProNativeImageDriver(c); driver != "" && parsed.Model == "gpt-image-2" {
-		// Ordinary GPT groups use their selected text model as the Responses
-		// driver and the image model as the tool model. This keeps the request
-		// on the text group's account pool; routing it as gpt-image-2 would
-		// incorrectly require a dedicated image account in that group.
-		routingModel = driver
-		parsed.ResponsesModel = driver
-	}
+	// The text selection is only an ingress authorization/group-routing hint.
+	// Once the global key resolves to its group, schedule/map/forward the
+	// image request exactly as for a group-scoped key. In particular, do not
+	// force an API-key account through the OAuth Responses image converter.
 	if !compositeTargetPlatformAllowed(c, apiKey, requestModel, service.PlatformOpenAI) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Model is not supported by this OpenAI-compatible endpoint for composite groups")
 		return
@@ -146,11 +142,6 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(parsed.Stream, false)))
 
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, routingModel)
-	if parsed.ResponsesModel != "" && channelMapping.Mapped {
-		parsed.ResponsesModel = channelMapping.MappedModel
-		// Mapping applies to the driver, never to the image tool model.
-		channelMapping.MappedModel = ""
-	}
 
 	if h.errorPassthroughService != nil {
 		service.BindErrorPassthroughService(c, h.errorPassthroughService)
