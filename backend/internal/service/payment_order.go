@@ -60,14 +60,6 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 			return nil, err
 		}
 	}
-	orderAmount := req.Amount
-	limitAmount := req.Amount
-	if plan != nil {
-		orderAmount = plan.Price
-		limitAmount = plan.Price
-	} else if req.OrderType == payment.OrderTypeBalance {
-		orderAmount = calculateCreditedBalance(req.Amount, pricing.BalanceRechargeMultiplier)
-	}
 	feeRate := pricing.FeeRate
 	fixedFee := pricing.FixedFee
 	methodCurrency := payment.DefaultPaymentCurrency
@@ -76,6 +68,21 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 		if err != nil {
 			return nil, err
 		}
+	}
+	orderAmount := req.Amount
+	limitAmount := req.Amount
+	bonusAmount := 0.0
+	if plan != nil {
+		orderAmount = plan.Price
+		limitAmount = plan.Price
+	} else if req.OrderType == payment.OrderTypeBalance {
+		// 阈值按支付金额命中。赠金模式：到账 = 基数 + 赠送；折扣模式：到账 = 基数，实付基数按折扣减少。
+		bonusConfig := *cfg
+		bonusConfig.BalanceRechargeMultiplier = pricing.BalanceRechargeMultiplier
+		quote := quoteRechargeBonus(&bonusConfig, req.Amount, methodCurrency)
+		limitAmount = quote.PayBase
+		bonusAmount = quote.Bonus
+		orderAmount = quote.Credited
 	}
 	gatewayBaseAmount := createOrderGatewayBaseAmount(limitAmount, methodCurrency, req.OrderType, pricing.SubscriptionMultiplier)
 	payAmountStr, payAmount, err := calculateCreateOrderPayAmountWithFixed(gatewayBaseAmount, feeRate, fixedFee, methodCurrency)
@@ -114,7 +121,7 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 		oauthResp.BalanceRechargeMultiplier = pricing.BalanceRechargeMultiplier
 		return oauthResp, nil
 	}
-	order, err := s.createOrderInTx(ctx, req, user, plan, cfg, orderAmount, limitAmount, gatewayBaseAmount, feeRate, fixedFee, pricing.BalanceRechargeMultiplier, payAmount, sel)
+	order, err := s.createOrderInTx(ctx, req, user, plan, cfg, orderAmount, limitAmount, gatewayBaseAmount, feeRate, fixedFee, pricing.BalanceRechargeMultiplier, payAmount, bonusAmount, sel)
 	if err != nil {
 		return nil, err
 	}
@@ -159,7 +166,7 @@ func (s *PaymentService) validateSubOrder(ctx context.Context, req CreateOrderRe
 	return plan, nil
 }
 
-func (s *PaymentService) createOrderInTx(ctx context.Context, req CreateOrderRequest, user *User, plan *dbent.SubscriptionPlan, cfg *PaymentConfig, orderAmount, limitAmount, gatewayBaseAmount, feeRate, fixedFee, balanceMultiplier, payAmount float64, sel *payment.InstanceSelection) (*dbent.PaymentOrder, error) {
+func (s *PaymentService) createOrderInTx(ctx context.Context, req CreateOrderRequest, user *User, plan *dbent.SubscriptionPlan, cfg *PaymentConfig, orderAmount, limitAmount, gatewayBaseAmount, feeRate, fixedFee, balanceMultiplier, payAmount, bonusAmount float64, sel *payment.InstanceSelection) (*dbent.PaymentOrder, error) {
 	tx, err := s.entClient.Tx(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin transaction: %w", err)
@@ -193,6 +200,7 @@ func (s *PaymentService) createOrderInTx(ctx context.Context, req CreateOrderReq
 		SetAmount(orderAmount).
 		SetPayAmount(payAmount).
 		SetFeeRate(feeRate).
+		SetBonusAmount(bonusAmount).
 		SetRechargeCode("").
 		SetOutTradeNo(outTradeNo).
 		SetPaymentType(req.PaymentType).
@@ -468,6 +476,7 @@ func (s *PaymentService) invokeProvider(ctx context.Context, order *dbent.Paymen
 	s.writeAuditLog(ctx, order.ID, "ORDER_CREATED", fmt.Sprintf("user:%d", req.UserID), map[string]any{
 		"paymentAmount":  req.Amount,
 		"creditedAmount": order.Amount,
+		"bonusAmount":    order.BonusAmount,
 		"payAmount":      order.PayAmount,
 		"paymentType":    req.PaymentType,
 		"orderType":      req.OrderType,
@@ -746,6 +755,7 @@ func buildCreateOrderResponse(order *dbent.PaymentOrder, req CreateOrderRequest,
 		JSAPIPayload:              pr.JSAPI,
 		ExpiresAt:                 order.ExpiresAt,
 		PaymentMode:               sel.PaymentMode,
+		BonusAmount:               order.BonusAmount,
 	}
 }
 

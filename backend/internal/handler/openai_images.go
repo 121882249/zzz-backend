@@ -88,12 +88,12 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		routingModel = resolvedModel
 	}
 	if driver := service.TokenProNativeImageDriver(c); driver != "" && parsed.Model == "gpt-image-2" {
-		// The driver is consumed only while resolving a global Key to its
-		// selected text group. Once the request-scoped group is attached,
-		// continue through the same image forwarding and billing path as a
-		// non-global group Key. Do not turn the driver into an extra Responses
-		// model invocation; that can bill the text model more than once.
-		routingModel = requestModel
+		// Ordinary GPT groups use their selected text model as the Responses
+		// driver and the image model as the tool model. This keeps the request
+		// on the text group's account pool; routing it as gpt-image-2 would
+		// incorrectly require a dedicated image account in that group.
+		routingModel = driver
+		parsed.ResponsesModel = driver
 	}
 	if !compositeTargetPlatformAllowed(c, apiKey, requestModel, service.PlatformOpenAI) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Model is not supported by this OpenAI-compatible endpoint for composite groups")
@@ -178,6 +178,18 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		h.handleStreamingAwareError(c, status, code, message, streamStarted)
 		return
 	}
+
+	// 余额模式在途预留（与计费同口径估算；计费任务扣减余额缓存后才释放）。
+	inflightDone, inflightErr := reserveInflightBalance(c, h.billingCacheService, h.gatewayService, apiKey, subscription, service.InflightEstimateRequest{Model: routingModel, BodyBytes: len(body), Kind: service.InflightEstimateImage, Units: parsed.N})
+	if inflightErr != nil {
+		status, code, message, retryAfter := billingErrorDetails(inflightErr)
+		if retryAfter > 0 {
+			c.Header("Retry-After", strconv.Itoa(retryAfter))
+		}
+		h.handleStreamingAwareError(c, status, code, message, streamStarted)
+		return
+	}
+	defer inflightDone()
 
 	sessionHash := h.gatewayService.GenerateExplicitSessionHash(c, body)
 	requestCtx := service.WithOpenAIImagesEndpoint(service.WithOpenAIImageGenerationIntent(c.Request.Context()))

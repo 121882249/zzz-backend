@@ -78,25 +78,41 @@ func TestCompareVersionsUsesNumericCoreForCustomBuilds(t *testing.T) {
 	require.Equal(t, 1, compareVersions("TokenPro-R28", "0.2.0"))
 	require.Equal(t, 1, compareVersions("TokenPro-R28", "0.2.2"))
 	require.Equal(t, 1, compareVersions("TokenPro-R28", "0.2.4"))
-	require.Equal(t, 0, compareVersions("TokenPro-R28", "0.2.8"))
-	require.Equal(t, -1, compareVersions("TokenPro-R28", "0.2.9"))
+	require.Equal(t, 0, compareVersions("TokenPro-R28", "0.2.16"))
+	require.Equal(t, -1, compareVersions("TokenPro-R28", "0.2.17"))
 	require.Equal(t, 1, compareVersions("TokenPro-R28", "0.1.185"))
 }
 
 func TestUpdateServiceReportsTokenProUpstreamVersion(t *testing.T) {
 	svc := NewUpdateService(
 		&updateServiceCacheStub{},
-		&updateServiceGitHubClientStub{release: &GitHubRelease{TagName: "v0.2.8", Name: "v0.2.8"}},
-		"TokenPro-R71-v0.2.8",
+		&updateServiceGitHubClientStub{release: &GitHubRelease{TagName: "v0.2.16", Name: "v0.2.16"}},
+		"TokenPro-R78-v0.2.16",
 		"release",
 	)
 
 	info, err := svc.CheckUpdate(context.Background(), true)
 
 	require.NoError(t, err)
-	require.Equal(t, "TokenPro-R71-v0.2.8", info.CurrentVersion)
-	require.Equal(t, "0.2.8", info.CurrentUpstreamVersion)
-	require.Equal(t, "0.2.8", info.LatestVersion)
+	require.Equal(t, "TokenPro-R78-v0.2.16", info.CurrentVersion)
+	require.Equal(t, "0.2.16", info.CurrentUpstreamVersion)
+	require.Equal(t, "0.2.16", info.LatestVersion)
+	require.False(t, info.HasUpdate)
+}
+
+func TestUpdateServiceReportsEmbeddedTokenProUpstreamVersion(t *testing.T) {
+	svc := NewUpdateService(
+		&updateServiceCacheStub{},
+		&updateServiceGitHubClientStub{release: &GitHubRelease{TagName: "v0.2.10", Name: "v0.2.10"}},
+		"TokenPro-R74-v0.2.10",
+		"release",
+	)
+
+	info, err := svc.CheckUpdate(context.Background(), true)
+
+	require.NoError(t, err)
+	require.Equal(t, "0.2.10", info.CurrentUpstreamVersion)
+	require.Equal(t, "0.2.10", info.LatestVersion)
 	require.False(t, info.HasUpdate)
 }
 

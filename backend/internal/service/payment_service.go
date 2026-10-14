@@ -94,6 +94,7 @@ type CreateOrderResponse struct {
 	FixedFee                      float64                         `json:"fixed_fee"`
 	FeeAmount                     float64                         `json:"fee_amount"`
 	BalanceRechargeMultiplier     float64                         `json:"balance_recharge_multiplier"`
+	BonusAmount                   float64                         `json:"bonus_amount"`
 	Status                        string                          `json:"status"`
 	ResultType                    payment.CreatePaymentResultType `json:"result_type,omitempty"`
 	PaymentType                   string                          `json:"payment_type"`
