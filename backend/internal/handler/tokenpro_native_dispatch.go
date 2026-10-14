@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -57,7 +58,38 @@ func (h *OpenAIGatewayHandler) dispatchTokenProNativeImage(c *gin.Context, apiKe
 	}
 	c.Header("Content-Type", "text/event-stream")
 	*streamStarted = true
-	for _, event := range []gin.H{{"type": "response.output_item.done", "output_index": 0, "item": item}, {"type": "response.completed", "response": response}} {
+	createdResponse := gin.H{
+		"id": id, "object": "response", "model": model, "status": "in_progress",
+		"created_at": time.Now().Unix(), "output": []any{},
+	}
+	events := []gin.H{
+		{"type": "response.created", "response": createdResponse},
+	}
+	if itemType, _ := item["type"].(string); itemType == "function_call" {
+		added := gin.H{}
+		for key, value := range item {
+			added[key] = value
+		}
+		added["arguments"] = ""
+		events = append(events,
+			gin.H{"type": "response.output_item.added", "output_index": 0, "item": added},
+			gin.H{
+				"type": "response.function_call_arguments.delta", "output_index": 0,
+				"item_id": item["id"], "call_id": item["call_id"], "name": item["name"],
+				"delta": item["arguments"],
+			},
+			gin.H{
+				"type": "response.function_call_arguments.done", "output_index": 0,
+				"item_id": item["id"], "call_id": item["call_id"], "name": item["name"],
+				"arguments": item["arguments"],
+			},
+		)
+	}
+	events = append(events,
+		gin.H{"type": "response.output_item.done", "output_index": 0, "item": item},
+		gin.H{"type": "response.completed", "response": response},
+	)
+	for _, event := range events {
 		data, _ := json.Marshal(event)
 		if _, err := fmt.Fprintf(c.Writer, "data: %s\n\n", data); err != nil {
 			return true

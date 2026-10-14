@@ -88,12 +88,12 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		routingModel = resolvedModel
 	}
 	if driver := service.TokenProNativeImageDriver(c); driver != "" && parsed.Model == "gpt-image-2" {
-		// The driver is consumed only while resolving a global Key to its
-		// selected text group. Once the request-scoped group is attached,
-		// continue through the same image forwarding and billing path as a
-		// non-global group Key. Do not turn the driver into an extra Responses
-		// model invocation; that can bill the text model more than once.
-		routingModel = requestModel
+		// Ordinary GPT groups use their selected text model as the Responses
+		// driver and the image model as the tool model. This keeps the request
+		// on the text group's account pool; routing it as gpt-image-2 would
+		// incorrectly require a dedicated image account in that group.
+		routingModel = driver
+		parsed.ResponsesModel = driver
 	}
 	if !compositeTargetPlatformAllowed(c, apiKey, requestModel, service.PlatformOpenAI) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Model is not supported by this OpenAI-compatible endpoint for composite groups")
