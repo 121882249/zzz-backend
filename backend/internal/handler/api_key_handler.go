@@ -168,7 +168,7 @@ func (h *APIKeyHandler) GetGlobal(c *gin.Context) {
 	// intermediary or browser cache.
 	c.Header("Cache-Control", "no-store")
 	c.Header("Pragma", "no-cache")
-	response.Success(c, dto.APIKeyFromService(key))
+	response.Success(c, dto.APIKeyFromService(key).Localized(c.GetHeader("Accept-Language")))
 }
 
 // GetByID handles getting a single API key
@@ -361,7 +361,7 @@ func (h *APIKeyHandler) Regenerate(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	response.Success(c, dto.APIKeyFromService(key))
+	response.Success(c, dto.APIKeyFromService(key).Localized(c.GetHeader("Accept-Language")))
 }
 
 // GetAvailableGroups 获取用户可以绑定的分组列表
