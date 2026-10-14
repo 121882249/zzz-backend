@@ -2021,7 +2021,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			observer.ObserveOpenAI(dataBytes, rawEventType)
 			if account != nil && account.IsOpenAIResponseModelRewriteEnabled() {
 				line = s.rewriteOpenAIResponseModelInSSELine(line, originalModel)
-			} else if needModelReplace && strings.Contains(data, mappedModel) {
+			} else if needModelReplace {
 				line = s.replaceModelInSSELine(line, mappedModel, originalModel)
 				if replacedData, replaced := extractOpenAISSEDataLine(line); replaced {
 					dataBytes = []byte(replacedData)

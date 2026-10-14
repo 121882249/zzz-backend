@@ -671,7 +671,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			// Fast path: most events do not contain model field values.
 			if account != nil && account.IsOpenAIResponseModelRewriteEnabled() {
 				line = s.rewriteOpenAIResponseModelInSSELine(line, originalModel)
-			} else if needModelReplace && mappedModel != "" && strings.Contains(line, mappedModel) {
+			} else if needModelReplace {
 				line = s.replaceModelInSSELine(line, mappedModel, originalModel)
 			}
 			startsClientOutput := forceFlushFailedEvent || openAIStreamDataStartsClientOutput(data, eventType)
