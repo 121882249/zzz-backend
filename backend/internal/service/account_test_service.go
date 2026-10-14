@@ -225,6 +225,12 @@ func (s *AccountTestService) FetchOpenAIAccountModels(ctx context.Context, accou
 		}
 		for _, model := range openai.DefaultModels {
 			if IsGPTImageGenerationModel(model.ID) && account.IsModelSupported(model.ID) && !seen[model.ID] {
+				// Native image scheduling is independent of text mappings, but
+				// the admin picker still only lists configured model names.
+				mapping := account.GetModelMapping()
+				if !passthrough && len(mapping) > 0 && !mappingSupportsRequestedModel(mapping, model.ID) {
+					continue
+				}
 				if !passthrough && !IsGPTImageGenerationModel(account.GetMappedModel(model.ID)) {
 					continue
 				}
