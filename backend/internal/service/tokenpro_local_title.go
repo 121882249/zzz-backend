@@ -51,8 +51,9 @@ func ServeTokenProLocalTitle(c *gin.Context, body []byte) bool {
 	text := tokenProLocalTitleText(body)
 	encoded, _ := json.Marshal(gin.H{"title": text, "description": text})
 	id := tokenProDispatchID("resp_tp_title_")
+	outputPart := gin.H{"type": "output_text", "text": string(encoded), "annotations": []any{}}
 	item := gin.H{"type": "message", "id": tokenProDispatchID("msg_"), "role": "assistant", "status": "completed",
-		"content": []any{gin.H{"type": "output_text", "text": string(encoded), "annotations": []any{}}}}
+		"content": []any{outputPart}}
 	response := gin.H{"id": id, "object": "response", "created_at": time.Now().Unix(), "model": gjson.GetBytes(body, "model").String(),
 		"status": "completed", "output": []any{item}, "usage": gin.H{"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}}
 	c.Header("X-TokenPro-Local-Title", "v1")
@@ -68,7 +69,7 @@ func ServeTokenProLocalTitle(c *gin.Context, body []byte) bool {
 		{"type": "response.content_part.added", "output_index": 0, "item_id": item["id"], "content_index": 0, "part": gin.H{"type": "output_text", "text": "", "annotations": []any{}}},
 		{"type": "response.output_text.delta", "output_index": 0, "item_id": item["id"], "content_index": 0, "delta": string(encoded)},
 		{"type": "response.output_text.done", "output_index": 0, "item_id": item["id"], "content_index": 0, "text": string(encoded)},
-		{"type": "response.content_part.done", "output_index": 0, "item_id": item["id"], "content_index": 0, "part": item["content"].([]any)[0]},
+		{"type": "response.content_part.done", "output_index": 0, "item_id": item["id"], "content_index": 0, "part": outputPart},
 		{"type": "response.output_item.done", "output_index": 0, "item": item},
 		{"type": "response.completed", "response": response},
 	} {
