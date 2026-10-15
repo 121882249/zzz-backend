@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 )
 
 // Set only by authenticated TokenPro direct-route middleware, not from an
@@ -62,10 +63,24 @@ func RestrictTokenProNativeImages(c *gin.Context, group *Group, model string) {
 
 const tokenProNativeImageInstructions = "[TokenPro native image delivery v1] For image generation or editing, call the client's image_gen.imagegen function. Its result is delivered by the client's native Images API tool. Do not use the hosted image_generation tool: this client cannot display its result. Do not claim an image is generated or displayed unless the native tool returned an actual image. After successful native image delivery, acknowledge completion in plain text only. Never repeat the displayed image using Markdown, HTML, or a file link. For new image generation omit both referenced_image_paths and num_last_images_to_include. On tool failure, report the error; do not retry through hosted image_generation or replace it with a text-only success message."
 
+func tokenProHasNativeImageTool(body []byte) bool {
+	for _, tool := range gjson.GetBytes(body, "tools").Array() {
+		if tool.Get("type").String() != "namespace" || tool.Get("name").String() != "image_gen" {
+			continue
+		}
+		for _, child := range tool.Get("tools").Array() {
+			if child.Get("type").String() == "function" && child.Get("name").String() == "imagegen" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // PrepareTokenProNativeImages adapts only explicitly opted-in Codex requests.
 // It never changes history, emits a tool result, or manufactures image success.
 // Pure-image dispatch is handled before upstream forwarding. It must never
-// borrow a text model as a fallback here.
+// borrow a text model or invent a client-side tool handler here.
 func PrepareTokenProNativeImages(body []byte) ([]byte, error) {
 	var request map[string]any
 	// Preserve large numeric metadata fields rather than round-tripping float64.
@@ -81,10 +96,13 @@ func PrepareTokenProNativeImages(body []byte) ([]byte, error) {
 	if isOpenAIImageGenerationModel(model) {
 		return body, nil
 	}
+	// Adding a tool schema upstream cannot register its implementation in Codex.
+	// API-key/code-mode clients may only advertise exec, not image_gen.imagegen.
+	if !tokenProHasNativeImageTool(body) {
+		return body, nil
+	}
 	tools, _ := request["tools"].([]any)
-	kept := make([]any, 0, len(tools)+1)
-	hasNative := false
-	var nativeNamespace map[string]any
+	kept := make([]any, 0, len(tools))
 	for _, raw := range tools {
 		tool, ok := raw.(map[string]any)
 		if !ok {
@@ -94,36 +112,7 @@ func PrepareTokenProNativeImages(body []byte) ([]byte, error) {
 		if tool["type"] == "image_generation" {
 			continue
 		}
-		if tool["type"] == "namespace" && tool["name"] == "image_gen" {
-			nativeNamespace = tool
-			children, _ := tool["tools"].([]any)
-			for _, child := range children {
-				if nested, ok := child.(map[string]any); ok && nested["name"] == "imagegen" {
-					hasNative = true
-				}
-			}
-		}
 		kept = append(kept, raw)
-	}
-	if !hasNative {
-		native := map[string]any{
-			"type": "namespace", "name": "image_gen", "description": "Generate and edit images using the Codex client's native image tool.",
-			"tools": []any{map[string]any{
-				"type": "function", "name": "imagegen", "description": "Generate an image or edit existing images and return the real image to the current conversation.",
-				"parameters": map[string]any{"type": "object", "properties": map[string]any{
-					"prompt":                     map[string]any{"type": "string"},
-					"referenced_image_paths":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-					"num_last_images_to_include": map[string]any{"type": "integer", "minimum": 1, "maximum": 5},
-				}, "required": []string{"prompt"}, "additionalProperties": false}, "strict": false,
-			}},
-		}
-		if nativeNamespace == nil {
-			kept = append(kept, native)
-		} else {
-			children, _ := nativeNamespace["tools"].([]any)
-			nativeTools, _ := native["tools"].([]any)
-			nativeNamespace["tools"] = append(children, nativeTools...)
-		}
 	}
 	request["tools"] = kept
 	if choice, ok := request["tool_choice"].(map[string]any); ok && choice["type"] == "image_generation" {

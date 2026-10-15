@@ -16,7 +16,7 @@ import (
 )
 
 func TestTokenProNativeImagesPreserveHistoryAndToolCorrelation(t *testing.T) {
-	body := []byte(`{"model":"gpt-5.6-sol","metadata":{"id":9007199254740993},"input":[{"type":"function_call_output","call_id":"call_image_A","output":"returned-image-A"}],"tools":[{"type":"image_generation"},{"type":"function","name":"other","parameters":{"type":"object"}}],"tool_choice":{"type":"image_generation"}}`)
+	body := []byte(`{"model":"gpt-5.6-sol","metadata":{"id":9007199254740993},"input":[{"type":"function_call_output","call_id":"call_image_A","output":"returned-image-A"}],"tools":[{"type":"image_generation"},{"type":"function","name":"other","parameters":{"type":"object"}},{"type":"namespace","name":"image_gen","tools":[{"type":"function","name":"imagegen","parameters":{"type":"object"}}]}],"tool_choice":{"type":"image_generation"}}`)
 	adapted, err := PrepareTokenProNativeImages(body)
 	require.NoError(t, err)
 	require.Equal(t, "gpt-5.6-sol", gjson.GetBytes(adapted, "model").String())
@@ -57,7 +57,7 @@ func TestTokenProNativeImagesForwardDisablesLegacyHostedInjection(t *testing.T) 
 			c.Set(TokenProNativeImagesContextKey, !tc.textDelivery)
 			c.Set(TokenProTextImageDeliveryContextKey, tc.textDelivery)
 			SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
-			result, err := svc.Forward(context.Background(), c, account, []byte(`{"model":"`+tc.model+`","stream":false,"input":"draw a cat"}`))
+			result, err := svc.Forward(context.Background(), c, account, []byte(`{"model":"`+tc.model+`","stream":false,"input":"draw a cat","tools":[{"type":"namespace","name":"image_gen","tools":[{"type":"function","name":"imagegen","parameters":{"type":"object"}}]}]}`))
 			require.NoError(t, err)
 			require.Zero(t, result.ImageCount, "dispatching a tool must not be billed as an already generated image")
 			for _, tool := range gjson.GetBytes(upstream.lastBody, "tools").Array() {
@@ -70,7 +70,7 @@ func TestTokenProNativeImagesForwardDisablesLegacyHostedInjection(t *testing.T) 
 }
 
 func TestTokenProNativeImagesDoesNotDuplicateNamespace(t *testing.T) {
-	body, err := PrepareTokenProNativeImages([]byte(`{"model":"gpt-5.6-sol","tools":[{"type":"namespace","name":"image_gen","tools":[]}],"input":[]}`))
+	body, err := PrepareTokenProNativeImages([]byte(`{"model":"gpt-5.6-sol","tools":[{"type":"namespace","name":"image_gen","tools":[{"type":"function","name":"imagegen","parameters":{"type":"object"}}]}],"input":[]}`))
 	require.NoError(t, err)
 	require.Len(t, gjson.GetBytes(body, "tools").Array(), 1)
 	require.Len(t, gjson.GetBytes(body, "tools.0.tools").Array(), 1)
