@@ -75,7 +75,7 @@ func latestMonitoringUserTexts(value any, gemini, allowImplicitRole bool) []stri
 			continue
 		}
 		role := strings.ToLower(strings.TrimSpace(stringValue(item["role"])))
-		if role != "user" && !(allowImplicitRole && role == "") {
+		if role != "user" && (!allowImplicitRole || role != "") {
 			continue
 		}
 		if !gemini {
