@@ -15,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 const tokenProLegacySkillCatalogFixture = "- imagegen: Generate or edit raster images through TokenPro. (file: /Users/fixture/.codex/skills/imagegen/SKILL.md)"
@@ -76,9 +77,33 @@ func TestTokenProTextImageSkillUsesOnlyDeclaredToolsAndSelectedTextRoute(t *test
 	require.Contains(t, guidance, "--model \""+route+"\"")
 	require.NotContains(t, guidance, tokenProNativeImageInstructions)
 	require.NotContains(t, guidance, "gpt-image-2.5-sunburst")
+	require.Contains(t, guidance, tokenProTextImageFastDeliveryInstructions)
 	twice, err := prepareTokenProImageTools(c, adapted)
 	require.NoError(t, err)
 	require.Equal(t, adapted, twice)
+}
+
+func TestTokenProTextImageFastDeliveryChangesInstructionsOnly(t *testing.T) {
+	c, _ := tokenProTextToolsContext(t)
+	body := tokenProTextToolsFixture(t, "developer", tokenProLegacySkillCatalogFixture)
+	var err error
+	body, err = sjson.SetBytes(body, "reasoning", gin.H{"effort": "xhigh", "summary": "auto"})
+	require.NoError(t, err)
+	body, err = sjson.SetBytes(body, "tool_choice", "auto")
+	require.NoError(t, err)
+	adapted, err := prepareTokenProImageTools(c, body)
+	require.NoError(t, err)
+	originalWithoutInstructions, err := sjson.DeleteBytes(body, "instructions")
+	require.NoError(t, err)
+	adaptedWithoutInstructions, err := sjson.DeleteBytes(adapted, "instructions")
+	require.NoError(t, err)
+	require.JSONEq(t, string(originalWithoutInstructions), string(adaptedWithoutInstructions))
+	guidance := gjson.GetBytes(adapted, "instructions").String()
+	require.Contains(t, guidance, "yield_time_ms: 30000")
+	require.Contains(t, guidance, "exit code 0 and an actual saved absolute image path")
+	require.Contains(t, guidance, "Failed, incomplete or ambiguous outputs must not be treated as success")
+	require.Contains(t, guidance, "this shortcut does not discard it")
+	require.Equal(t, "xhigh", gjson.GetBytes(adapted, "reasoning.effort").String())
 }
 
 func TestTokenProImageSkillDiscoveryTrustsOnlyInstalledDeveloperCatalog(t *testing.T) {
@@ -121,6 +146,7 @@ func TestTokenProTextImageToolsWithoutClientCapabilityPreserveOrdinaryPath(t *te
 			adapted, err := prepareTokenProImageTools(c, body)
 			require.NoError(t, err)
 			require.Equal(t, body, adapted)
+			require.NotContains(t, string(adapted), "TokenPro fast image delivery")
 			require.False(t, TokenProNativeImageDelivery(c))
 		})
 	}

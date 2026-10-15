@@ -31,6 +31,10 @@ async function probe(mode) {
         const snippets=(body.input??[]).filter(item=>item.role==='developer').map(item=>JSON.stringify(item.content)).filter(text=>text.includes('TokenPro')).map(text=>{const i=text.indexOf('TokenPro');return text.slice(Math.max(0,i-220),i+500);});
         throw new Error('actual client Skill catalog not recognized: '+JSON.stringify(snippets));
       }
+      assert(body.instructions?.includes('[TokenPro fast image delivery v1]'));
+      assert(body.instructions.includes('yield_time_ms: 30000'));
+      assert(body.instructions.includes('exit code 0 and an actual saved absolute image path'));
+      assert.deepEqual(body.reasoning,JSON.parse(raw).reasoning,'image delivery must not override user reasoning effort');
     }
     requests.push(body);
     let item;
