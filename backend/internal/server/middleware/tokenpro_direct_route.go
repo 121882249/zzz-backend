@@ -72,6 +72,13 @@ func TokenProDirectRoute(stores ...service.TokenProImageTurnStore) gin.HandlerFu
 		}
 		c.Request.Body = io.NopCloser(bytes.NewReader(body))
 
+		// Desktop title generation is free local metadata work, not another
+		// selection from the global model catalog. Authentication ran above.
+		if strings.EqualFold(mediaType, "application/json") && service.ServeTokenProLocalTitle(c, body) {
+			c.Abort()
+			return
+		}
+
 		var groupID int64
 		var rewritten []byte
 		var routed bool
