@@ -66,12 +66,14 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			defer func() { c.Writer = originalWriter }()
 		}
 		var nativeErr error
-		body, nativeErr = PrepareTokenProNativeImages(body)
+		body, nativeErr = prepareTokenProImageTools(c, body)
 		if nativeErr != nil {
 			return nil, nativeErr
 		}
-		canonicalImageIntentBody = body
-		SetOpenAIImageIntentHint(c, false)
+		if TokenProNativeImageDelivery(c) {
+			canonicalImageIntentBody = body
+			SetOpenAIImageIntentHint(c, false)
+		}
 	}
 
 	normalizedBody, normalized, err := normalizeOpenAICodexCompactReasoningEffortForAccount(c, account, body)
