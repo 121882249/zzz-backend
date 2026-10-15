@@ -639,6 +639,7 @@ func (s *OpenAIGatewayService) checkChannelPricingRestriction(ctx context.Contex
 	if groupID == nil || s.channelService == nil || requestedModel == "" {
 		return false
 	}
+	requestedModel = tokenProImagesChannelAuthorizationModel(ctx, groupID, requestedModel)
 	mapping := s.channelService.ResolveChannelMapping(ctx, *groupID, requestedModel)
 	billingModel := billingModelForRestriction(mapping.BillingModelSource, requestedModel, mapping.MappedModel)
 	if billingModel == "" {
@@ -651,6 +652,7 @@ func (s *OpenAIGatewayService) isUpstreamModelRestrictedByChannel(ctx context.Co
 	if s.channelService == nil {
 		return false
 	}
+	requestedModel = tokenProImagesChannelAuthorizationModel(ctx, &groupID, requestedModel)
 	if compactForwardModel, ok := openAIForwardModelFromContext(ctx); ok {
 		requestedModel = compactForwardModel.model
 		requireCompact = compactForwardModel.useCompactModelMapping

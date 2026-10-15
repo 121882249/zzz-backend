@@ -11,6 +11,7 @@ export interface ContentMonitorItem {
   user_email: string
   model: string
   content: string
+  user_input_only: boolean
   created_at: string
 }
 

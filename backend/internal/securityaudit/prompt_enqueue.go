@@ -39,7 +39,7 @@ func (e *Enqueuer) Monitor(ctx context.Context, req Request) error {
 	if !ok {
 		return errors.New("account monitoring repository unavailable")
 	}
-	snapshot, err := ExtractPromptSnapshot(req)
+	snapshot, err := extractMonitoringSnapshot(req)
 	if errors.Is(err, ErrNoPromptText) {
 		return nil
 	}

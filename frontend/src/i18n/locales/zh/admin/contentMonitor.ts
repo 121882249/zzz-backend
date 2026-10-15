@@ -1,7 +1,7 @@
 export default {
   contentMonitor: {
     title: '内容监控',
-    description: '查看指定账号后续请求中输入的内容、时间和模型。',
+    description: '只显示指定账号当前一轮的用户输入、时间和模型，不展示系统指令、工具结果或历史回复。',
     account: '监控账号',
     accountHint: '每行填写一个邮箱。保存后只记录这些账号后续发送的输入，不影响请求。',
     placeholder: '每行一个邮箱地址',
@@ -17,6 +17,7 @@ export default {
     records: '输入记录',
     userAccount: '用户账号',
     content: '输入内容',
+    legacyInputUnavailable: '历史记录未单独保存用户输入，不展示完整上下文。',
     time: '输入时间',
     model: '所用模型',
     empty: '暂无记录。保存账号后，新请求会显示在这里。',
