@@ -314,7 +314,7 @@ func (r *PostgreSQLRepository) RecordMonitoring(ctx context.Context, snapshot Pr
 	result := &NormalizedResult{
 		Decision: EventPass, RiskLevel: RiskLow, Action: ActionAllow, Safety: "monitor",
 		Categories: []string{}, MatchedScanners: []string{}, ScannerScores: map[string]float64{},
-		ScannerEvidence: map[string]string{}, ScannerBackend: "account-monitor", ScannerVersion: "1",
+		ScannerEvidence: map[string]string{}, ScannerBackend: "account-monitor", ScannerVersion: monitoringUserInputVersion,
 		PolicyID: "account-monitor", PolicyVersion: 1, ChunkTotal: 1,
 	}
 	tx, err := r.db.BeginTx(ctx, nil)

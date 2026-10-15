@@ -31,11 +31,12 @@ type EventFilter struct {
 }
 
 type ContentMonitorItem struct {
-	ID        int64     `json:"id"`
-	UserEmail string    `json:"user_email"`
-	Model     string    `json:"model"`
-	Content   string    `json:"content"`
-	CreatedAt time.Time `json:"created_at"`
+	ID            int64     `json:"id"`
+	UserEmail     string    `json:"user_email"`
+	Model         string    `json:"model"`
+	Content       string    `json:"content"`
+	UserInputOnly bool      `json:"user_input_only"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 type ContentMonitorPage struct {
@@ -142,7 +143,9 @@ func (r *PostgreSQLRepository) ListMonitoringEvents(ctx context.Context, email s
 		return nil, err
 	}
 	args = append(args, pageSize, (page-1)*pageSize)
-	rows, err := r.db.QueryContext(ctx, `SELECT e.id,e.user_email_snapshot,e.model,e.full_prompt,e.created_at
+	rows, err := r.db.QueryContext(ctx, `SELECT e.id,e.user_email_snapshot,e.model,
+		CASE WHEN e.scanner_version='`+monitoringUserInputVersion+`' THEN e.full_prompt ELSE '' END,
+		e.scanner_version='`+monitoringUserInputVersion+`',e.created_at
 		FROM prompt_audit_events e`+where+fmt.Sprintf(` ORDER BY e.created_at DESC,e.id DESC LIMIT $%d OFFSET $%d`, len(args)-1, len(args)), args...)
 	if err != nil {
 		return nil, err
@@ -151,7 +154,7 @@ func (r *PostgreSQLRepository) ListMonitoringEvents(ctx context.Context, email s
 	items := make([]ContentMonitorItem, 0, pageSize)
 	for rows.Next() {
 		var item ContentMonitorItem
-		if err := rows.Scan(&item.ID, &item.UserEmail, &item.Model, &item.Content, &item.CreatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.UserEmail, &item.Model, &item.Content, &item.UserInputOnly, &item.CreatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, item)

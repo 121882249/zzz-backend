@@ -45,7 +45,10 @@
           <tbody class="divide-y divide-gray-100 dark:divide-dark-800">
             <tr v-for="item in items" :key="item.id" class="align-top">
               <td class="whitespace-nowrap px-5 py-4 text-sm text-gray-800 dark:text-dark-100 sm:px-6">{{ item.user_email || '—' }}</td>
-              <td class="px-5 py-4 sm:px-6"><pre class="max-h-48 overflow-auto whitespace-pre-wrap break-words font-sans text-sm text-gray-800 dark:text-dark-100">{{ item.content || '—' }}</pre></td>
+              <td class="px-5 py-4 sm:px-6">
+                <pre v-if="item.user_input_only" class="max-h-48 overflow-auto whitespace-pre-wrap break-words font-sans text-sm text-gray-800 dark:text-dark-100">{{ item.content || '—' }}</pre>
+                <span v-else class="text-sm text-gray-500">{{ t('admin.contentMonitor.legacyInputUnavailable') }}</span>
+              </td>
               <td class="whitespace-nowrap px-5 py-4 text-sm text-gray-600 dark:text-dark-300 sm:px-6">{{ formatTime(item.created_at) }}</td>
               <td class="whitespace-nowrap px-5 py-4 text-sm text-gray-800 dark:text-dark-100 sm:px-6">{{ item.model || '—' }}</td>
             </tr>

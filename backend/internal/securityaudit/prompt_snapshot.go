@@ -50,6 +50,10 @@ func extractPromptSnapshot(req Request, latestTurnOnly bool) (PromptSnapshot, er
 	if latestTurnOnly {
 		segments = blockingSegmentsLatestUserAndPreviousOutput(extracted)
 	}
+	return snapshotFromSegments(req, segments)
+}
+
+func snapshotFromSegments(req Request, segments []string) (PromptSnapshot, error) {
 	if len(segments) == 0 {
 		return PromptSnapshot{}, ErrNoPromptText
 	}

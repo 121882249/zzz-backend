@@ -1,7 +1,7 @@
 export default {
   contentMonitor: {
     title: 'Content Monitor',
-    description: 'View the input content, time, and model for selected accounts.',
+    description: 'View the latest user input, time, and model without system instructions, tool results, or conversation history.',
     account: 'Monitored accounts',
     accountHint: 'Enter one email per line. Only future inputs are recorded, without affecting requests.',
     placeholder: 'One email address per line',
@@ -17,6 +17,7 @@ export default {
     records: 'Input records',
     userAccount: 'User Account',
     content: 'Input content',
+    legacyInputUnavailable: 'User input was not stored separately in this older record. Full context is hidden.',
     time: 'Input time',
     model: 'Model',
     empty: 'No records yet. New requests appear here after an account is saved.',
