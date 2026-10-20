@@ -2317,6 +2317,12 @@ func setDefaults() {
 	viper.SetDefault("image_storage.access_key_id", "")
 	viper.SetDefault("image_storage.secret_access_key", "")
 	viper.SetDefault("image_storage.public_base_url", "")
+	// Codex chat-image URL settings: register so GATEWAY_TOKENPRO_* env vars work.
+	viper.SetDefault("gateway.tokenpro_image_public_base_url", "")
+	viper.SetDefault("gateway.tokenpro_image_url_secret", "")
+	viper.SetDefault("gateway.tokenpro_image_url_ttl_hours", 0)
+	viper.SetDefault("gateway.tokenpro_image_store_dir", "")
+	viper.SetDefault("gateway.tokenpro_chat_image_keepalive_seconds", 0)
 
 	// Ops (vNext)
 	viper.SetDefault("ops.enabled", true)
