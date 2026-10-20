@@ -914,11 +914,14 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				return
 			}
 			if result != nil && result.ImageCount > 0 {
+				// An error reached the client; partial images are not billed.
 				reqLog.Warn("openai.forward_partial_error_with_image_result",
 					zap.Int64("account_id", account.ID),
 					zap.Int("image_count", result.ImageCount),
+					zap.Bool("billed", false),
 					zap.Error(err),
 				)
+				return
 			} else {
 				var failoverErr *service.UpstreamFailoverError
 				if errors.As(err, &failoverErr) {
@@ -1014,7 +1017,11 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					zap.Bool("upstream_error_response_already_written", upstreamErrorAlreadyCommunicated),
 					zap.Error(err),
 				}
-				submitResponsesUsage(result)
+				// The client received an error for this request: never bill it,
+				// even when upstream metered partial usage before failing.
+				if result != nil {
+					fields = append(fields, zap.Bool("partial_usage_not_billed", true))
+				}
 				if shouldLogOpenAIForwardFailureAsWarn(c, wroteFallback) {
 					reqLog.Warn("openai.forward_failed", fields...)
 					return
@@ -1589,7 +1596,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 					zap.Bool("fallback_error_response_written", wroteFallback),
 					zap.Error(err),
 				)
-				submitMessagesUsage(result)
+				// Error delivered to the client: do not bill partial usage.
 				return
 			}
 		}

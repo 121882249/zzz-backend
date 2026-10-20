@@ -294,7 +294,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 			}()
 			return h.gatewayService.ForwardImages(requestCtx, c, account, body, parsed, channelMapping.MappedModel)
 		}()
-		if result != nil && result.ImageCount > 0 && finishReceipt != nil {
+		if err == nil && result != nil && result.ImageCount > 0 && finishReceipt != nil {
 			if receiptErr := finishReceipt(true); receiptErr != nil {
 				reqLog.Warn("openai.images.receipt_finish_failed", zap.Error(receiptErr))
 			}
@@ -311,11 +311,16 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		}
 		if err != nil {
 			if result != nil && result.ImageCount > 0 {
+				// The client already received an error (stream error event or
+				// error response) for this request: never bill a failed request,
+				// even if some images were generated before the failure.
 				reqLog.Warn("openai.images.forward_partial_error_with_image_result",
 					zap.Int64("account_id", account.ID),
 					zap.Int("image_count", result.ImageCount),
+					zap.Bool("billed", false),
 					zap.Error(err),
 				)
+				return
 			} else {
 				var imageUpstreamErr *service.OpenAIImagesUpstreamError
 				if errors.As(err, &imageUpstreamErr) {
@@ -426,6 +431,15 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 			h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, requestModel, false, result), true, nil)
 		}
 
+		if !openAIImagesResultBillable(result) {
+			// Upstream answered 2xx but delivered no image (error body / empty
+			// output): the client got nothing usable, so nothing is billed.
+			reqLog.Warn("openai.images.success_without_images_not_billed",
+				zap.Int64("account_id", account.ID),
+			)
+			return
+		}
+
 		userAgent := c.GetHeader("User-Agent")
 		clientIP := ip.GetClientIP(c)
 		requestPayloadHash := service.HashUsageRequestPayload(body)
@@ -486,4 +500,10 @@ func (h *OpenAIGatewayHandler) openAIImagesJSONKeepaliveInterval() time.Duration
 
 func isMultipartImagesContentType(contentType string) bool {
 	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(contentType)), "multipart/form-data")
+}
+
+// openAIImagesResultBillable reports whether an images forward result
+// represents delivered images. Only delivered images are billed.
+func openAIImagesResultBillable(result *service.OpenAIForwardResult) bool {
+	return result != nil && result.ImageCount > 0
 }

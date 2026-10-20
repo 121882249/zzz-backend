@@ -414,7 +414,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 					zap.Bool("upstream_error_response_already_written", upstreamErrorAlreadyCommunicated),
 					zap.Error(err),
 				)
-				submitChatUsage(result)
+				// Error delivered to the client: do not bill partial usage.
 				return
 			}
 		}

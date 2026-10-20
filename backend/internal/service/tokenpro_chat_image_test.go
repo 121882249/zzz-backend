@@ -69,7 +69,7 @@ func TestTokenProChatImageMessagesAndErrorMapping(t *testing.T) {
 	require.NotContains(t, text, "data:")
 	require.LessOrEqual(t, len([]rune(strings.TrimPrefix(strings.Split(text, "调整后的描述：")[1], ""))), 120)
 
-	require.Equal(t, "这次请求未通过检查，请调整图片描述后再试。", TokenProChatImageFailureText(errString("content policy violation")))
+	require.Equal(t, "这次请求未通过检查，请调整图片描述后再试。", TokenProChatImageFailureText(chatImageTestErr("content policy violation")))
 	require.Equal(t, "当前没有可用的生图账号，请稍后再试。", TokenProChatImageFailureText(ErrTokenProChatImageNoAccount))
 	require.Equal(t, "图片未能正常返回，请重新生成。", TokenProChatImageFailureText(ErrTokenProChatImageEmpty))
 	status, message, ok := TokenProChatImageClientError(ErrTokenProChatImagePrompt)
@@ -88,7 +88,7 @@ func TestLogTokenProChatImageUpstreamErrorSanitizes(t *testing.T) {
 	tokenProChatImageUpstreamLogHook = func(detail string) { got = detail }
 	t.Cleanup(func() { tokenProChatImageUpstreamLogHook = previous })
 	long := strings.Repeat("x", 250)
-	LogTokenProChatImageUpstreamError(errString("boom https://up.example/v1/images?access_token=secret&next=1 " + long))
+	LogTokenProChatImageUpstreamError(chatImageTestErr("boom https://up.example/v1/images?access_token=secret&next=1 " + long))
 	require.NotContains(t, got, "secret")
 	require.Contains(t, got, "access_token=***")
 	require.LessOrEqual(t, len([]rune(got)), 200)
@@ -129,9 +129,9 @@ func TestBeginTokenProChatImageReceipt(t *testing.T) {
 	require.Nil(t, finish)
 }
 
-type errString string
+type chatImageTestErr string
 
-func (e errString) Error() string { return string(e) }
+func (e chatImageTestErr) Error() string { return string(e) }
 
 type fakeChatImageCallStore struct {
 	call       TokenProImageCall
