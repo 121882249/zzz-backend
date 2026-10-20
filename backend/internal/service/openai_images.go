@@ -879,6 +879,12 @@ func buildOpenAIImagesURL(base string, endpoint string) string {
 	return buildOpenAIEndpointURL(base, endpoint)
 }
 
+// RewriteOpenAIImagesModel replaces the public model in a JSON or multipart
+// Images body. Callers use it before scheduling so billing sees the replacement.
+func RewriteOpenAIImagesModel(body []byte, contentType string, model string) ([]byte, string, error) {
+	return rewriteOpenAIImagesModel(body, contentType, model)
+}
+
 func rewriteOpenAIImagesModel(body []byte, contentType string, model string) ([]byte, string, error) {
 	model = strings.TrimSpace(model)
 	if model == "" {

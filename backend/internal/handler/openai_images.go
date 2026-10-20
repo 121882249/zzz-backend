@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -67,9 +68,12 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		setOpsRequestContext(c, "", false)
 	}
 
-	parsed, err := h.gatewayService.ParseOpenAIImagesRequest(c, body)
-	if err != nil {
-		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+	body, parsed, err := h.applyTokenProSelectedImageModel(c, body)
+	if err != nil || parsed == nil {
+		if err == nil {
+			err = fmt.Errorf("%w: parsed image request missing", service.ErrTokenProImageModelInternal)
+		}
+		h.respondTokenProImageModelError(c, err)
 		return
 	}
 	requestModel := parsed.Model
