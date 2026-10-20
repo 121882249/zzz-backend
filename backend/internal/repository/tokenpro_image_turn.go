@@ -31,6 +31,19 @@ func (s *redisImageTurnStore) Bind(ctx context.Context, key string, route servic
 	return nil
 }
 
+func (s *redisImageTurnStore) RememberThread(ctx context.Context, key string, route service.TokenProImageTurnRoute) error {
+	data, err := json.Marshal(route)
+	if err != nil {
+		return err
+	}
+	// Latest turn wins. A mid-thread model switch must replace the previous model.
+	return s.client.Set(ctx, key, data, service.TokenProImageThreadTTL).Err()
+}
+
+func (s *redisImageTurnStore) LookupThread(ctx context.Context, key string) (service.TokenProImageTurnRoute, error) {
+	return s.Lookup(ctx, key)
+}
+
 func (s *redisImageTurnStore) Lookup(ctx context.Context, key string) (service.TokenProImageTurnRoute, error) {
 	var route service.TokenProImageTurnRoute
 	data, err := s.client.Get(ctx, key).Bytes()

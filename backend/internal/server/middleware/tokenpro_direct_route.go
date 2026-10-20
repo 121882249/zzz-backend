@@ -17,7 +17,6 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -89,10 +88,38 @@ func TokenProDirectRoute(stores ...service.TokenProImageTurnStore) gin.HandlerFu
 		// New clients do not set a provider-wide image mode. The native Images
 		// call identifies its turn; Responses eligibility is checked after auth.
 		turnMode := imageMode == "native-v2" || (imageEndpoint && len(imageTurnHeaders) > 0)
+		threadBound := false
+		if imageEndpoint {
+			route, found, threadErr := lookupTokenProImageThread(c, apiKey, turnStore)
+			if threadErr != nil {
+				status := http.StatusServiceUnavailable
+				if errors.Is(threadErr, service.ErrImageTurnConflict) {
+					status = http.StatusBadRequest
+				}
+				abortImageTurn(c, status, "native_image_turn_unavailable")
+				return
+			}
+			if found {
+				// The latest model chosen in this thread wins over a stale
+				// provider header and over an older per-turn record.
+				imageRoute = tokenProDirectModelPrefix + strconv.FormatInt(route.GroupID, 10) + "-" + base64.RawURLEncoding.EncodeToString([]byte(route.Model))
+				c.Request.Header.Del("X-TokenPro-Image-Model")
+				c.Request.Header.Del(tokenProGroupIDHeader)
+				c.Set(service.TokenProImageThreadBoundContextKey, true)
+				c.Set(service.TokenProImageSessionContextKey, route.ThreadID)
+				if len(imageTurnHeaders) == 1 && validTokenProTurnID(imageTurnID) && turnStore != nil {
+					c.Set(service.TokenProImageReceiptContextKey, &service.TokenProImageReceiptContext{Store: turnStore, TurnID: imageTurnID})
+				}
+				threadBound = true
+				turnMode = true
+			}
+		}
 		if turnMode {
 			// Provider-level defaults must never override a turn's explicit choice.
-			imageRoute = ""
-			if imageEndpoint {
+			if !threadBound {
+				imageRoute = ""
+			}
+			if imageEndpoint && !threadBound {
 				if len(imageTurnHeaders) != 1 || !validTokenProTurnID(imageTurnID) || turnStore == nil {
 					abortImageTurn(c, http.StatusBadRequest, "native_image_turn_missing")
 					return
@@ -112,6 +139,13 @@ func TokenProDirectRoute(stores ...service.TokenProImageTurnStore) gin.HandlerFu
 				c.Set(service.TokenProImageSessionContextKey, route.ThreadID)
 				c.Set(service.TokenProImageReceiptContextKey, &service.TokenProImageReceiptContext{Store: turnStore, TurnID: imageTurnID})
 			}
+		}
+		if imageEndpoint && !threadBound && imageRoute == "" && strings.TrimSpace(c.GetHeader("X-TokenPro-Image-Model")) == "" &&
+			strings.TrimSpace(c.GetHeader("X-Codex-Turn-Metadata")) != "" {
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": gin.H{
+				"type": "invalid_request_error", "message": "无法确定本次生图模型，没有改用其他模型。",
+			}})
+			return
 		}
 		resolve := func(model string) (int64, string, bool, error) {
 			group, public, matched := decodeTokenProDirectModel(model)
@@ -247,8 +281,39 @@ func abortImageTurn(c *gin.Context, status int, code string) {
 }
 
 func validTokenProTurnID(value string) bool {
-	id, err := uuid.Parse(value)
-	return err == nil && id != uuid.Nil && id.String() == value
+	return service.ValidTokenProCorrelationID(value)
+}
+
+func lookupTokenProImageThread(c *gin.Context, apiKey *service.APIKey, store service.TokenProImageTurnStore) (service.TokenProImageTurnRoute, bool, error) {
+	var route service.TokenProImageTurnRoute
+	threadStore, ok := store.(service.TokenProImageThreadStore)
+	if !ok || apiKey == nil || c == nil || c.Request == nil {
+		return route, false, nil
+	}
+	if len(c.Request.Header.Values("X-Codex-Turn-Metadata")) > 1 {
+		return route, false, service.ErrImageTurnConflict
+	}
+	header := strings.TrimSpace(c.GetHeader("X-Codex-Turn-Metadata"))
+	if header == "" || !gjson.Valid(header) {
+		return route, false, nil
+	}
+	threadID := strings.TrimSpace(gjson.Get(header, "thread_id").String())
+	if !service.ValidTokenProCorrelationID(threadID) {
+		return route, false, nil
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+	defer cancel()
+	found, err := threadStore.LookupThread(ctx, service.TokenProImageThreadKey(apiKey, threadID))
+	if errors.Is(err, service.ErrImageTurnMissing) {
+		return route, false, nil
+	}
+	if err != nil {
+		return route, false, err
+	}
+	if found.ThreadID != "" && found.ThreadID != threadID {
+		return route, false, service.ErrImageTurnConflict
+	}
+	return found, true, nil
 }
 
 func tokenProTurnMetadata(c *gin.Context, body []byte) (string, string, error) {

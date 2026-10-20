@@ -52,6 +52,14 @@ func (h *OpenAIGatewayHandler) dispatchTokenProNativeImageV1(c *gin.Context, api
 		h.handleStreamingAwareError(c, status, "native_image_dispatch_error", err.Error(), *streamStarted)
 		return true
 	}
+	// The Images call that follows this function_call resolves the thread's
+	// latest model. Record it before any response byte, including the SSE events.
+	if itemType, _ := item["type"].(string); itemType == "function_call" && item["name"] == "imagegen" {
+		if bindErr := service.RememberTokenProImageThread(c, apiKey, model, body); bindErr != nil {
+			h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "native_image_thread_unbound", bindErr.Error(), *streamStarted)
+			return true
+		}
+	}
 	id := "resp_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	response := gin.H{"id": id, "object": "response", "model": model, "status": "completed", "output": []any{item},
 		"usage": gin.H{"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}}
