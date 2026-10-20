@@ -30,7 +30,7 @@ func TestTokenProPureDispatchAfterAdmission(t *testing.T) {
 			gin.SetMode(gin.TestMode)
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
-			body := `{"model":"gpt-image-2.5-flare","input":"draw a cat","stream":false}`
+			body := `{"model":"gpt-image-2.5-flare","input":"draw a cat","stream":false,"tools":[{"type":"namespace","name":"image_gen","tools":[{"type":"function","name":"imagegen"}]}]}`
 			if tc.stream {
 				body = strings.Replace(body, `"stream":false`, `"stream":true`, 1)
 			}
@@ -117,7 +117,7 @@ func TestTokenProPureDispatchGroupDescriptionField(t *testing.T) {
 			}
 			started := false
 			h := &OpenAIGatewayHandler{}
-			handled := h.dispatchTokenProNativeImage(c, key, "gpt-image-2.5-flare", service.PlatformOpenAI, []byte(`{"input":"draw a cat"}`), false, &started)
+			handled := h.dispatchTokenProNativeImage(c, key, "gpt-image-2.5-flare", service.PlatformOpenAI, []byte(`{"input":"draw a cat","tools":[{"type":"namespace","name":"image_gen","tools":[{"type":"function","name":"imagegen"}]}]}`), false, &started)
 			require.Equal(t, tc.want, handled)
 			if tc.want {
 				require.Equal(t, "v1", rec.Header().Get("X-TokenPro-Native-Dispatch"))

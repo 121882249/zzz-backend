@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 )
@@ -140,6 +141,9 @@ func uniqueTokenProImagePaths(paths []string) []string {
 	return unique
 }
 
+// tokenProNativeImageFailureLogHook is optional and used by tests.
+var tokenProNativeImageFailureLogHook func(reason string)
+
 func tokenProNativeImageResultText(output gjson.Result) string {
 	if output.IsArray() {
 		for _, part := range output.Array() {
@@ -149,11 +153,12 @@ func tokenProNativeImageResultText(output gjson.Result) string {
 		}
 	}
 
-	message := output.Raw
+	raw := output.Raw
 	if output.Type == gjson.String {
-		message = output.String()
+		raw = output.String()
 	}
-	message = strings.ToLower(message)
+	logTokenProNativeImageFailure(raw)
+	message := strings.ToLower(raw)
 	switch {
 	case strings.Contains(message, "timeout"), strings.Contains(message, "timed out"), strings.Contains(message, "超时"):
 		return "图片生成超时了，请重新发起。"
@@ -166,4 +171,12 @@ func tokenProNativeImageResultText(output gjson.Result) string {
 	default:
 		return "图片未能正常返回，请重新生成。"
 	}
+}
+
+func logTokenProNativeImageFailure(raw string) {
+	reason := tokenProLogSnippet(raw)
+	if tokenProNativeImageFailureLogHook != nil {
+		tokenProNativeImageFailureLogHook(reason)
+	}
+	logger.LegacyPrintf("service.tokenpro_native_dispatch", "native image tool failure: %s", reason)
 }

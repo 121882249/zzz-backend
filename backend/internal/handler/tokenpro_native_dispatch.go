@@ -15,8 +15,9 @@ import (
 
 // Called only after Responses authentication, group resolution, moderation,
 // image permission, concurrency, billing eligibility and session-block checks.
-// Dispatch has no upstream inference and no usage charge. The subsequent native
-// Images request is independently authorized, scheduled and billed as usual.
+// Requests that actually carry image_gen.imagegen, or that continue a native
+// call id, keep the function_call protocol. Every other pure-image chat turn
+// is generated here and answered with an HTTPS URL.
 func (h *OpenAIGatewayHandler) dispatchTokenProNativeImage(c *gin.Context, apiKey *service.APIKey, model, platform string, body []byte, stream bool, streamStarted *bool) bool {
 	if !service.TokenProNativeImages(c) || !service.IsGPTImageGenerationModel(model) ||
 		!isBareOpenAIResponsesPath(c) || service.IsOpenAIResponsesCompactPath(c) ||
@@ -24,6 +25,13 @@ func (h *OpenAIGatewayHandler) dispatchTokenProNativeImage(c *gin.Context, apiKe
 		!service.TokenProPureImageGroup(apiKey.Group) {
 		return false
 	}
+	if service.TokenProExplicitNativeImageFlow(body) {
+		return h.dispatchTokenProNativeImageV1(c, apiKey, model, body, stream, streamStarted)
+	}
+	return h.dispatchTokenProChatImage(c, apiKey, model, body, stream, streamStarted)
+}
+
+func (h *OpenAIGatewayHandler) dispatchTokenProNativeImageV1(c *gin.Context, apiKey *service.APIKey, model string, body []byte, stream bool, streamStarted *bool) bool {
 	store, turnKey := service.TokenProImageReceiptStore(c, apiKey)
 	item, handled, err := service.BuildTokenProImageReceiptContinuation(body, func(callID string) error {
 		return service.VerifyTokenProImageReceipt(c.Request.Context(), store, turnKey, callID)

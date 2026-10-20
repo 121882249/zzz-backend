@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 
@@ -116,6 +117,10 @@ func TestTokenProPureDispatchSuccessContinuationIsFriendly(t *testing.T) {
 }
 
 func TestTokenProNativeImageFailureMessages(t *testing.T) {
+	var logged []string
+	previous := tokenProNativeImageFailureLogHook
+	tokenProNativeImageFailureLogHook = func(reason string) { logged = append(logged, reason) }
+	t.Cleanup(func() { tokenProNativeImageFailureLogHook = previous })
 	tests := []struct {
 		output string
 		want   string
@@ -129,4 +134,7 @@ func TestTokenProNativeImageFailureMessages(t *testing.T) {
 		output := gjson.Get(`{"output":`+strconv.Quote(tt.output)+`}`, "output")
 		require.Equal(t, tt.want, tokenProNativeImageResultText(output))
 	}
+	require.Len(t, logged, len(tests))
+	require.Contains(t, logged[0], "request timed out")
+	require.NotContains(t, strings.Join(logged, "\n"), "图片生成好了")
 }
