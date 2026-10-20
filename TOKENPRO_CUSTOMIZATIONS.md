@@ -58,7 +58,7 @@ OpenAI、Codex、Claude、Gemini、Grok 等入口（HTTP、流式、WebSocket）
 3. 重新计算 `effectivePlatform = effectiveAPIKeyPlatform(c, apiKey)`；
 4. 再执行上游的 composite / Antigravity 模型检查。
 
-`ListModels` 对全局 Key 返回内置目录 `gemini.FallbackModelsList()`，不按空分组去上游查询。Gemini 显式缓存管理遵循上游约束：只允许固定 Gemini 分组 Key，不为全局 Key 猜测缓存归属。
+`ListModels` 对全局 Key 返回内置目录 `gemini.FallbackModelsList()`，不按空分组去上游查询。未携带分组（没有 `tp-g` slug，也没有 `X-TokenPro-Group-Id`）时与其他入口一样，经 `respondGlobalKeyRoutingError` 返回 HTTP 400，错误码 `group_id_required`，响应仍是 Gemini 错误体。分组无效仍返回 503；平台不匹配仍返回 400。Gemini 显式缓存管理遵循上游约束：只允许固定 Gemini 分组 Key，不为全局 Key 猜测缓存归属。
 
 ## 4. 生图桥接 / 文本组生图交付 / 本地标题
 

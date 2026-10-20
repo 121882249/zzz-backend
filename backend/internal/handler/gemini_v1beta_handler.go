@@ -258,7 +258,7 @@ func (h *GatewayHandler) GeminiV1BetaGetModel(c *gin.Context) {
 	if apiKey.IsGlobal() {
 		resolvedKey, resolveErr := resolveGlobalAPIKeyForModel(c, h.gatewayService, apiKey, apiKey.UserID, modelName)
 		if resolveErr != nil {
-			googleError(c, http.StatusServiceUnavailable, "当前模型没有可用分组或有效订阅。")
+			respondGlobalKeyRoutingError(c, resolveErr, googleRoutingError)
 			return
 		}
 		apiKey = resolvedKey
@@ -350,7 +350,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 	if apiKey.IsGlobal() {
 		resolvedKey, resolveErr := resolveGlobalAPIKeyForModel(c, h.gatewayService, apiKey, authSubject.UserID, modelName)
 		if resolveErr != nil {
-			googleError(c, http.StatusServiceUnavailable, "当前模型没有可用分组或有效订阅。")
+			respondGlobalKeyRoutingError(c, resolveErr, googleRoutingError)
 			return
 		}
 		apiKey = resolvedKey
@@ -944,6 +944,25 @@ func (e *pathParseError) Error() string { return e.msg }
 // 4xx 为客户端请求问题，其余状态码不登记（按平台错误统计）。
 func googleError(c *gin.Context, status int, message string) {
 	googleErrorWithType(c, status, googleClientErrorType(status), "", message)
+}
+
+// googleRoutingError writes respondGlobalKeyRoutingError results in Gemini's
+// error envelope. error.code stays the HTTP status, and the shared routing
+// code (group_id_required, no_available_group, ...) is the ErrorInfo reason.
+func googleRoutingError(c *gin.Context, status int, code, message string) {
+	service.SetOpsLocalErrorType(c, googleClientErrorType(status), code)
+	errObj := gin.H{
+		"code":    status,
+		"message": message,
+		"status":  googleapi.HTTPStatusToGoogleStatus(status),
+	}
+	if code != "" {
+		errObj["details"] = []gin.H{{
+			"@type":  "type.googleapis.com/google.rpc.ErrorInfo",
+			"reason": code,
+		}}
+	}
+	c.JSON(status, gin.H{"error": errObj})
 }
 
 // googlePlatformError 以 Google 错误格式回写由平台侧原因（如管理员未完成配置）导致的错误，ops 按平台错误统计。
