@@ -68,9 +68,12 @@ func (h *OpenAIGatewayHandler) dispatchTokenProChatImage(c *gin.Context, apiKey 
 		}
 		text := service.TokenProLocalImageAssistantText(follow.Output, imageURL)
 		mode := "url-v1"
+		choice := "url"
 		if strings.HasPrefix(text, "![") {
 			mode = "local-v1"
+			choice = "local"
 		}
+		h.logTokenProChatImageDispatch(c, body, choice)
 		var sse *tokenProChatImageSSE
 		if stream {
 			sse = h.startTokenProChatImageSSE(c, model, streamStarted, mode)
@@ -80,6 +83,7 @@ func (h *OpenAIGatewayHandler) dispatchTokenProChatImage(c *gin.Context, apiKey 
 		return true
 	}
 	if text, ok := service.TokenProChatImageCheapReply(body); ok {
+		h.logTokenProChatImageDispatch(c, body, "text")
 		var sse *tokenProChatImageSSE
 		if stream {
 			sse = h.startTokenProChatImageSSE(c, model, streamStarted, "text-v1")
@@ -137,11 +141,13 @@ func (h *OpenAIGatewayHandler) dispatchTokenProChatImage(c *gin.Context, apiKey 
 		h.recordTokenProChatImageUsage(c, apiKey, generated.Account, generated.Result, body)
 	}
 	if item, ok := service.BuildTokenProLocalImageCall(body, imageURL, tokenProChatImageThreadID(c, body)); ok {
+		h.logTokenProChatImageDispatch(c, body, "local")
 		h.rememberTokenProLocalImage(c, apiKey, item, imageURL)
 		h.writeTokenProChatImageOutput(c, sse, model, item, generated.Result, stream, "local-v1")
 		succeeded = true
 		return true
 	}
+	h.logTokenProChatImageDispatch(c, body, "url")
 	text := service.TokenProChatImageSuccessText(imageURL, generated.Revised)
 	h.finishTokenProChatImage(c, sse, model, text, generated.Result, stream, "url-v1")
 	succeeded = true
@@ -623,7 +629,8 @@ func (h *OpenAIGatewayHandler) writeTokenProChatImageOutput(c *gin.Context, sse 
 		c.JSON(http.StatusOK, response)
 		return
 	}
-	if itemType, ok := item["type"].(string); ok && itemType == "function_call" {
+	switch itemType, _ := item["type"].(string); itemType {
+	case "function_call":
 		added := make(map[string]any, len(item))
 		for key, value := range item {
 			added[key] = value
@@ -640,11 +647,53 @@ func (h *OpenAIGatewayHandler) writeTokenProChatImageOutput(c *gin.Context, sse 
 			"item_id": item["id"], "call_id": item["call_id"], "name": item["name"],
 			"arguments": item["arguments"],
 		})
-	} else {
+	case "custom_tool_call":
+		added := make(map[string]any, len(item))
+		for key, value := range item {
+			added[key] = value
+		}
+		added["input"] = ""
+		_ = sse.write(gin.H{"type": "response.output_item.added", "output_index": 0, "item": added})
+		_ = sse.write(gin.H{
+			"type": "response.custom_tool_call_input.delta", "output_index": 0,
+			"item_id": item["id"], "call_id": item["call_id"], "name": item["name"],
+			"delta": item["input"],
+		})
+		_ = sse.write(gin.H{
+			"type": "response.custom_tool_call_input.done", "output_index": 0,
+			"item_id": item["id"], "call_id": item["call_id"], "name": item["name"],
+			"input": item["input"],
+		})
+	default:
 		_ = sse.write(gin.H{"type": "response.output_item.added", "output_index": 0, "item": item})
 	}
 	_ = sse.write(gin.H{"type": "response.output_item.done", "output_index": 0, "item": item})
 	_ = sse.write(gin.H{"type": "response.completed", "response": response})
+}
+
+func (h *OpenAIGatewayHandler) logTokenProChatImageDispatch(c *gin.Context, body []byte, mode string) {
+	ua, originator := "", ""
+	if c != nil && c.Request != nil {
+		ua = strings.TrimSpace(c.Request.UserAgent())
+		originator = strings.TrimSpace(c.GetHeader("originator"))
+	}
+	ua = tokenProChatImageLogValue(ua, 256)
+	originator = tokenProChatImageLogValue(originator, 128)
+	requestLogger(c, "handler.tokenpro_chat_image").Info("tokenpro.chat_image.dispatch",
+		zap.String("mode", mode),
+		zap.Strings("tools", service.TokenProChatImageToolNames(body)),
+		zap.String("originator", originator),
+		zap.String("user_agent", ua),
+	)
+}
+
+func tokenProChatImageLogValue(value string, limit int) string {
+	value = strings.ReplaceAll(value, "\n", " ")
+	value = strings.ReplaceAll(value, "\r", " ")
+	if len(value) > limit {
+		value = value[:limit]
+	}
+	return value
 }
 
 func tokenProChatImageThreadID(c *gin.Context, body []byte) string {

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -11,10 +12,14 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 func TestTokenProChatImageSSEAndBilling(t *testing.T) {
@@ -253,6 +258,87 @@ func TestTokenProChatImageDownloadsThroughExecCommand(t *testing.T) {
 	require.Equal(t, "local-v1", rec.Header().Get("X-TokenPro-Chat-Image"))
 	require.Equal(t, "function_call", gjson.Get(rec.Body.String(), "output.0.type").String())
 	require.Equal(t, int32(1), billed.Load())
+}
+
+func TestTokenProChatImageCodeModeExecStreamsAndLogsTools(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	core, logs := observer.New(zap.InfoLevel)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	req.Header.Set("User-Agent", "Codex Desktop/0.163.0-alpha.10.2 (Codex Desktop; 26.1013.40934)")
+	req.Header.Set("originator", "codex_chatgpt_desktop")
+	c.Request = req.WithContext(logger.IntoContext(req.Context(), zap.New(core)))
+	c.Set(service.TokenProNativeImagesContextKey, true)
+	var billed atomic.Int32
+	var generated atomic.Int32
+	h := &OpenAIGatewayHandler{}
+	h.chatImageGenerate = func(context.Context, *gin.Context, *service.APIKey, string, *service.TokenProChatImageRequest) (*tokenProChatImageGenerated, error) {
+		generated.Add(1)
+		return &tokenProChatImageGenerated{
+			Bytes: []byte{0x89, 'P', 'N', 'G'}, ContentType: "image/png",
+			Result:  &service.OpenAIForwardResult{ImageCount: 1, Model: "gpt-image-2.5-flare"},
+			Account: &service.Account{ID: 8},
+		}, nil
+	}
+	h.chatImagePublish = func(context.Context, string, []byte) (string, error) {
+		return "https://tokenpro.work/cat.png?exp=1&sig=ff", nil
+	}
+	h.chatImageRecordUsage = func(*service.OpenAIRecordUsageInput) { billed.Add(1) }
+	body, err := json.Marshal(map[string]any{
+		"input":  "画一只猫",
+		"stream": true,
+		"tools": []any{
+			map[string]any{
+				"type": "custom", "name": "exec",
+				"description": "### `exec_command`\n",
+				"format":      map[string]any{"type": "grammar", "syntax": "lark", "definition": "start: SOURCE"},
+			},
+			map[string]any{"type": "function", "name": "wait"},
+		},
+	})
+	require.NoError(t, err)
+	started := false
+	handled := h.dispatchTokenProNativeImage(c, tokenProLocalChatImageKey(), "gpt-image-2.5-flare", service.PlatformOpenAI, body, true, &started)
+	require.True(t, handled)
+	require.Equal(t, int32(1), generated.Load())
+	require.Equal(t, int32(1), billed.Load())
+	require.Equal(t, "local-v1", rec.Header().Get("X-TokenPro-Chat-Image"))
+	var inputDone gjson.Result
+	for _, event := range parseTokenProSSE(t, rec.Body.String()) {
+		if event.Get("type").String() == "response.custom_tool_call_input.done" {
+			inputDone = event
+		}
+	}
+	require.Equal(t, "exec", inputDone.Get("name").String())
+	input := inputDone.Get("input").String()
+	require.Contains(t, input, "await tools.exec_command(")
+	require.Contains(t, input, "curl -fsSL")
+	require.Contains(t, input, "tokenpro_image_url=https://tokenpro.work/cat.png?exp=1&sig=ff")
+	require.NotContains(t, input, `\u0026`)
+	events := parseTokenProSSE(t, rec.Body.String())
+	require.Equal(t, "custom_tool_call", events[len(events)-1].Get("response.output.0.type").String())
+	require.NotContains(t, rec.Body.String(), "图片已生成")
+
+	entries := logs.FilterMessage("tokenpro.chat_image.dispatch").All()
+	require.Len(t, entries, 1)
+	fields := map[string]any{}
+	encoder := zapcore.NewMapObjectEncoder()
+	for _, field := range entries[0].Context {
+		field.AddTo(encoder)
+	}
+	for key, value := range encoder.Fields {
+		fields[key] = value
+	}
+	require.Equal(t, "local", fields["mode"])
+	require.Equal(t, []any{"custom/exec", "function/wait"}, fields["tools"])
+	require.Equal(t, "codex_chatgpt_desktop", fields["originator"])
+	require.Contains(t, fields["user_agent"], "Codex Desktop/0.163.0-alpha.10.2")
+	encoded, err := json.Marshal(fields)
+	require.NoError(t, err)
+	require.NotContains(t, string(encoded), "画一只猫")
+	require.NotContains(t, string(encoded), "tokenpro.work")
+	require.NotContains(t, string(encoded), "sig=")
 }
 
 func TestTokenProChatImageFollowUpRendersLocalMarkdown(t *testing.T) {

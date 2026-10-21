@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -111,9 +112,43 @@ func TokenProLocalImageDownloadAvailable(body []byte) bool {
 	return ok
 }
 
-// BuildTokenProLocalImageCall returns a shell/exec function_call Codex 0.163
-// desktop can run. apply_patch is ignored. ok is false when no shell tool is
-// advertised, and the caller keeps the HTTPS link text.
+// TokenProChatImageToolNames lists each advertised tool as type/name, including
+// namespace children. Descriptions and schemas stay out of the log.
+func TokenProChatImageToolNames(body []byte) []string {
+	var names []string
+	var walk func(tool gjson.Result, namespace string)
+	walk = func(tool gjson.Result, namespace string) {
+		kind := tool.Get("type").String()
+		if kind == "" {
+			kind = "unknown"
+		}
+		name := tool.Get("name").String()
+		if name == "" && kind == "local_shell" {
+			name = "local_shell"
+		}
+		label := kind + "/"
+		if namespace != "" {
+			label += namespace + "/"
+		}
+		names = append(names, label+name)
+		if kind == "namespace" {
+			for _, child := range tool.Get("tools").Array() {
+				walk(child, name)
+			}
+		}
+	}
+	for _, tool := range gjson.GetBytes(body, "tools").Array() {
+		walk(tool, "")
+	}
+	return names
+}
+
+// BuildTokenProLocalImageCall returns a download call Codex 0.163 desktop can
+// run. Direct shell tools stay function_call or local_shell_call. Code mode
+// hides those behind the freeform tool named exec, so that shape is a
+// custom_tool_call whose input is JavaScript that calls the nested shell.
+// apply_patch is ignored. ok is false when no shell tool is advertised, and
+// the caller keeps the HTTPS link text.
 func BuildTokenProLocalImageCall(body []byte, imageURL, threadID string) (map[string]any, bool) {
 	tool, ok := selectTokenProLocalImageTool(body)
 	if !ok || !safeTokenProImageURL(imageURL) {
@@ -126,8 +161,7 @@ func BuildTokenProLocalImageCall(body []byte, imageURL, threadID string) (map[st
 		thread = "session"
 	}
 	script := tokenProLocalImageScript(imageURL, thread, fileID, tool.windows)
-	switch tool.name {
-	case "local_shell":
+	if tool.kind == "local_shell" {
 		command := tokenProLocalImageArgv(script, tool.windows)
 		return map[string]any{
 			"type":    "local_shell_call",
@@ -140,27 +174,22 @@ func BuildTokenProLocalImageCall(body []byte, imageURL, threadID string) (map[st
 				"timeout_ms": 60000,
 			},
 		}, true
-	case "shell":
-		args := map[string]any{
-			"command":    tokenProLocalImageArgv(script, tool.windows),
-			"timeout_ms": 60000,
-		}
-		return localImageFunctionCall(tool, callID, fileID, tokenProLocalImageEscalation(body, args)), true
-	default:
-		shell := "bash"
-		if tool.windows {
-			shell = "powershell.exe"
-		}
-		args := map[string]any{
-			"cmd":               script,
-			"shell":             shell,
-			"login":             false,
-			"tty":               false,
-			"yield_time_ms":     60000,
-			"max_output_tokens": 2000,
-		}
-		return localImageFunctionCall(tool, callID, fileID, tokenProLocalImageEscalation(body, args)), true
 	}
+	args := localImageCallArgs(body, tool, script)
+	if tool.kind == "code_mode" {
+		item := map[string]any{
+			"type":    "custom_tool_call",
+			"id":      "ctc_" + fileID,
+			"call_id": callID,
+			"name":    tool.name,
+			"input":   "// " + tokenProLocalImageURLMarker + imageURL + "\n" + tokenProCodeModeInput(tool.nested, args),
+		}
+		if tool.namespace != "" {
+			item["namespace"] = tool.namespace
+		}
+		return item, true
+	}
+	return localImageFunctionCall(tool, callID, fileID, args), true
 }
 
 // tokenProLocalImageEscalation asks Codex to leave the sandbox when the
@@ -190,9 +219,14 @@ func tokenProLocalImageUnrestricted(body []byte) bool {
 }
 
 type tokenProLocalImageTool struct {
+	key       string
 	name      string
 	namespace string
+	kind      string
+	argStyle  string
+	nested    string
 	windows   bool
+	exact     bool
 }
 
 func selectTokenProLocalImageTool(body []byte) (tokenProLocalImageTool, bool) {
@@ -208,31 +242,240 @@ func selectTokenProLocalImageTool(body []byte) (tokenProLocalImageTool, bool) {
 			}
 			return
 		}
+		if own := strings.TrimSpace(tool.Get("namespace").String()); own != "" {
+			namespace = own
+		}
 		if kind == "local_shell" {
 			name = "local_shell"
 		}
-		switch name {
-		case "exec_command", "shell", "local_shell":
-			if _, exists := found[name]; exists {
-				return
-			}
-			description := tool.Get("description").String()
-			found[name] = tokenProLocalImageTool{
-				name:      name,
-				namespace: namespace,
-				windows:   tokenProLocalImageWindows(body, description),
-			}
+		candidate, ok := classifyTokenProLocalImageTool(body, tool, kind, name, namespace)
+		if !ok {
+			return
 		}
+		if prev, exists := found[candidate.key]; exists && !tokenProLocalImageToolBetter(candidate, prev) {
+			return
+		}
+		found[candidate.key] = candidate
 	}
 	for _, tool := range gjson.GetBytes(body, "tools").Array() {
 		walk(tool, "")
 	}
-	for _, name := range []string{"exec_command", "shell", "local_shell"} {
-		if tool, ok := found[name]; ok {
+	// A direct shell call is what the TUI already runs. Code mode's public
+	// exec tool is only the route when those names are hidden.
+	for _, key := range []string{"exec_command", "shell", "shell_command", "local_shell", "exec"} {
+		if tool, ok := found[key]; ok {
 			return tool, true
 		}
 	}
 	return tokenProLocalImageTool{}, false
+}
+
+func tokenProLocalImageToolBetter(next, prev tokenProLocalImageTool) bool {
+	return next.exact && !prev.exact
+}
+
+func classifyTokenProLocalImageTool(body []byte, tool gjson.Result, kind, name, namespace string) (tokenProLocalImageTool, bool) {
+	leaf := tokenProLocalImageLeaf(name)
+	description := tool.Get("description").String()
+	candidate := tokenProLocalImageTool{
+		name:      name,
+		namespace: namespace,
+		windows:   tokenProLocalImageWindows(body, description),
+		exact:     name == leaf,
+	}
+	switch {
+	case kind == "local_shell" || leaf == "local_shell":
+		candidate.key = "local_shell"
+		candidate.kind = "local_shell"
+		candidate.name = name
+		if candidate.name == "" {
+			candidate.name = "local_shell"
+		}
+		candidate.exact = leaf == "local_shell" && (name == "local_shell" || name == "")
+		return candidate, true
+	case leaf == "exec_command" && tokenProFunctionTool(kind):
+		candidate.key = "exec_command"
+		candidate.kind = "function"
+		candidate.argStyle = "cmd"
+		return candidate, true
+	case leaf == "shell" && tokenProFunctionTool(kind):
+		candidate.key = "shell"
+		candidate.kind = "function"
+		candidate.argStyle = "argv"
+		return candidate, true
+	case leaf == "shell_command" && tokenProFunctionTool(kind):
+		candidate.key = "shell_command"
+		candidate.kind = "function"
+		candidate.argStyle = tokenProShellCommandStyle(tool)
+		return candidate, true
+	case leaf == "exec" && tokenProCodeModeTool(kind, tool):
+		candidate.key = "exec"
+		candidate.kind = "code_mode"
+		candidate.nested, candidate.argStyle = tokenProCodeModeNestedShell(description)
+		return candidate, true
+	default:
+		return tokenProLocalImageTool{}, false
+	}
+}
+
+func tokenProFunctionTool(kind string) bool {
+	return kind == "" || kind == "function"
+}
+
+func tokenProCodeModeTool(kind string, tool gjson.Result) bool {
+	if kind == "custom" {
+		return true
+	}
+	return kind == "" && tool.Get("format.type").String() == "grammar"
+}
+
+// tokenProLocalImageLeaf accepts functions.exec_command, functions__exec_command,
+// and the same separators mixed. The call still uses the advertised name.
+func tokenProLocalImageLeaf(name string) string {
+	name = strings.TrimSpace(name)
+	for {
+		cut, sepLen := -1, 0
+		for _, sep := range []string{"__", ".", "/"} {
+			index := strings.LastIndex(name, sep)
+			if index > cut {
+				cut, sepLen = index, len(sep)
+			}
+		}
+		if cut < 0 {
+			return name
+		}
+		next := name[cut+sepLen:]
+		if next == "" {
+			name = name[:cut]
+			continue
+		}
+		return next
+	}
+}
+
+func tokenProShellCommandStyle(tool gjson.Result) string {
+	props := tool.Get("parameters.properties")
+	if !props.Exists() {
+		props = tool.Get("input_schema.properties")
+	}
+	command := props.Get("command")
+	if command.Get("type").String() == "array" || command.Get("items").Exists() {
+		return "argv"
+	}
+	if command.Get("type").String() == "string" {
+		return "command"
+	}
+	if props.Get("cmd").Exists() {
+		return "cmd"
+	}
+	// 0.163 aliases the shell_command model shell type to unified exec, whose
+	// live parameter is cmd. A bare tool name uses that shape.
+	return "cmd"
+}
+
+// tokenProCodeModeNestedShell reads the Code Mode Only headings
+// (`### `exec_command“). The public description always mentions
+// tools.exec_command as an example, so that sentence is not evidence.
+func tokenProCodeModeNestedShell(description string) (string, string) {
+	switch {
+	case tokenProCodeModeHeading(description, "exec_command"):
+		return "exec_command", "cmd"
+	case tokenProCodeModeHeading(description, "shell_command"):
+		return "shell_command", "cmd"
+	case tokenProCodeModeHeading(description, "shell"):
+		return "shell", "argv"
+	default:
+		return "exec_command", "cmd"
+	}
+}
+
+func tokenProCodeModeHeading(description, tool string) bool {
+	needle := "### `" + tool + "`"
+	rest := description
+	for {
+		index := strings.Index(rest, needle)
+		if index < 0 {
+			return false
+		}
+		after := index + len(needle)
+		if after >= len(rest) {
+			return true
+		}
+		switch rest[after] {
+		case '\n', ' ', '(', '\r':
+			return true
+		}
+		rest = rest[after:]
+	}
+}
+
+func localImageCallArgs(body []byte, tool tokenProLocalImageTool, script string) map[string]any {
+	switch tool.argStyle {
+	case "argv":
+		args := map[string]any{
+			"command":    tokenProLocalImageArgv(script, tool.windows),
+			"timeout_ms": 60000,
+		}
+		return tokenProLocalImageEscalation(body, args)
+	case "command":
+		args := map[string]any{
+			"command":    script,
+			"timeout_ms": 60000,
+		}
+		return tokenProLocalImageEscalation(body, args)
+	default:
+		shell := "bash"
+		if tool.windows {
+			shell = "powershell.exe"
+		}
+		args := map[string]any{
+			"cmd":               script,
+			"shell":             shell,
+			"login":             false,
+			"tty":               false,
+			"yield_time_ms":     60000,
+			"max_output_tokens": 2000,
+		}
+		return tokenProLocalImageEscalation(body, args)
+	}
+}
+
+func tokenProCodeModeInput(nested string, args map[string]any) string {
+	encoded := jsonNoHTML(args)
+	call := "tools[" + jsonNoHTML(nested) + "](" + encoded + ")"
+	if jsIdentifier(nested) {
+		call = "tools." + nested + "(" + encoded + ")"
+	}
+	return "const result = await " + call + ";\n" +
+		"const output = (result && typeof result === \"object\" && typeof result.output === \"string\") ? result.output : String(result ?? \"\");\n" +
+		"text(output);\n"
+}
+
+func jsIdentifier(name string) bool {
+	if name == "" {
+		return false
+	}
+	for index, r := range name {
+		ok := r == '_' || r == '$' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
+		if index > 0 {
+			ok = ok || (r >= '0' && r <= '9')
+		}
+		if !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func jsonNoHTML(value any) string {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(value); err != nil {
+		fallback, _ := json.Marshal(value)
+		return string(fallback)
+	}
+	return strings.TrimRight(buf.String(), "\n")
 }
 
 func tokenProLocalImageWindows(body []byte, description string) bool {
@@ -364,12 +607,36 @@ func decodeLocalImageCommand(raw string) string {
 }
 
 func localImageOutputText(item gjson.Result) string {
-	output := item.Get("output")
+	return flattenLocalImageOutput(item.Get("output"))
+}
+
+// flattenLocalImageOutput reads a string, an exec result object, or the
+// content-item array Codex sends for a code-mode custom_tool_call_output.
+func flattenLocalImageOutput(output gjson.Result) string {
 	switch output.Type {
 	case gjson.String:
 		return output.String()
 	case gjson.JSON:
-		if text := output.Get("output").String(); text != "" {
+		if output.IsArray() {
+			var b strings.Builder
+			for _, part := range output.Array() {
+				switch part.Type {
+				case gjson.String:
+					_, _ = b.WriteString(part.String())
+					_ = b.WriteByte('\n')
+				default:
+					if text := part.Get("text").String(); text != "" {
+						_, _ = b.WriteString(text)
+						_ = b.WriteByte('\n')
+					}
+				}
+			}
+			return b.String()
+		}
+		if output.Get("output").Exists() {
+			return flattenLocalImageOutput(output.Get("output"))
+		}
+		if text := output.Get("text").String(); text != "" {
 			return text
 		}
 		return output.Raw
@@ -404,7 +671,7 @@ func localImageURLFromCommand(command string) string {
 		return ""
 	}
 	rest := command[index+len(tokenProLocalImageURLMarker):]
-	end := strings.IndexAny(rest, " \t\r\n'\"")
+	end := strings.IndexAny(rest, " \t\r\n'\"\\")
 	if end >= 0 {
 		rest = rest[:end]
 	}

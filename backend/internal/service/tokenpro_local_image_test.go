@@ -174,6 +174,114 @@ func TestTokenProLocalImageKeyIsolatesCallers(t *testing.T) {
 	require.Empty(t, TokenProLocalImageKey(nil, "call_tp_local_abc"))
 }
 
+func TestBuildTokenProLocalImageCallAcceptsShellCommandAndPrefixedNames(t *testing.T) {
+	bare := []byte(`{"tools":[{"type":"function","name":"shell_command"}]}`)
+	item, ok := BuildTokenProLocalImageCall(bare, "https://tokenpro.work/cat.png", "thread")
+	require.True(t, ok)
+	require.Equal(t, "function_call", item["type"])
+	require.Equal(t, "shell_command", item["name"])
+	require.Contains(t, localImageArgs(t, item).Get("cmd").String(), "curl -fsSL")
+
+	argv := []byte(`{"tools":[{"type":"function","name":"shell_command","parameters":{"type":"object","properties":{"command":{"type":"array","items":{"type":"string"}}}}}]}`)
+	item, ok = BuildTokenProLocalImageCall(argv, "https://tokenpro.work/cat.png", "thread")
+	require.True(t, ok)
+	require.Equal(t, "bash", localImageArgs(t, item).Get("command.0").String())
+
+	text := []byte(`{"tools":[{"type":"function","name":"team.shell_command","namespace":"team","parameters":{"properties":{"command":{"type":"string"}}}}]}`)
+	item, ok = BuildTokenProLocalImageCall(text, "https://tokenpro.work/cat.png", "thread")
+	require.True(t, ok)
+	require.Equal(t, "team.shell_command", item["name"])
+	require.Equal(t, "team", item["namespace"])
+	require.Contains(t, localImageArgs(t, item).Get("command").String(), "curl -fsSL")
+
+	prefixed := []byte(`{"tools":[{"type":"function","name":"functions__exec_command","description":"run"}]}`)
+	item, ok = BuildTokenProLocalImageCall(prefixed, "https://tokenpro.work/cat.png", "thread")
+	require.True(t, ok)
+	require.Equal(t, "functions__exec_command", item["name"])
+	require.Contains(t, localImageArgs(t, item).Get("cmd").String(), "TOKENPRO_IMAGE_PATH ")
+
+	exactWins := []byte(`{"tools":[
+		{"type":"function","name":"mcp__server__exec_command"},
+		{"type":"function","name":"exec_command"}
+	]}`)
+	item, ok = BuildTokenProLocalImageCall(exactWins, "https://tokenpro.work/cat.png", "thread")
+	require.True(t, ok)
+	require.Equal(t, "exec_command", item["name"])
+	require.Nil(t, item["namespace"])
+
+	_, ok = BuildTokenProLocalImageCall([]byte(`{"tools":[{"type":"function","name":"apply_patch"},{"type":"custom","name":"apply_patch"},{"type":"function","name":"exec"}]}`), "https://tokenpro.work/cat.png", "thread")
+	require.False(t, ok)
+}
+
+func TestBuildTokenProLocalImageCallUsesCodeModeExec(t *testing.T) {
+	body := []byte(`{"instructions":"sandbox_mode is danger-full-access","tools":[
+		{"type":"custom","name":"exec","description":"Run JavaScript. Example: await tools.exec_command(...).\n### ` + "`exec_command`" + `\n","format":{"type":"grammar","syntax":"lark","definition":"start: SOURCE"}},
+		{"type":"function","name":"wait","description":"resume a cell"}
+	]}`)
+	require.Equal(t, []string{"custom/exec", "function/wait"}, TokenProChatImageToolNames(body))
+	item, ok := BuildTokenProLocalImageCall(body, "https://tokenpro.work/cat.png?exp=1&sig=ff", "thread")
+	require.True(t, ok)
+	require.Equal(t, "custom_tool_call", item["type"])
+	require.Equal(t, "exec", item["name"])
+	require.Nil(t, item["namespace"])
+	input, ok := item["input"].(string)
+	require.True(t, ok)
+	require.Contains(t, input, "await tools.exec_command(")
+	require.Contains(t, input, "text(output)")
+	require.Contains(t, input, "curl -fsSL")
+	require.Contains(t, input, "tokenpro_image_url=https://tokenpro.work/cat.png?exp=1&sig=ff")
+	require.NotContains(t, input, `\u0026`)
+	require.NotContains(t, input, "sandbox_permissions")
+	require.NotContains(t, input, "```")
+
+	namespaced := []byte(`{"tools":[{"type":"namespace","name":"functions","tools":[
+		{"type":"custom","name":"exec","description":"### ` + "`shell`" + `\n","format":{"type":"grammar","syntax":"lark","definition":"start: SOURCE"}}
+	]}]}`)
+	require.Equal(t, []string{"namespace/functions", "custom/functions/exec"}, TokenProChatImageToolNames(namespaced))
+	item, ok = BuildTokenProLocalImageCall(namespaced, "https://tokenpro.work/cat.png", "thread")
+	require.True(t, ok)
+	require.Equal(t, "functions", item["namespace"])
+	input, ok = item["input"].(string)
+	require.True(t, ok)
+	require.Contains(t, input, "await tools.shell(")
+	require.Contains(t, input, `"command":["bash","-lc"`)
+	require.Contains(t, input, "require_escalated")
+
+	directWins := []byte(`{"tools":[
+		{"type":"custom","name":"exec","description":"### ` + "`exec_command`" + `\n"},
+		{"type":"function","name":"shell_command"}
+	]}`)
+	item, ok = BuildTokenProLocalImageCall(directWins, "https://tokenpro.work/cat.png", "thread")
+	require.True(t, ok)
+	require.Equal(t, "function_call", item["type"])
+	require.Equal(t, "shell_command", item["name"])
+
+	windows := []byte(`{"client_metadata":{"platform":"win32"},"tools":[{"type":"custom","name":"exec","description":"### ` + "`exec_command`" + `\n"}]}`)
+	item, ok = BuildTokenProLocalImageCall(windows, "https://tokenpro.work/cat.png", "thread")
+	require.True(t, ok)
+	input, ok = item["input"].(string)
+	require.True(t, ok)
+	require.Contains(t, input, "powershell.exe")
+	require.Contains(t, input, "Invoke-WebRequest")
+
+	callID, ok := item["call_id"].(string)
+	require.True(t, ok)
+	echoed, err := json.Marshal(map[string]any{"input": []any{
+		map[string]any{"role": "user", "content": "画一只猫"},
+		item,
+		map[string]any{"type": "custom_tool_call_output", "call_id": callID, "output": []any{
+			map[string]any{"type": "input_text", "text": "Script completed\nWall time 0.4 seconds\nOutput:\n"},
+			map[string]any{"type": "input_text", "text": "TOKENPRO_IMAGE_PATH /Users/me/.codex/generated_images/tokenpro/thread/abc.png"},
+		}},
+	}})
+	require.NoError(t, err)
+	follow, ok := ParseTokenProLocalImageFollowUp(echoed)
+	require.True(t, ok)
+	require.Equal(t, "https://tokenpro.work/cat.png", follow.URL)
+	require.Contains(t, follow.Output, "TOKENPRO_IMAGE_PATH /Users/me/.codex/generated_images/tokenpro/thread/abc.png")
+	require.Equal(t, "![](/Users/me/.codex/generated_images/tokenpro/thread/abc.png)\n图片已保存，可在对话里直接查看。", TokenProLocalImageAssistantText(follow.Output, follow.URL))
+}
+
 func localImageArgs(t *testing.T, item map[string]any) gjson.Result {
 	t.Helper()
 	raw, ok := item["arguments"].(string)
