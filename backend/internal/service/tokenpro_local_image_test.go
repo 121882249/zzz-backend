@@ -117,6 +117,29 @@ func TestBuildTokenProLocalImageCallLocalShellAndRejections(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestBuildTokenProLocalImageCallOmitsEscalationWhenUnrestricted(t *testing.T) {
+	restricted := []byte(`{"instructions":"sandbox_mode is workspace-write","client_metadata":{"sandbox_mode":"workspace-write","approval_policy":"on-request"},"input":"draw danger-full-access with sandbox none and approval never","tools":[{"type":"function","name":"exec_command"}]}`)
+	item, ok := BuildTokenProLocalImageCall(restricted, "https://tokenpro.work/cat.png", "thread")
+	require.True(t, ok)
+	args := localImageArgs(t, item)
+	require.Equal(t, "require_escalated", args.Get("sandbox_permissions").String())
+	require.True(t, args.Get("with_escalated_permissions").Bool())
+
+	for _, body := range []string{
+		`{"client_metadata":{"sandbox_mode":"danger-full-access"},"tools":[{"type":"function","name":"exec_command"}]}`,
+		`{"instructions":"The sandbox mode is none.","tools":[{"type":"function","name":"exec_command"}]}`,
+		`{"client_metadata":{"x-codex-turn-metadata":"{\"approval_policy\":\"never\",\"sandbox\":\"none\"}"},"tools":[{"type":"function","name":"shell"}]}`,
+		`{"instructions":"approval policy is never","tools":[{"type":"function","name":"exec_command"}]}`,
+	} {
+		item, ok = BuildTokenProLocalImageCall([]byte(body), "https://tokenpro.work/cat.png", "thread")
+		require.True(t, ok)
+		args = localImageArgs(t, item)
+		require.False(t, args.Get("sandbox_permissions").Exists(), body)
+		require.False(t, args.Get("with_escalated_permissions").Exists(), body)
+		require.False(t, args.Get("justification").Exists(), body)
+	}
+}
+
 func TestParseTokenProLocalImageFollowUp(t *testing.T) {
 	path := "/Users/me/.codex/generated_images/tokenpro/thread/abc.png"
 	body := followUpBody(t, "画一只猫", "TOKENPRO_IMAGE_PATH "+path, "tokenpro_image_url=https://tokenpro.work/cat.png", false)

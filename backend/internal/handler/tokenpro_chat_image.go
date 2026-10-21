@@ -79,6 +79,15 @@ func (h *OpenAIGatewayHandler) dispatchTokenProChatImage(c *gin.Context, apiKey 
 		h.finishTokenProChatImage(c, sse, model, text, nil, stream, mode)
 		return true
 	}
+	if text, ok := service.TokenProChatImageCheapReply(body); ok {
+		var sse *tokenProChatImageSSE
+		if stream {
+			sse = h.startTokenProChatImageSSE(c, model, streamStarted, "text-v1")
+			defer sse.stop()
+		}
+		h.finishTokenProChatImage(c, sse, model, text, nil, stream, "text-v1")
+		return true
+	}
 	prompt, err := service.ExtractTokenProChatImage(body)
 	if err != nil {
 		h.writeTokenProChatImageClientError(c, err, *streamStarted)

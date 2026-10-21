@@ -363,6 +363,57 @@ func (m *tokenProLocalImageMem) LookupLocalImage(_ context.Context, key string) 
 	return record, nil
 }
 
+func TestTokenProChatImageTitleReplayDoesNotBill(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, body := range [][]byte{
+		serviceTitleCapture(),
+		[]byte(strings.Replace(string(serviceTitleCapture()), `"tools": []`, `"tools":[{"type":"function","name":"exec_command","description":"run a command"}]`, 1)),
+	} {
+		require.Contains(t, string(body), "画一只猫")
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+		c.Set(service.TokenProNativeImagesContextKey, true)
+		var generated atomic.Int32
+		var billed atomic.Int32
+		h := &OpenAIGatewayHandler{}
+		h.chatImageGenerate = func(context.Context, *gin.Context, *service.APIKey, string, *service.TokenProChatImageRequest) (*tokenProChatImageGenerated, error) {
+			generated.Add(1)
+			return nil, nil
+		}
+		h.chatImageRecordUsage = func(*service.OpenAIRecordUsageInput) { billed.Add(1) }
+		started := false
+		handled := h.dispatchTokenProNativeImage(c, tokenProLocalChatImageKey(), "gpt-image-2.5-flare", service.PlatformOpenAI, body, true, &started)
+		require.True(t, handled)
+		require.Equal(t, int32(0), generated.Load())
+		require.Equal(t, int32(0), billed.Load())
+		require.Equal(t, "text-v1", rec.Header().Get("X-TokenPro-Chat-Image"))
+		var text string
+		for _, event := range parseTokenProSSE(t, rec.Body.String()) {
+			if event.Get("type").String() == "response.output_item.done" {
+				text = event.Get("item.content.0.text").String()
+			}
+		}
+		require.Equal(t, "画一只猫", gjson.Get(text, "title").String())
+		require.NotContains(t, rec.Body.String(), "图片已生成")
+		require.NotContains(t, rec.Body.String(), "function_call")
+	}
+}
+
+func serviceTitleCapture() []byte {
+	return []byte(`{
+  "model": "gpt-image-2.5-flare",
+  "stream": true,
+  "client_metadata": {
+    "thread_id": "22222222-2222-4222-8222-222222222222",
+    "x-codex-turn-metadata": "{\"thread_id\":\"22222222-2222-4222-8222-222222222222\",\"thread_source\":\"thread_title\"}"
+  },
+  "tools": [],
+  "text": {"format": {"type": "json_schema", "name": "thread_title", "strict": true, "schema": {"type": "object", "properties": {"title": {"type": "string", "minLength": 1, "maxLength": 36}}, "required": ["title"], "additionalProperties": false}}},
+  "input": [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Generate a concise, single-line task title of at most 36 characters and under five words where possible. Start with an imperative verb. Capitalize only the first word unless the user's language, proper nouns, acronyms, or code terms require otherwise. Preserve ticket references exactly. Write in the user's language. Do not use quotes, markdown, or trailing punctuation. Do not answer the request.\n\nUser prompt:\n画一只猫"}]}]
+}`)
+}
+
 func tokenProLocalChatImageKey() *service.APIKey {
 	key := tokenProChatImageKey()
 	key.ID = 9

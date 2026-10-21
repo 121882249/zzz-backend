@@ -142,31 +142,51 @@ func BuildTokenProLocalImageCall(body []byte, imageURL, threadID string) (map[st
 		}, true
 	case "shell":
 		args := map[string]any{
-			"command":                    tokenProLocalImageArgv(script, tool.windows),
-			"timeout_ms":                 60000,
-			"with_escalated_permissions": true,
-			"sandbox_permissions":        "require_escalated",
-			"justification":              "把生成的图片保存到本机，以便在对话里直接显示。",
+			"command":    tokenProLocalImageArgv(script, tool.windows),
+			"timeout_ms": 60000,
 		}
-		return localImageFunctionCall(tool, callID, fileID, args), true
+		return localImageFunctionCall(tool, callID, fileID, tokenProLocalImageEscalation(body, args)), true
 	default:
 		shell := "bash"
 		if tool.windows {
 			shell = "powershell.exe"
 		}
 		args := map[string]any{
-			"cmd":                        script,
-			"shell":                      shell,
-			"login":                      false,
-			"tty":                        false,
-			"yield_time_ms":              60000,
-			"max_output_tokens":          2000,
-			"with_escalated_permissions": true,
-			"sandbox_permissions":        "require_escalated",
-			"justification":              "把生成的图片保存到本机，以便在对话里直接显示。",
+			"cmd":               script,
+			"shell":             shell,
+			"login":             false,
+			"tty":               false,
+			"yield_time_ms":     60000,
+			"max_output_tokens": 2000,
 		}
-		return localImageFunctionCall(tool, callID, fileID, args), true
+		return localImageFunctionCall(tool, callID, fileID, tokenProLocalImageEscalation(body, args)), true
 	}
+}
+
+// tokenProLocalImageEscalation asks Codex to leave the sandbox when the
+// request is still sandboxed. danger-full-access, sandbox none, and approval
+// never already allow the download, and an extra approval field makes exec
+// wait instead of running.
+func tokenProLocalImageEscalation(body []byte, args map[string]any) map[string]any {
+	if tokenProLocalImageUnrestricted(body) {
+		return args
+	}
+	args["with_escalated_permissions"] = true
+	args["sandbox_permissions"] = "require_escalated"
+	args["justification"] = "把生成的图片保存到本机，以便在对话里直接显示。"
+	return args
+}
+
+var tokenProLocalImageUnrestrictedPattern = regexp.MustCompile(`(?i)danger-full-access|(?:sandbox(?:_mode)?|sandbox mode)\s*(?:["']?\s*[:=]\s*["']?|\bis\s+)none\b|sandbox\s+none\b|approval(?:_policy|\s+policy)?\s*(?:["']?\s*[:=]\s*["']?|\bis\s+)never\b|approval\s+never\b`)
+
+func tokenProLocalImageUnrestricted(body []byte) bool {
+	// The user prompt is not a signal. Codex records the live sandbox in
+	// instructions and client_metadata, including the nested turn-metadata JSON.
+	blob := gjson.GetBytes(body, "instructions").String() + "\n" + gjson.GetBytes(body, "client_metadata").Raw
+	if nested := gjson.GetBytes(body, "client_metadata.x-codex-turn-metadata").String(); gjson.Valid(nested) {
+		blob += "\n" + nested
+	}
+	return tokenProLocalImageUnrestrictedPattern.MatchString(blob)
 }
 
 type tokenProLocalImageTool struct {
