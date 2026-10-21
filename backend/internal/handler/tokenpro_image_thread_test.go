@@ -8,12 +8,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Wei-Shaw/sub2api/internal/repository"
 	"github.com/Wei-Shaw/sub2api/internal/service"
-	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 )
 
@@ -33,6 +30,52 @@ func (s *imageThreadSpy) LookupThread(ctx context.Context, key string) (service.
 	return s.threads.LookupThread(ctx, key)
 }
 
+// imageThreadMemStore is an in-memory TokenProImageTurnStore/ThreadStore so the
+// handler tests do not depend on the repository layer (depguard).
+type imageThreadMemStore struct {
+	mu      sync.Mutex
+	turns   map[string]service.TokenProImageTurnRoute
+	threads map[string]service.TokenProImageTurnRoute
+}
+
+func newImageThreadMemStore() *imageThreadMemStore {
+	return &imageThreadMemStore{turns: map[string]service.TokenProImageTurnRoute{}, threads: map[string]service.TokenProImageTurnRoute{}}
+}
+
+func (m *imageThreadMemStore) Bind(_ context.Context, key string, route service.TokenProImageTurnRoute) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.turns[key] = route
+	return nil
+}
+
+func (m *imageThreadMemStore) Lookup(_ context.Context, key string) (service.TokenProImageTurnRoute, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	route, ok := m.turns[key]
+	if !ok {
+		return service.TokenProImageTurnRoute{}, service.ErrImageTurnMissing
+	}
+	return route, nil
+}
+
+func (m *imageThreadMemStore) RememberThread(_ context.Context, key string, route service.TokenProImageTurnRoute) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.threads[key] = route
+	return nil
+}
+
+func (m *imageThreadMemStore) LookupThread(_ context.Context, key string) (service.TokenProImageTurnRoute, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	route, ok := m.threads[key]
+	if !ok {
+		return service.TokenProImageTurnRoute{}, service.ErrImageTurnMissing
+	}
+	return route, nil
+}
+
 type imageThreadFailStore struct{}
 
 func (imageThreadFailStore) Bind(context.Context, string, service.TokenProImageTurnRoute) error {
@@ -50,10 +93,7 @@ func (imageThreadFailStore) LookupThread(context.Context, string) (service.Token
 
 func TestImageFunctionCallStoresThreadBeforeResponse(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	rdb := miniredis.RunT(t)
-	client := redis.NewClient(&redis.Options{Addr: rdb.Addr()})
-	t.Cleanup(func() { _ = client.Close() })
-	base := repository.NewTokenProImageTurnStore(client)
+	base := newImageThreadMemStore()
 	groupA, groupB := int64(65), int64(77)
 	keyA := &service.APIKey{ID: 1, UserID: 9, Key: "key-a", KeyType: service.APIKeyTypeGlobal, GroupID: &groupA,
 		Group: &service.Group{ID: 65, Platform: service.PlatformOpenAI, Description: "生图"}}
@@ -75,7 +115,7 @@ func TestImageFunctionCallStoresThreadBeforeResponse(t *testing.T) {
 		return rec
 	}
 
-	spyA := &imageThreadSpy{TokenProImageTurnStore: base, threads: base.(service.TokenProImageThreadStore)}
+	spyA := &imageThreadSpy{TokenProImageTurnStore: base, threads: base}
 	recA := httptest.NewRecorder()
 	cA, _ := gin.CreateTestContext(recA)
 	spyA.writer = cA.Writer
@@ -88,14 +128,14 @@ func TestImageFunctionCallStoresThreadBeforeResponse(t *testing.T) {
 	require.Equal(t, 200, recA.Code, recA.Body.String())
 	require.True(t, spyA.rememberedBeforeResponse)
 	require.Contains(t, recA.Body.String(), `"name":"imagegen"`)
-	got, err := base.(service.TokenProImageThreadStore).LookupThread(context.Background(), service.TokenProImageThreadKey(keyA, threadA))
+	got, err := base.LookupThread(context.Background(), service.TokenProImageThreadKey(keyA, threadA))
 	require.NoError(t, err)
 	require.Equal(t, "gpt-image-2.5-flare", got.Model)
 	require.Equal(t, groupA, got.GroupID)
 
 	recSwitch := dispatch(keyA, threadA, "gpt-image-2.5-sunburst", base)
 	require.Equal(t, 200, recSwitch.Code, recSwitch.Body.String())
-	got, err = base.(service.TokenProImageThreadStore).LookupThread(context.Background(), service.TokenProImageThreadKey(keyA, threadA))
+	got, err = base.LookupThread(context.Background(), service.TokenProImageThreadKey(keyA, threadA))
 	require.NoError(t, err)
 	require.Equal(t, "gpt-image-2.5-sunburst", got.Model)
 
@@ -107,10 +147,10 @@ func TestImageFunctionCallStoresThreadBeforeResponse(t *testing.T) {
 		require.Equal(t, 200, rec.Code, rec.Body.String())
 	}()
 	wg.Wait()
-	other, err := base.(service.TokenProImageThreadStore).LookupThread(context.Background(), service.TokenProImageThreadKey(keyB, threadB))
+	other, err := base.LookupThread(context.Background(), service.TokenProImageThreadKey(keyB, threadB))
 	require.NoError(t, err)
 	require.Equal(t, "gpt-image-1.5", other.Model)
-	stillA, err := base.(service.TokenProImageThreadStore).LookupThread(context.Background(), service.TokenProImageThreadKey(keyA, threadA))
+	stillA, err := base.LookupThread(context.Background(), service.TokenProImageThreadKey(keyA, threadA))
 	require.NoError(t, err)
 	require.Equal(t, "gpt-image-2.5-sunburst", stillA.Model)
 

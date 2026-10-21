@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
-	"github.com/Wei-Shaw/sub2api/internal/repository"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -23,8 +22,6 @@ import (
 	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 )
-
-const tokenProChatImageDownloadPath = "/v1/tokenpro/images/"
 
 type tokenProChatImageGenerated struct {
 	Bytes       []byte
@@ -204,13 +201,13 @@ func serviceContentType(contentType string) string {
 }
 
 func (h *OpenAIGatewayHandler) tokenProChatImageObjectStorage() service.ImageStorage {
-	if h == nil || h.cfg == nil || !h.cfg.ImageStorage.Active() {
+	if h == nil || h.cfg == nil || !h.cfg.ImageStorage.Active() || h.chatImageStorageFactory == nil {
 		return nil
 	}
 	h.chatImageObjectOnce.Do(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		storage, err := repository.NewS3ImageStorage(ctx, &h.cfg.ImageStorage)
+		storage, err := h.chatImageStorageFactory(ctx, &h.cfg.ImageStorage)
 		if err != nil {
 			h.chatImageObjectErr = err
 			service.LogTokenProChatImageUpstreamError(fmt.Errorf("object storage init: %w", err))
@@ -444,7 +441,7 @@ func downloadTokenProChatImage(ctx context.Context, imageURL string) ([]byte, st
 	if err != nil {
 		return nil, "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 300 {
 		return nil, "", fmt.Errorf("image download status %d", resp.StatusCode)
 	}

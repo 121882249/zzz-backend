@@ -55,7 +55,8 @@ func TestImageThreadStoreLatestWinsAndIsolatesKeys(t *testing.T) {
 	r := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: r.Addr()})
 	t.Cleanup(func() { _ = client.Close() })
-	store := NewTokenProImageTurnStore(client).(service.TokenProImageThreadStore)
+	store, ok := NewTokenProImageTurnStore(client).(service.TokenProImageThreadStore)
+	require.True(t, ok)
 	ctx := context.Background()
 	key := &service.APIKey{ID: 7, UserID: 8, Key: "key-a"}
 	thread := "11111111-1111-4111-8111-111111111111"

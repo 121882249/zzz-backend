@@ -52,15 +52,16 @@ type OpenAIGatewayHandler struct {
 	cfg                        *config.Config
 	// Chat-image hooks are nil in production. Tests use them to avoid a live
 	// scheduler while still exercising SSE, billing and URL publishing.
-	chatImageGenerate      tokenProChatImageGenerator
-	chatImagePublish       tokenProChatImagePublisher
-	chatImageRecordUsage   tokenProChatImageUsageRecorder
-	chatImageKeepalive     time.Duration
-	chatImageFiles         *service.TokenProChatImageFiles
-	chatImageFilesOnce     sync.Once
-	chatImageObjectStorage service.ImageStorage
-	chatImageObjectErr     error
-	chatImageObjectOnce    sync.Once
+	chatImageGenerate       tokenProChatImageGenerator
+	chatImagePublish        tokenProChatImagePublisher
+	chatImageRecordUsage    tokenProChatImageUsageRecorder
+	chatImageKeepalive      time.Duration
+	chatImageFiles          *service.TokenProChatImageFiles
+	chatImageFilesOnce      sync.Once
+	chatImageObjectStorage  service.ImageStorage
+	chatImageStorageFactory service.ImageStorageFactory
+	chatImageObjectErr      error
+	chatImageObjectOnce     sync.Once
 }
 
 // SetGlobalGroupResolver wires the shared request-scoped global-key resolver.

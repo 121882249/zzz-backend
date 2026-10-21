@@ -138,6 +138,7 @@ func ProvideOpenAIGatewayHandler(
 	cfg *config.Config,
 	coordinator *securityaudit.Coordinator,
 	compositeResolver *service.CompositeRouteResolver,
+	imageStorageFactory service.ImageStorageFactory,
 ) *OpenAIGatewayHandler {
 	gatewayService.SetPluginManager(pluginManager)
 	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, apiKeyService,
@@ -146,6 +147,7 @@ func ProvideOpenAIGatewayHandler(
 	h.securityAuditCoordinator = coordinator
 	h.SetGlobalGroupResolver(globalGroupResolver)
 	h.grokMediaEligibilityProber = grokQuotaService
+	h.chatImageStorageFactory = imageStorageFactory
 	return h
 }
 

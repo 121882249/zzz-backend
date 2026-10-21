@@ -26,7 +26,8 @@ func TestImageThreadBindingSwitchAndConcurrentThreads(t *testing.T) {
 	client := redis.NewClient(&redis.Options{Addr: rdb.Addr()})
 	t.Cleanup(func() { _ = client.Close() })
 	store := repository.NewTokenProImageTurnStore(client)
-	threads := store.(service.TokenProImageThreadStore)
+	threads, ok := store.(service.TokenProImageThreadStore)
+	require.True(t, ok)
 	key := &service.APIKey{ID: 1, UserID: 2, Key: "fixture", KeyType: service.APIKeyTypeGlobal}
 	r := gin.New()
 	r.Use(func(c *gin.Context) { c.Set(string(ContextKeyAPIKey), key); c.Next() })
