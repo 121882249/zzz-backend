@@ -331,11 +331,14 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		}
 		if err != nil {
 			if result != nil && result.ImageCount > 0 {
+				// An error reached the client; partial images are not billed.
 				reqLog.Warn("openai_chat_completions.forward_partial_error_with_image_result",
 					zap.Int64("account_id", account.ID),
 					zap.Int("image_count", result.ImageCount),
+					zap.Bool("billed", false),
 					zap.Error(err),
 				)
+				return
 			} else {
 				var failoverErr *service.UpstreamFailoverError
 				if errors.As(err, &failoverErr) {
@@ -414,7 +417,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 					zap.Bool("upstream_error_response_already_written", upstreamErrorAlreadyCommunicated),
 					zap.Error(err),
 				)
-				submitChatUsage(result)
+				// Error delivered to the client: do not bill partial usage.
 				return
 			}
 		}

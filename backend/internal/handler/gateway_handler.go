@@ -1112,8 +1112,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				// Forward 与错误一起返回的部分结果：流中断前上游已计量的 usage 照常入账，
 				// 避免上游已产生消耗的请求完全漏记（#5148）。failover 错误恒定 result=nil，
 				// 不会走到这里重复计费。
+				// 客户端已收到错误：失败请求一律不计费（即便上游已计量部分 usage）。
 				if result != nil {
-					submitForwardUsage(result)
 					// 上游已接受并计量本次会话（流中断），会话槽保持既有语义
 					upstreamServedSession = true
 				}

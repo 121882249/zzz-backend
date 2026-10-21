@@ -10,11 +10,19 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"github.com/tidwall/gjson"
 )
 
 const TokenProImageTurnContextKey = "tokenpro_image_turn_v2"
 const TokenProImageSessionContextKey = "tokenpro_image_session_v2"
+const TokenProImageThreadBoundContextKey = "tokenpro_image_thread_bound"
 const TokenProImageTurnTTL = 30 * time.Minute
+const TokenProImageThreadTTL = 24 * time.Hour
+
+// ErrTokenProImageThreadUnbound means a Codex turn named a thread but the
+// latest image model could not be recorded before the function_call returned.
+var ErrTokenProImageThreadUnbound = errors.New("无法记录本次对话的生图模型，没有改用其他模型。")
 
 var ErrImageTurnMissing = errors.New("image turn route missing or expired")
 var ErrImageTurnConflict = errors.New("image turn route conflicts with existing selection")
@@ -35,6 +43,27 @@ type TokenProImageTurnRoute struct {
 type TokenProImageTurnStore interface {
 	Bind(context.Context, string, TokenProImageTurnRoute) error
 	Lookup(context.Context, string) (TokenProImageTurnRoute, error)
+}
+
+// TokenProImageThreadStore remembers the latest image-group chat model for one
+// Codex thread. Unlike the per-turn record, a later turn overwrites it.
+type TokenProImageThreadStore interface {
+	RememberThread(context.Context, string, TokenProImageTurnRoute) error
+	LookupThread(context.Context, string) (TokenProImageTurnRoute, error)
+}
+
+// TokenProImageThreadKey isolates a thread binding by the caller's global key.
+// Thread IDs are correlation hints, never credentials.
+func TokenProImageThreadKey(key *APIKey, thread string) string {
+	sum := sha256.Sum256([]byte(key.Key))
+	return fmt.Sprintf("tokenpro:image-thread:v1:%d:%d:%s:%s", key.UserID, key.ID, hex.EncodeToString(sum[:]), thread)
+}
+
+// ValidTokenProCorrelationID accepts the canonical UUID Codex puts in
+// client_metadata.thread_id and x-codex-turn-metadata.thread_id.
+func ValidTokenProCorrelationID(value string) bool {
+	id, err := uuid.Parse(value)
+	return err == nil && id != uuid.Nil && id.String() == value
 }
 
 // Pending metadata is installed by ingress but bound only after the handler
@@ -115,5 +144,40 @@ func BindTokenProImageTurn(c *gin.Context, key *APIKey) error {
 	}
 	c.Set(TokenProNativeImagesContextKey, pure)
 	c.Set(TokenProTextImageDeliveryContextKey, textDelivery)
+	return nil
+}
+
+// RememberTokenProImageThread records (api key, thread) -> this turn's image
+// model. Call it before any byte of the image_gen.imagegen function_call is
+// written. A turn without a Codex thread id is unchanged. A turn that names a
+// thread must be stored or the function_call is not returned.
+func RememberTokenProImageThread(c *gin.Context, key *APIKey, model string, body []byte) error {
+	if c == nil || c.Request == nil {
+		return ErrTokenProImageThreadUnbound
+	}
+	threadID := ""
+	var store TokenProImageThreadStore
+	if v, ok := c.Get(TokenProImageTurnContextKey); ok {
+		if pending, _ := v.(*TokenProPendingImageTurn); pending != nil {
+			threadID = strings.TrimSpace(pending.ThreadID)
+			store, _ = pending.Store.(TokenProImageThreadStore)
+		}
+	}
+	if threadID == "" {
+		threadID = strings.TrimSpace(gjson.GetBytes(body, "client_metadata.thread_id").String())
+	}
+	if !ValidTokenProCorrelationID(threadID) {
+		return nil
+	}
+	if key == nil || key.GroupID == nil || *key.GroupID <= 0 || strings.TrimSpace(model) == "" || store == nil {
+		return ErrTokenProImageThreadUnbound
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+	defer cancel()
+	if err := store.RememberThread(ctx, TokenProImageThreadKey(key, threadID), TokenProImageTurnRoute{
+		GroupID: *key.GroupID, Model: strings.TrimSpace(model), ThreadID: threadID,
+	}); err != nil {
+		return fmt.Errorf("%w: %v", ErrTokenProImageThreadUnbound, err)
+	}
 	return nil
 }

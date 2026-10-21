@@ -49,3 +49,12 @@ Use a unique R54 image. Deploy the backend before releasing the native-v1 deskto
 configuration, retain the previous compose file/image, then smoke-test opted-in
 pure, text-only and mixed selections against the deployed backend. Never count a
 model's textual success claim as successful image delivery.
+
+## Chat-model image URL
+
+Later desktop builds select the image model as the chat model and do not send
+`image_gen.imagegen`. That path generates the image on the backend and returns
+an HTTPS URL in assistant `output_text`. The native-v1 function call above is
+unchanged when the request tools actually include `image_gen.imagegen`.
+Configure `image_storage` (HTTPS URL) or `gateway.tokenpro_image_public_base_url`
+plus `gateway.tokenpro_image_url_secret`. See `deploy/config.example.yaml`.

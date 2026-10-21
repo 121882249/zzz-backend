@@ -526,6 +526,25 @@ gateway:
     # Max image requests waiting in this process when overflow_mode=wait, 0=unlimited
     # wait 模式当前进程允许排队等待的图片请求数，0=不限制
     max_waiting_requests: 100
+  # Codex 把生图模型当作聊天模型、且请求里没有 image_gen.imagegen 工具时，
+  # 后端自己生图，并在 assistant output_text 里返回 HTTPS 图片链接。
+  # 优先使用本文件后面的 image_storage：启用且凭证齐全，并且 Save 返回 https URL
+  # （public_base_url 或 presigned）时直接用该地址。
+  # 否则使用下面的签名下载链接。两项都不配时，请求会返回中文配置错误，不会回传 data URI。
+  #
+  # 公网源站，不要带 /v1。最终链接形如：
+  # https://tokenpro.work/v1/tokenpro/images/<64位hex>?exp=<unix>&sig=<hmac>
+  # 该 GET 不需要 API Key，签名本身就是访问控制。
+  tokenpro_image_public_base_url: ""
+  # 签名密钥。重启和所有副本必须一致，否则旧链接全部失效。
+  tokenpro_image_url_secret: ""
+  # 签名链接有效期（小时）。0 表示默认 168（7 天）。
+  tokenpro_image_url_ttl_hours: 0
+  # 未使用对象存储时，图片字节写在这个目录。空值表示 data/tokenpro-chat-images。
+  tokenpro_image_store_dir: ""
+  # 生图期间 SSE 保活间隔（秒）。0 表示默认 10。
+  # 发送 Codex 会忽略但不报错的 response.in_progress。SSE 注释不能保活。
+  tokenpro_chat_image_keepalive_seconds: 0
   # SSE max line size in bytes (default: 40MB)
   # SSE 单行最大字节数（默认 40MB）
   max_line_size: 41943040

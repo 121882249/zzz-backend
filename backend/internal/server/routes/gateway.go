@@ -33,6 +33,12 @@ func RegisterGatewayRoutes(
 	cfg *config.Config,
 	imageTurnStores ...service.TokenProImageTurnStore,
 ) {
+	// Signed chat-image downloads are authorized by the URL itself. Register
+	// them before the /v1 API-key group so Codex can open the HTTPS link.
+	if h != nil && h.OpenAIGateway != nil {
+		r.GET("/v1/tokenpro/images/:id", h.OpenAIGateway.TokenProChatImageDownload)
+	}
+
 	bodyLimit := middleware.RequestBodyLimit(cfg.Gateway.MaxBodySize)
 	textBodyLimit := middleware.RequestBodyLimit(cfg.Gateway.TextMaxBodySize)
 	clientRequestID := middleware.ClientRequestID()

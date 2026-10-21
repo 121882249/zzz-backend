@@ -749,7 +749,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 	defer func() { _ = resp.Body.Close() }()
 
 	var usage OpenAIUsage
-	imageCount := parsed.N
+	var imageCount int
 	var firstTokenMs *int
 	if parsed.Stream && isEventStreamResponse(resp.Header) {
 		streamUsage, streamCount, streamSizes, ttft, err := s.handleOpenAIImagesStreamingResponse(resp, c, startTime, nil)
@@ -798,9 +798,9 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 			return nil, err
 		}
 		usage = nonStreamUsage
-		if nonStreamCount > 0 {
-			imageCount = nonStreamCount
-		}
+		// Bill only images actually present in the delivered body; an upstream
+		// 2xx without image data must not be billed as parsed.N images.
+		imageCount = nonStreamCount
 		return &OpenAIForwardResult{
 			RequestID:        resp.Header.Get("x-request-id"),
 			UpstreamHeaders:  resp.Header,
@@ -877,6 +877,12 @@ func (s *OpenAIGatewayService) buildOpenAIImagesRequest(
 
 func buildOpenAIImagesURL(base string, endpoint string) string {
 	return buildOpenAIEndpointURL(base, endpoint)
+}
+
+// RewriteOpenAIImagesModel replaces the public model in a JSON or multipart
+// Images body. Callers use it before scheduling so billing sees the replacement.
+func RewriteOpenAIImagesModel(body []byte, contentType string, model string) ([]byte, string, error) {
+	return rewriteOpenAIImagesModel(body, contentType, model)
 }
 
 func rewriteOpenAIImagesModel(body []byte, contentType string, model string) ([]byte, string, error) {

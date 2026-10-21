@@ -50,3 +50,33 @@ func TestImageTurnStoreIsolationConflictExpiry(t *testing.T) {
 	r.Close()
 	require.Error(t, a.Bind(ctx, index, route))
 }
+
+func TestImageThreadStoreLatestWinsAndIsolatesKeys(t *testing.T) {
+	r := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: r.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	store, ok := NewTokenProImageTurnStore(client).(service.TokenProImageThreadStore)
+	require.True(t, ok)
+	ctx := context.Background()
+	key := &service.APIKey{ID: 7, UserID: 8, Key: "key-a"}
+	thread := "11111111-1111-4111-8111-111111111111"
+	index := service.TokenProImageThreadKey(key, thread)
+	first := service.TokenProImageTurnRoute{GroupID: 65, Model: "gpt-image-2.5-flare", ThreadID: thread}
+	require.NoError(t, store.RememberThread(ctx, index, first))
+	next := first
+	next.Model = "gpt-image-2.5-sunburst"
+	require.NoError(t, store.RememberThread(ctx, index, next))
+	got, err := store.LookupThread(ctx, index)
+	require.NoError(t, err)
+	require.Equal(t, next, got)
+	otherThread := service.TokenProImageThreadKey(key, "22222222-2222-4222-8222-222222222222")
+	_, err = store.LookupThread(ctx, otherThread)
+	require.ErrorIs(t, err, service.ErrImageTurnMissing)
+	rotated := *key
+	rotated.Key = "key-b"
+	_, err = store.LookupThread(ctx, service.TokenProImageThreadKey(&rotated, thread))
+	require.ErrorIs(t, err, service.ErrImageTurnMissing)
+	r.FastForward(24 * time.Hour)
+	_, err = store.LookupThread(ctx, index)
+	require.ErrorIs(t, err, service.ErrImageTurnMissing)
+}

@@ -1091,6 +1091,18 @@ type GatewayConfig struct {
 	ImageStreamKeepaliveInterval int `mapstructure:"image_stream_keepalive_interval"`
 	// ImageNonstreamKeepaliveInterval: 图片非流式 JSON keepalive 间隔（秒），0表示禁用
 	ImageNonstreamKeepaliveInterval int `mapstructure:"image_nonstream_keepalive_interval"`
+	// TokenProImagePublicBaseURL 是聊天生图下载链接的公网 HTTPS 源站，例如 https://tokenpro.work。
+	// 不要带 /v1。未启用 image_storage，或对象存储返回的地址不是 HTTPS 时，必须同时配置本项和签名密钥。
+	TokenProImagePublicBaseURL string `mapstructure:"tokenpro_image_public_base_url"`
+	// TokenProImageURLTTLHours 是签名下载链接的有效期（小时）。0 表示默认 168（7 天）。
+	TokenProImageURLTTLHours int `mapstructure:"tokenpro_image_url_ttl_hours"`
+	// TokenProImageURLSecret 是下载链接的 HMAC 密钥，重启和多副本之间必须保持一致。
+	TokenProImageURLSecret string `mapstructure:"tokenpro_image_url_secret"`
+	// TokenProImageStoreDir 是未使用对象存储时的本地图片目录。空值表示 data/tokenpro-chat-images。
+	TokenProImageStoreDir string `mapstructure:"tokenpro_image_store_dir"`
+	// TokenProChatImageKeepaliveSeconds 是聊天生图 SSE 的 response.in_progress 间隔（秒）。
+	// 0 表示默认 10。Codex 只在解析出 SSE 事件时重置空闲计时，注释行不能保活。
+	TokenProChatImageKeepaliveSeconds int `mapstructure:"tokenpro_chat_image_keepalive_seconds"`
 	// MaxLineSize: 上游 SSE 单行最大字节数（0使用默认值）
 	MaxLineSize int `mapstructure:"max_line_size"`
 
@@ -2305,6 +2317,12 @@ func setDefaults() {
 	viper.SetDefault("image_storage.access_key_id", "")
 	viper.SetDefault("image_storage.secret_access_key", "")
 	viper.SetDefault("image_storage.public_base_url", "")
+	// Codex chat-image URL settings: register so GATEWAY_TOKENPRO_* env vars work.
+	viper.SetDefault("gateway.tokenpro_image_public_base_url", "")
+	viper.SetDefault("gateway.tokenpro_image_url_secret", "")
+	viper.SetDefault("gateway.tokenpro_image_url_ttl_hours", 0)
+	viper.SetDefault("gateway.tokenpro_image_store_dir", "")
+	viper.SetDefault("gateway.tokenpro_chat_image_keepalive_seconds", 0)
 
 	// Ops (vNext)
 	viper.SetDefault("ops.enabled", true)
@@ -3463,6 +3481,19 @@ func (c *Config) Validate() error {
 	if c.Gateway.ImageNonstreamKeepaliveInterval != 0 &&
 		(c.Gateway.ImageNonstreamKeepaliveInterval < 5 || c.Gateway.ImageNonstreamKeepaliveInterval > 60) {
 		return fmt.Errorf("gateway.image_nonstream_keepalive_interval must be 0 or between 5-60 seconds")
+	}
+	if base := strings.TrimSpace(c.Gateway.TokenProImagePublicBaseURL); base != "" {
+		parsed, err := url.Parse(base)
+		if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+			return fmt.Errorf("gateway.tokenpro_image_public_base_url must be an https URL")
+		}
+	}
+	if c.Gateway.TokenProImageURLTTLHours < 0 || c.Gateway.TokenProImageURLTTLHours > 8760 {
+		return fmt.Errorf("gateway.tokenpro_image_url_ttl_hours must be 0 (default 168) or between 1 and 8760")
+	}
+	if c.Gateway.TokenProChatImageKeepaliveSeconds < 0 ||
+		(c.Gateway.TokenProChatImageKeepaliveSeconds != 0 && (c.Gateway.TokenProChatImageKeepaliveSeconds < 1 || c.Gateway.TokenProChatImageKeepaliveSeconds > 60)) {
+		return fmt.Errorf("gateway.tokenpro_chat_image_keepalive_seconds must be 0 (default 10) or between 1 and 60")
 	}
 	// 兼容旧键 sticky_previous_response_ttl_seconds
 	if c.Gateway.OpenAIWS.StickyResponseIDTTLSeconds <= 0 && c.Gateway.OpenAIWS.StickyPreviousResponseTTLSeconds > 0 {

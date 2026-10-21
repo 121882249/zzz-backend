@@ -68,6 +68,18 @@ Codex OAuth/SetupToken 账号的原生图片接口独立于文本模型映射。
 
 图片权限由分组 `allow_image_generation` 控制。上游改 wire 依赖时要重新生成 `cmd/server/wire_gen.go`，不要手工拼接。
 
+当聊天模型本身是生图模型（分组 `description` 去空白后等于 `生图`），并且请求**没有**携带 `image_gen.imagegen` 工具时，后端直接生图，在 Responses 的 assistant `output_text` 里返回 HTTPS 链接，例如 `图片已生成：https://tokenpro.work/...`。请求工具里真有 `image_gen.imagegen`，或历史里已有 `call_tp_pure_` / `call_tp_receipt_` 时，仍走原来的 native-v1 function call，不在这里生图。
+
+链接优先来自已启用的 `image_storage`（必须是 HTTPS，公开域名或 presigned 都可以）。没有可用对象存储时，使用签名下载：
+
+- `gateway.tokenpro_image_public_base_url`：公网 HTTPS 源站，例如 `https://tokenpro.work`，不要带 `/v1`。
+- `gateway.tokenpro_image_url_secret`：HMAC 密钥，重启和多副本必须相同。
+- `gateway.tokenpro_image_url_ttl_hours`：有效期，`0` 表示 7 天。
+- `gateway.tokenpro_image_store_dir`：本地文件目录，空值是 `data/tokenpro-chat-images`。
+- `gateway.tokenpro_chat_image_keepalive_seconds`：生图 SSE 的 `response.in_progress` 间隔，`0` 表示 10 秒。
+
+下载路由是 `GET /v1/tokenpro/images/:id?exp=&sig=`，注册在 API Key 鉴权之外，签名错误返回 404，过期返回 410 并删除文件。两项存储都没配好时返回中文配置错误，不回传 data URI。示例见 `deploy/config.example.yaml`。
+
 账号 Extra 开关 `openai_response_model_rewrite_enabled`（`be/service/account.go`）控制 OpenAI 响应模型名回写，与全局 Key 路由一起保留。
 
 ## 5. 支付与计费二开

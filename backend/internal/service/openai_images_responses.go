@@ -1998,9 +1998,8 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 			)
 		}
 	}
-	if imageCount <= 0 {
-		imageCount = parsed.N
-	}
+	// Do not assume parsed.N images when none were observed: billing must
+	// reflect images actually delivered to the client.
 	return &OpenAIForwardResult{
 		RequestID:                     resp.Header.Get("x-request-id"),
 		UpstreamHeaders:               resp.Header,
