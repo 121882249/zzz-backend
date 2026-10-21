@@ -632,15 +632,50 @@ func (s *UpdateService) getFromCache(ctx context.Context) (*UpdateInfo, error) {
 // currentUpstreamVersion exposes the Sub2API release contained in this build.
 // TokenPro uses its own operator-facing revision, so comparing that revision
 // directly with Sub2API semver would hide or invent update notifications.
+// A label that is not X.Y.Z, X.Y.Z-tp.N, or TokenPro-R*-vX.Y.Z falls back to
+// tokenProUpstreamVersion. That keeps a build stamp such as PR7-a34e450 from
+// parsing as 0.0.0 and looking older than the upstream release it contains.
 func (s *UpdateService) currentUpstreamVersion() string {
-	v := strings.TrimPrefix(strings.TrimSpace(s.currentVersion), "v")
+	if upstream := tokenProComparableUpstream(s.currentVersion); upstream != "" {
+		return upstream
+	}
+	return tokenProUpstreamVersion
+}
+
+func tokenProComparableUpstream(raw string) string {
+	v := strings.TrimPrefix(strings.TrimSpace(raw), "v")
+	if v == "" {
+		return ""
+	}
 	if strings.HasPrefix(v, "TokenPro-R") {
 		return tokenProBuildUpstreamVersion(v)
 	}
+	core := v
 	if idx := strings.IndexByte(v, '-'); idx != -1 {
-		return v[:idx]
+		core = v[:idx]
 	}
-	return v
+	if !semverCore(core) {
+		return ""
+	}
+	return core
+}
+
+func semverCore(v string) bool {
+	parts := strings.Split(v, ".")
+	if len(parts) != 3 {
+		return false
+	}
+	for _, part := range parts {
+		if part == "" {
+			return false
+		}
+		for _, r := range part {
+			if r < '0' || r > '9' {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // tokenProBuildUpstreamVersion extracts the upstream Sub2API semver embedded

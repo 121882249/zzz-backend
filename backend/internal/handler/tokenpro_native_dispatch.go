@@ -17,7 +17,9 @@ import (
 // image permission, concurrency, billing eligibility and session-block checks.
 // Requests that actually carry image_gen.imagegen, or that continue a native
 // call id, keep the function_call protocol. Every other pure-image chat turn
-// is generated here and answered with an HTTPS URL.
+// is generated here. A client that advertises a shell tool receives a download
+// call so Codex desktop can render a local markdown image. Without that tool
+// the reply stays HTTPS link text.
 func (h *OpenAIGatewayHandler) dispatchTokenProNativeImage(c *gin.Context, apiKey *service.APIKey, model, platform string, body []byte, stream bool, streamStarted *bool) bool {
 	if !service.TokenProNativeImages(c) || !service.IsGPTImageGenerationModel(model) ||
 		!isBareOpenAIResponsesPath(c) || service.IsOpenAIResponsesCompactPath(c) ||

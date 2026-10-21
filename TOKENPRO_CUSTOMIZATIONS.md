@@ -1,6 +1,6 @@
 # TokenPro 二次开发清单
 
-当前分支以 Sub2API `v0.2.17`（`060d016`）为底层版本，发行名 `TokenPro-R83-v0.2.17`。`backend/internal/service/update_service.go` 中的 `tokenProUpstreamVersion` 为 `0.2.17`，`backend/cmd/server/VERSION` 为 `TokenPro-R83-v0.2.17`。此文件用于后续升级时区分上游改动和本项目改动。
+当前分支以 Sub2API `v0.2.17`（`060d016`）为底层版本。构建版本是 `0.2.17-tp.84`：`backend/cmd/server/VERSION` 为 `0.2.17-tp.84`，`backend/internal/service/update_service.go` 中的 `tokenProUpstreamVersion` 为 `0.2.17`。管理端按数字核心比较上游，`0.2.17-tp.N` 与上游 `v0.2.17` 相同，不会提示可更新。此文件用于后续升级时区分上游改动和本项目改动。
 
 下文路径中 `backend/internal/` 简写为 `be/`，`frontend/src/` 简写为 `fe/`。
 
@@ -115,7 +115,7 @@ v0.2.17 重写了退款（待定期间保留扣减，网关失败后原子回退
 
 ## 9. 品牌、文档与部署
 
-- TokenPro 版本号显示 `TokenPro-Rxx-v0.2.x`，以及上游版本映射 `tokenProUpstreamVersion`。
+- 构建版本号是 semver `X.Y.Z-tp.N`（当前 `0.2.17-tp.84`）。管理端徽章对非 `TokenPro-` 前缀补一个 `v`，所以界面显示 `v0.2.17-tp.84`。上游是否可更新只比较 `tokenProUpstreamVersion` 解析出的 `X.Y.Z`。
 - 管理员登录后检查底层新版本；同一浏览器会话对同一版本只提醒一次。
 - Agent 使用文档页面、菜单、样式和中英文内容。
 - 低内存 Docker 构建文件 `deploy/Dockerfile.lowmem`（Go 1.27.2，需与 `go.mod` 一致）。
@@ -155,12 +155,33 @@ R83 升级删除了以下误提交的备份文件，后续不要再提交 `*.bef
 - `fe/views/user/StripePaymentView.vue.before-operation-complete-20260905`
 - `fe/views/user/StripePaymentView.vue.before-payment-guard-20260905`
 
+## 构建版本号
+
+生产包曾经把 `PR7-a34e450` 写进 `-X main.Version`。管理端显示 `vPR7-a34e450`，更新检查把它解析成 `0.0.0`，于是基于上游 `v0.2.17` 的构建也被提示“有新版本 v0.2.17”。
+
+版本从这三处进入二进制，后者覆盖前者：
+
+1. `backend/cmd/server/VERSION`，由 `backend/cmd/server/main.go` 的 `//go:embed VERSION` 打进二进制。
+2. 精确 git 标签（`vX.Y.Z`、`X.Y.Z-tp.N` 或旧的 `TokenPro-R<N>-vX.Y.Z`）。`backend/scripts/resolve-version.sh` 会去掉一个前导 `v`。
+3. 编译参数 `-X main.Version=`。Docker 的 `VERSION` 构建参数走这个路径。根目录 `Dockerfile`、`backend/Dockerfile`、`deploy/Dockerfile`、`deploy/Dockerfile.lowmem` 都调用 `./scripts/resolve-version.sh "${VERSION:-}"`。
+
+脚本只接受 `X.Y.Z`、`X.Y.Z-tp.N` 和 `TokenPro-R<N>-vX.Y.Z`。`PR7-a34e450` 这类标签会被丢掉，然后改用 VERSION 文件；文件本身也不合法时构建失败。镜像 CI（`.github/workflows/tokenpro-server-image.yml`）用同一规则校验 VERSION 文件，再把它作为 `VERSION` 构建参数传入。
+
+以后这样改版本：
+
+- 仍基于当前上游、只发 TokenPro 改动：把 `backend/cmd/server/VERSION` 的 `tp.N` 加一，例如 `0.2.17-tp.85`。不要改 `tokenProUpstreamVersion`。
+- 合并新的上游正式标签：把 `tokenProUpstreamVersion` 改成该标签的 `X.Y.Z`，并把 VERSION 文件写成 `X.Y.Z-tp.1`。
+- 手工或 CI 构建时，`VERSION` 构建参数必须是上述三种格式之一，并且和 VERSION 文件一致。不要再传入 PR 号或短 SHA。
+- 更新检查比较的是数字核心，不把 `-tp.N` 当成预发布。`0.2.17-tp.84` 等于上游 `0.2.17`；上游变成 `0.2.18` 才提示可更新。无法解析的当前版本按 `tokenProUpstreamVersion` 比较，不再当成 `0.0.0`。旧发行名 `TokenPro-R28`（没有 `-vX.Y.Z`）仍回落到这个常量。
+
+本地确认：`backend/scripts/resolve-version.sh`、`backend/scripts/resolve-version.sh 0.2.17-tp.84` 应打印版本；`backend/scripts/resolve-version.sh PR7-a34e450` 应忽略参数并打印 VERSION 文件。
+
 ## 后续升级约定
 
 1. 只合并上游正式标签，使用 `git merge`，不用 rebase。先读 `tokenProUpstreamVersion` 和 `VERSION`，确认上一个底层标签是历史合并提交的第二父提交。
 2. 冲突优先同时保留上游修复和上述 TokenPro 行为，不以整文件覆盖。Gemini 与平台校验类冲突按第 3 节的四步顺序处理。
 3. schema 冲突时先合 `ent/schema/*.go`，再 `go generate ./ent`；wire 变更后重新生成 `cmd/server/wire_gen.go`，然后 `go mod tidy`。
-4. 每次升级同步 `tokenProUpstreamVersion` 与 `backend/cmd/server/VERSION`，并让 `deploy/Dockerfile.lowmem` 的 Go 版本与 `go.mod` 一致。
+4. 每次升级按上一节同步 `tokenProUpstreamVersion` 与 `backend/cmd/server/VERSION`，并让 `deploy/Dockerfile.lowmem` 的 Go 版本与 `go.mod` 一致。
 5. 检查上游新增迁移是否改动 `api_keys`、`users` 或支付相关表，是否与 234/237/238 的约束冲突。旧迁移一律不改。
 6. 上线前至少执行后端 `go build` / `go vet` / `go test`、前端类型检查与 vitest、数据库迁移检查，以及全局 Key 的并发、流式和普通分组 Key 回归测试。
 
