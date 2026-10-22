@@ -373,7 +373,12 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	if apiKey != nil {
 		imageGenerationAllowed = GroupAllowsImageGeneration(apiKey.Group)
 	}
-	codexImageGenerationBridgeEnabled := !TokenProNativeImageDelivery(c) && isCodexCLI &&
+	// Title turns (no tools + json_schema, or thread_source=thread_title) are
+	// metadata. They must not gain image_generation even when this request never
+	// entered the TokenPro text-image preparer, because the generic Codex bridge
+	// would otherwise attach the tool and bill an image.
+	codexImageGenerationBridgeEnabled := !TokenProNativeImageDelivery(c) &&
+		!tokenProTitleGenerationRequest(c, body) && isCodexCLI &&
 		!isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader)) &&
 		imageGenerationAllowed &&
 		codexImageGenerationExplicitToolPolicy != codexImageGenerationExplicitToolPolicyStrip &&

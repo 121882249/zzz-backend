@@ -271,6 +271,47 @@ func TestTokenProTextImageHostedForwardBillsOneTextRow(t *testing.T) {
 	}
 }
 
+func TestTokenProTitleWithoutTextImageDeliveryGetsNoImageTool(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		header string
+		tools  string
+	}{
+		{name: "no tools json_schema", tools: `[]`},
+		{name: "thread_title", header: `{"thread_source":"thread_title"}`, tools: `[{"type":"custom","name":"exec"}]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &config.Config{}
+			cfg.Gateway.ForceCodexCLI = true
+			cfg.Gateway.CodexImageGenerationBridgeEnabled = true
+			upstream := &httpUpstreamRecorder{resp: &http.Response{
+				StatusCode: 200,
+				Header:     http.Header{"Content-Type": {"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"id":"resp_title","object":"response","output":[{"type":"message","content":[{"type":"output_text","text":"{\"title\":\"猫\"}"}]}],"usage":{"input_tokens":3,"output_tokens":4,"total_tokens":7}}`)),
+			}}
+			svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream}
+			account := &Account{ID: 7, Name: "fixture", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "fixture", "base_url": "https://example.com"}, Extra: map[string]any{"use_responses_api": true}}
+			c, _ := tokenProTextToolsContext(t)
+			// No pending text-image delivery: this is the shape that reaches the
+			// generic Codex bridge instead of prepareTokenProImageTools.
+			c.Set(TokenProTextImageDeliveryContextKey, false)
+			if tc.header != "" {
+				c.Request.Header.Set("X-Codex-Turn-Metadata", tc.header)
+			}
+			body := tokenProTextToolsFixture(t, "developer", tokenProLegacySkillCatalogFixture)
+			body, err := sjson.SetRawBytes(body, "tools", []byte(tc.tools))
+			require.NoError(t, err)
+			body, err = sjson.SetBytes(body, "text.format.type", "json_schema")
+			require.NoError(t, err)
+			result, err := svc.Forward(context.Background(), c, account, body)
+			require.NoError(t, err)
+			require.Zero(t, result.ImageCount)
+			require.False(t, gjson.GetBytes(upstream.lastBody, `tools.#(type=="image_generation")`).Exists())
+			require.NotContains(t, string(upstream.lastBody), "sub2api-codex-image-generation")
+		})
+	}
+}
+
 func TestTokenProTextImageTitleForwardStaysUnbilledAndTextOnly(t *testing.T) {
 	for _, tc := range []struct {
 		name        string

@@ -618,9 +618,19 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCost(
 		return s.billingService.CalculateAudioCost(result.AudioUsage.Mode, result.AudioUsage.DurationOrUnits, cfg, webSearchMultiplier), nil
 	}
 
+	// hostedTextImageCost is the per-image price for a text-model turn that also
+	// produced hosted image_generation output. It is added to that same text row.
+	// A pure image model keeps the image-only return below, so its token usage
+	// is not priced a second time.
+	var hostedTextImageCost *CostBreakdown
 	if result != nil && result.ImageCount > 0 {
-		// 渠道定价为 token 计费时走 token 路径，否则走图片计费
-		if resolved := s.resolveOpenAIChannelPricing(ctx, billingModel, apiKey); resolved == nil || resolved.Mode != BillingModeToken {
+		textModels := openAITextModelsAlongsideImage(billingModel, billingModels)
+		if len(textModels) > 0 && openAIUsageHasTextTokens(tokens) {
+			hostedTextImageCost = s.calculateOpenAIImageCost(ctx, billingModel, apiKey, result, imageMultiplier)
+			billingModels = textModels
+			billingModel = textModels[0]
+		} else if resolved := s.resolveOpenAIChannelPricing(ctx, billingModel, apiKey); resolved == nil || resolved.Mode != BillingModeToken {
+			// 渠道定价为 token 计费时走 token 路径，否则走图片计费
 			return s.calculateOpenAIImageCost(ctx, billingModel, apiKey, result, imageMultiplier), nil
 		}
 	}
@@ -671,6 +681,11 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCost(
 
 	tokenBillingAttempted := len(billingModels) > 0 && billingModel != ""
 	if tokenCost == nil {
+		if hostedTextImageCost != nil {
+			// Text-card pricing is missing. Keep the image charge instead of
+			// failing the whole row down to $0.
+			return hostedTextImageCost, nil
+		}
 		if tokenBillingAttempted {
 			if lastErr == nil {
 				lastErr = fmt.Errorf("%w: no non-empty billing model candidates", ErrModelPricingUnavailable)
@@ -689,13 +704,64 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCost(
 		}
 		return nil, fmt.Errorf("calculate OpenAI usage cost failed for billing models %s: %w", strings.Join(billingModels, ","), lastErr)
 	}
-	if searchCost == nil || (searchCost.TotalCost == 0 && searchCost.ActualCost == 0) {
-		return tokenCost, nil
+	if searchCost != nil && (searchCost.TotalCost != 0 || searchCost.ActualCost != 0) {
+		// Additive: tokens + search surcharge.
+		tokenCost.TotalCost += searchCost.TotalCost
+		tokenCost.ActualCost += searchCost.ActualCost
 	}
-	// Additive: tokens + search surcharge.
-	tokenCost.TotalCost += searchCost.TotalCost
-	tokenCost.ActualCost += searchCost.ActualCost
-	return tokenCost, nil
+	return addHostedTextImageCost(tokenCost, hostedTextImageCost), nil
+}
+
+// openAITextModelsAlongsideImage returns the non-image candidates that should
+// keep their token price when the primary billing model is an image model.
+// Pure image requests have no such candidate and stay on per-image billing.
+func openAITextModelsAlongsideImage(imageModel string, billingModels []string) []string {
+	if !isOpenAIImageGenerationModel(imageModel) {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(billingModels))
+	textModels := make([]string, 0, len(billingModels))
+	for _, candidate := range billingModels {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" || isOpenAIImageGenerationModel(candidate) {
+			continue
+		}
+		key := strings.ToLower(candidate)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		textModels = append(textModels, candidate)
+	}
+	return textModels
+}
+
+func openAIUsageHasTextTokens(tokens UsageTokens) bool {
+	return tokens.InputTokens > 0 || tokens.OutputTokens > 0 ||
+		tokens.CacheCreationTokens > 0 || tokens.CacheReadTokens > 0 ||
+		tokens.CacheCreation5mTokens > 0 || tokens.CacheCreation1hTokens > 0
+}
+
+// addHostedTextImageCost folds one per-image charge into the text-model row.
+// Input and output costs stay the text token amounts. The image price is added
+// once to the totals, and the row is labeled image so the per-image component
+// is visible next to image_count.
+func addHostedTextImageCost(tokenCost, imageCost *CostBreakdown) *CostBreakdown {
+	if tokenCost == nil || imageCost == nil {
+		return tokenCost
+	}
+	if imageCost.TotalCost == 0 && imageCost.ActualCost == 0 &&
+		imageCost.ImageInputCost == 0 && imageCost.ImageOutputCost == 0 {
+		return tokenCost
+	}
+	tokenCost.TotalCost += imageCost.TotalCost
+	tokenCost.ActualCost += imageCost.ActualCost
+	tokenCost.ImageInputCost += imageCost.ImageInputCost
+	tokenCost.ImageOutputCost += imageCost.ImageOutputCost
+	if imageCost.BillingMode != "" {
+		tokenCost.BillingMode = imageCost.BillingMode
+	}
+	return tokenCost
 }
 
 func isGrokVideoBillingModel(model string) bool {
