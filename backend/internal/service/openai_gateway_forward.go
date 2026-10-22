@@ -286,6 +286,17 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Stripped /responses image_generation tool for Codex client by account policy")
 			}
 		}
+		hostedBody, hosted, hostedErr := s.applyTokenProPassthroughHostedImage(ctx, c, account, originalBody, isCodexCLI, codexImageGenerationExplicitToolPolicy)
+		if hostedErr != nil {
+			return nil, hostedErr
+		}
+		if hosted {
+			body = hostedBody
+			originalBody = hostedBody
+			// The handler already classified the pre-injection body. Recompute
+			// this attempt so the injected tool bills on the same text row.
+			attemptImageIntentInvalidated = true
+		}
 		// 透传分支只需要轻量提取字段，避免热路径全量 Unmarshal。
 		mappedModel := account.GetMappedModel(reqModel)
 		reasoningEffort := extractOpenAIReasoningEffortFromBody(body, mappedModel)
