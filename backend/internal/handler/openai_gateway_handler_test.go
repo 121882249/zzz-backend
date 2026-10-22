@@ -1648,6 +1648,7 @@ func TestOpenAIWSTurnBillingModelPreservesImagePricingModel(t *testing.T) {
 	tests := []struct {
 		name             string
 		resultModel      string
+		imageCount       int
 		mapping          service.ChannelMappingResult
 		requestedModel   string
 		upstreamModel    string
@@ -1692,11 +1693,29 @@ func TestOpenAIWSTurnBillingModelPreservesImagePricingModel(t *testing.T) {
 			upstreamModel:    "gpt-5.6-sol",
 			wantBillingModel: "gpt-5.6-sol",
 		},
+		{
+			name:             "hosted image keeps gpt-image-2 under requested source",
+			resultModel:      "gpt-image-2",
+			imageCount:       1,
+			mapping:          service.ChannelMappingResult{BillingModelSource: service.BillingModelSourceRequested},
+			requestedModel:   "gpt-6-sol",
+			upstreamModel:    "gpt-6-sol",
+			wantBillingModel: "gpt-image-2",
+		},
+		{
+			name:             "hosted image keeps gpt-image-2 under channel mapped source",
+			resultModel:      "gpt-image-2",
+			imageCount:       1,
+			mapping:          service.ChannelMappingResult{MappedModel: "gpt-6-sol", BillingModelSource: service.BillingModelSourceChannelMapped},
+			requestedModel:   "gpt-6-sol-alias",
+			upstreamModel:    "gpt-6-sol",
+			wantBillingModel: "gpt-image-2",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := &service.OpenAIForwardResult{BillingModel: tt.resultModel}
+			result := &service.OpenAIForwardResult{BillingModel: tt.resultModel, ImageCount: tt.imageCount}
 			require.Equal(t, tt.wantBillingModel, openAIWSTurnBillingModel(result, tt.mapping, tt.requestedModel, tt.upstreamModel))
 		})
 	}

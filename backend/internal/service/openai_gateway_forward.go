@@ -286,6 +286,17 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Stripped /responses image_generation tool for Codex client by account policy")
 			}
 		}
+		hostedBody, hosted, hostedErr := s.applyTokenProPassthroughHostedImage(ctx, c, account, originalBody, isCodexCLI, codexImageGenerationExplicitToolPolicy)
+		if hostedErr != nil {
+			return nil, hostedErr
+		}
+		if hosted {
+			body = hostedBody
+			originalBody = hostedBody
+			// The handler already classified the pre-injection body. Recompute
+			// this attempt so the injected tool bills on the same text row.
+			attemptImageIntentInvalidated = true
+		}
 		// 透传分支只需要轻量提取字段，避免热路径全量 Unmarshal。
 		mappedModel := account.GetMappedModel(reqModel)
 		reasoningEffort := extractOpenAIReasoningEffortFromBody(body, mappedModel)
@@ -362,7 +373,12 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	if apiKey != nil {
 		imageGenerationAllowed = GroupAllowsImageGeneration(apiKey.Group)
 	}
-	codexImageGenerationBridgeEnabled := !TokenProNativeImageDelivery(c) && isCodexCLI &&
+	// Title turns (no tools + json_schema, or thread_source=thread_title) are
+	// metadata. They must not gain image_generation even when this request never
+	// entered the TokenPro text-image preparer, because the generic Codex bridge
+	// would otherwise attach the tool and bill an image.
+	codexImageGenerationBridgeEnabled := !TokenProNativeImageDelivery(c) &&
+		!tokenProTitleGenerationRequest(c, body) && isCodexCLI &&
 		!isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader)) &&
 		imageGenerationAllowed &&
 		codexImageGenerationExplicitToolPolicy != codexImageGenerationExplicitToolPolicyStrip &&
@@ -448,6 +464,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		if codexImageGenerationBridgeEnabled && ensureOpenAIResponsesImageGenerationTool(decoded) {
 			markDecodedModified()
 			logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Injected /responses image_generation tool for Codex client")
+			// Desktop does not render image_generation_call. Keep this upstream
+			// image and its text-row bill, and deliver the bytes through the
+			// local download flow. A second image-group generation would charge again.
+			armTokenProHostedImageDelivery(c, body)
 		}
 		if codexImageGenerationBridgeEnabled && ensureOpenAIResponsesImageGenerationToolChoiceAuto(decoded) {
 			markDecodedModified()
