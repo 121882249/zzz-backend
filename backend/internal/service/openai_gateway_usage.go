@@ -620,18 +620,32 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCost(
 
 	// hostedTextImageCost is the per-image price for a text-model turn that also
 	// produced hosted image_generation output. It is added to that same text row.
-	// A pure image model keeps the image-only return below, so its token usage
-	// is not priced a second time.
+	// Detect it from the image billing model (gpt-image-2), not from candidate
+	// order: billing_model_source requested/channel_mapped rewrites the first
+	// candidate to the text model, and requiring that candidate to be an image
+	// model dropped the per-image fee. A pure image model keeps the image-only
+	// return below, so its token usage is not priced a second time.
 	var hostedTextImageCost *CostBreakdown
 	if result != nil && result.ImageCount > 0 {
-		textModels := openAITextModelsAlongsideImage(billingModel, billingModels)
-		if len(textModels) > 0 && openAIUsageHasTextTokens(tokens) {
-			hostedTextImageCost = s.calculateOpenAIImageCost(ctx, billingModel, apiKey, result, imageMultiplier)
+		imageBillingModel := openAIHostedImageBillingModel(result, billingModels)
+		textModels := openAITextModelsAlongsideImage(imageBillingModel, billingModels)
+		if imageBillingModel != "" && len(textModels) > 0 && openAIUsageHasTextTokens(tokens) {
+			hostedTextImageCost = s.calculateOpenAIImageCost(ctx, imageBillingModel, apiKey, result, imageMultiplier)
 			billingModels = textModels
 			billingModel = textModels[0]
-		} else if resolved := s.resolveOpenAIChannelPricing(ctx, billingModel, apiKey); resolved == nil || resolved.Mode != BillingModeToken {
-			// 渠道定价为 token 计费时走 token 路径，否则走图片计费
-			return s.calculateOpenAIImageCost(ctx, billingModel, apiKey, result, imageMultiplier), nil
+			// tool_usage.image_gen reports image tokens that are not a subset of
+			// response output_tokens (515 image tokens next to 162 text output
+			// tokens). computeTokenBreakdown subtracts them from output, clamps
+			// at 0 — so output_cost becomes 0 — and prices the image tokens at
+			// the channel image_output_price. The per-image fee above is the
+			// image charge; the text card must not bill those tokens again.
+			tokens.ImageOutputTokens = 0
+		} else if pureImageModel := openAIPureImageBillingModel(imageBillingModel, billingModel); pureImageModel != "" {
+			// A token-priced channel skips per-image billing only for a pure
+			// image-model request. A text model's token card must not.
+			if resolved := s.resolveOpenAIChannelPricing(ctx, pureImageModel, apiKey); resolved == nil || resolved.Mode != BillingModeToken {
+				return s.calculateOpenAIImageCost(ctx, pureImageModel, apiKey, result, imageMultiplier), nil
+			}
 		}
 	}
 
@@ -712,8 +726,39 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCost(
 	return addHostedTextImageCost(tokenCost, hostedTextImageCost), nil
 }
 
+// openAIHostedImageBillingModel is the image-generation model a hosted
+// text+image turn should use for the per-image fee. The forward result keeps
+// that model even when billing_model_source puts the text model first.
+func openAIHostedImageBillingModel(result *OpenAIForwardResult, billingModels []string) string {
+	if result == nil || result.ImageCount <= 0 {
+		return ""
+	}
+	if model := strings.TrimSpace(result.BillingModel); isOpenAIImageGenerationModel(model) {
+		return model
+	}
+	for _, candidate := range billingModels {
+		if model := strings.TrimSpace(candidate); isOpenAIImageGenerationModel(model) {
+			return model
+		}
+	}
+	return ""
+}
+
+// openAIPureImageBillingModel is the image model whose channel card may stay on
+// token billing. Empty when this is not a pure image-model request.
+func openAIPureImageBillingModel(imageBillingModel, candidate string) string {
+	if isOpenAIImageGenerationModel(imageBillingModel) {
+		return strings.TrimSpace(imageBillingModel)
+	}
+	if isOpenAIImageGenerationModel(candidate) {
+		return strings.TrimSpace(candidate)
+	}
+	return ""
+}
+
 // openAITextModelsAlongsideImage returns the non-image candidates that should
-// keep their token price when the primary billing model is an image model.
+// keep their token price beside a hosted image. imageModel is the image
+// generation model, which is not necessarily the first billing candidate.
 // Pure image requests have no such candidate and stay on per-image billing.
 func openAITextModelsAlongsideImage(imageModel string, billingModels []string) []string {
 	if !isOpenAIImageGenerationModel(imageModel) {

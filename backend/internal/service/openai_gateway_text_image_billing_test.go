@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
 )
 
@@ -148,4 +149,223 @@ func TestOpenAIRecordUsage_TextModelImageIsOneRow(t *testing.T) {
 	require.InDelta(t, text+imagePrice, userRepo.lastAmount, 1e-12)
 	require.NotNil(t, usageRepo.lastLog.BillingMode)
 	require.Equal(t, string(BillingModeImage), *usageRepo.lastLog.BillingMode)
+}
+
+// Production shape: group rate 0.3, independent image rate 1, group 2K price
+// 0.08, and a token-priced gpt-6-sol channel (image_output_price 3e-5).
+// billing_model_source must not hide gpt-image-2. 515 image tokens are not
+// subtracted from 162 text output tokens and are not priced at 3e-5.
+func TestOpenAIRecordUsage_HostedTextImageIgnoresBillingModelSource(t *testing.T) {
+	const (
+		inputTokens       = 1000
+		outputTokens      = 162
+		imageOutputTokens = 515
+		groupRate         = 0.3
+		imageRate         = 1.0
+		imagePrice2K      = 0.08
+	)
+	inputPrice := 3e-6
+	outputPrice := 1.5e-5
+	cacheReadPrice := 3e-7
+	imageOutputPrice := 3e-5
+	decoyInput := 9e-6
+	decoyOutput := 9e-5
+	textList := float64(inputTokens)*inputPrice + float64(outputTokens)*outputPrice
+	textActual := textList * groupRate
+	imageActual := imagePrice2K * imageRate
+
+	groupID := int64(16016)
+	price1K := 0.03
+	price2K := imagePrice2K
+	price4K := 0.10
+	group := &Group{
+		ID:                   groupID,
+		Platform:             PlatformOpenAI,
+		RateMultiplier:       groupRate,
+		ImageRateIndependent: true,
+		ImageRateMultiplier:  imageRate,
+		ImagePrice1K:         &price1K,
+		ImagePrice2K:         &price2K,
+		ImagePrice4K:         &price4K,
+	}
+
+	tests := []struct {
+		name       string
+		source     string
+		original   string
+		mapped     string
+		pricedName string
+	}{
+		{
+			name:       "requested",
+			source:     BillingModelSourceRequested,
+			original:   "gpt-6-sol",
+			mapped:     "gpt-6-sol-mapped",
+			pricedName: "gpt-6-sol",
+		},
+		{
+			name:       "channel_mapped",
+			source:     BillingModelSourceChannelMapped,
+			original:   "gpt-6-sol-alias",
+			mapped:     "gpt-6-sol",
+			pricedName: "gpt-6-sol",
+		},
+		{
+			name:       "upstream",
+			source:     BillingModelSourceUpstream,
+			original:   "gpt-6-sol",
+			mapped:     "",
+			pricedName: "gpt-6-sol",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+			userRepo := &openAIRecordUsageUserRepoStub{}
+			svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, &openAIRecordUsageSubRepoStub{}, nil)
+			svc.resolver = newHostedTextImageChannelResolver(t, groupID, map[string]hostedTextImageChannelPrices{
+				"gpt-6-sol":        {input: inputPrice, output: outputPrice, cacheRead: cacheReadPrice, imageOutput: imageOutputPrice},
+				"gpt-6-sol-mapped": {input: decoyInput, output: decoyOutput, cacheRead: cacheReadPrice, imageOutput: imageOutputPrice},
+				"gpt-6-sol-alias":  {input: decoyInput, output: decoyOutput, cacheRead: cacheReadPrice, imageOutput: imageOutputPrice},
+			})
+
+			err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+				Result: &OpenAIForwardResult{
+					RequestID:     "resp_hosted_" + tt.name,
+					Model:         tt.original,
+					BillingModel:  "gpt-image-2",
+					UpstreamModel: "gpt-6-sol",
+					Usage: OpenAIUsage{
+						InputTokens:       inputTokens,
+						OutputTokens:      outputTokens,
+						ImageOutputTokens: imageOutputTokens,
+					},
+					ImageCount: 1,
+					ImageSize:  "2K",
+					Duration:   time.Second,
+				},
+				APIKey: &APIKey{
+					ID:      10,
+					GroupID: i64p(groupID),
+					Group:   group,
+				},
+				User:    &User{ID: 20},
+				Account: &Account{ID: 30, Platform: PlatformOpenAI, Type: AccountTypeAPIKey},
+				ChannelUsageFields: ChannelUsageFields{
+					OriginalModel:      tt.original,
+					ChannelMappedModel: tt.mapped,
+					BillingModelSource: tt.source,
+				},
+			})
+			require.NoError(t, err)
+			require.Equal(t, 1, usageRepo.calls)
+			require.Equal(t, 1, userRepo.deductCalls)
+			log := usageRepo.lastLog
+			require.NotNil(t, log)
+			require.NotNil(t, log.BillingMode)
+			require.Equal(t, string(BillingModeImage), *log.BillingMode)
+			require.Equal(t, 1, log.ImageCount)
+			require.NotNil(t, log.ImageSize)
+			require.Equal(t, "2K", *log.ImageSize)
+			require.Equal(t, imageOutputTokens, log.ImageOutputTokens)
+			require.Equal(t, outputTokens, log.OutputTokens)
+			require.InDelta(t, float64(inputTokens)*inputPrice, log.InputCost, 1e-12)
+			require.InDelta(t, float64(outputTokens)*outputPrice, log.OutputCost, 1e-12, "text output tokens must not be reduced by image_output_tokens")
+			require.Zero(t, log.ImageOutputCost, "image_output_price must not bill the hosted image")
+			require.InDelta(t, textList+imagePrice2K, log.TotalCost, 1e-12)
+			require.InDelta(t, textActual+imageActual, log.ActualCost, 1e-12)
+			require.InDelta(t, imageRate, log.RateMultiplier, 1e-12)
+			require.InDelta(t, textActual+imageActual, userRepo.lastAmount, 1e-12)
+			require.NotEqual(t, tt.pricedName, "")
+		})
+	}
+}
+
+func TestOpenAIRecordUsage_PureImageTokenChannelStillSkipsPerImageFee(t *testing.T) {
+	groupID := int64(16017)
+	imagePrice := 0.08
+	inputPrice := 3e-6
+	outputPrice := 1.5e-5
+	imageOutputPrice := 3e-5
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	svc := newOpenAIRecordUsageServiceForTest(usageRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, nil)
+	svc.resolver = newHostedTextImageChannelResolver(t, groupID, map[string]hostedTextImageChannelPrices{
+		"gpt-image-2": {input: inputPrice, output: outputPrice, imageOutput: imageOutputPrice},
+	})
+
+	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{
+			RequestID:    "resp_pure_image_token_channel",
+			Model:        "gpt-image-2",
+			BillingModel: "gpt-image-2",
+			Usage: OpenAIUsage{
+				InputTokens:       10,
+				OutputTokens:      20,
+				ImageOutputTokens: 20,
+			},
+			ImageCount: 1,
+			ImageSize:  "2K",
+			Duration:   time.Second,
+		},
+		APIKey: &APIKey{
+			ID:      11,
+			GroupID: i64p(groupID),
+			Group: &Group{
+				ID:                   groupID,
+				RateMultiplier:       0.3,
+				ImageRateIndependent: true,
+				ImageRateMultiplier:  1,
+				ImagePrice2K:         &imagePrice,
+			},
+		},
+		User:    &User{ID: 21},
+		Account: &Account{ID: 31, Platform: PlatformOpenAI, Type: AccountTypeAPIKey},
+		ChannelUsageFields: ChannelUsageFields{
+			OriginalModel:      "gpt-image-2",
+			BillingModelSource: BillingModelSourceRequested,
+		},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, usageRepo.lastLog)
+	require.NotNil(t, usageRepo.lastLog.BillingMode)
+	require.Equal(t, string(BillingModeToken), *usageRepo.lastLog.BillingMode)
+	require.InDelta(t, 10*inputPrice, usageRepo.lastLog.InputCost, 1e-12)
+	require.Zero(t, usageRepo.lastLog.OutputCost)
+	require.InDelta(t, 20*imageOutputPrice, usageRepo.lastLog.ImageOutputCost, 1e-12)
+	require.NotEqual(t, imagePrice, usageRepo.lastLog.TotalCost)
+}
+
+type hostedTextImageChannelPrices struct {
+	input       float64
+	output      float64
+	cacheRead   float64
+	imageOutput float64
+}
+
+func newHostedTextImageChannelResolver(t *testing.T, groupID int64, models map[string]hostedTextImageChannelPrices) *ModelPricingResolver {
+	t.Helper()
+	cache := newEmptyChannelCache()
+	for model, price := range models {
+		inputPrice := price.input
+		outputPrice := price.output
+		cacheReadPrice := price.cacheRead
+		imageOutputPrice := price.imageOutput
+		entry := &ChannelModelPricing{
+			BillingMode:      BillingModeToken,
+			InputPrice:       &inputPrice,
+			OutputPrice:      &outputPrice,
+			ImageOutputPrice: &imageOutputPrice,
+		}
+		if price.cacheRead > 0 {
+			entry.CacheReadPrice = &cacheReadPrice
+		}
+		cache.pricingByGroupModel[channelModelKey{groupID: groupID, model: model}] = entry
+	}
+	cache.channelByGroupID[groupID] = &Channel{ID: groupID, Status: StatusActive}
+	cache.groupPlatform[groupID] = ""
+	cache.loadedAt = time.Now()
+	cs := &ChannelService{}
+	cs.cache.Store(cache)
+	return NewModelPricingResolver(cs, NewBillingService(&config.Config{}, nil))
 }

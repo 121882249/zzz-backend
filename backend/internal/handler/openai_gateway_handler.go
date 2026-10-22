@@ -154,6 +154,13 @@ func openAIWSIngressEndedByClient(err error) bool {
 }
 
 func openAIWSTurnBillingModel(result *service.OpenAIForwardResult, mapping service.ChannelMappingResult, requestedModel, upstreamModel string) string {
+	// A hosted text turn keeps the concrete image model (gpt-image-2) on the
+	// result. RecordUsage still prices the text card from billing_model_source.
+	// Replacing BillingModel here hid that image model, so the per-image fee
+	// was skipped and the text card's image_output_price billed the picture.
+	if result != nil && result.ImageCount > 0 && service.IsOpenAIImageGenerationModel(result.BillingModel) {
+		return strings.TrimSpace(result.BillingModel)
+	}
 	billingModel := ""
 	if result != nil {
 		billingModel = strings.TrimSpace(result.BillingModel)

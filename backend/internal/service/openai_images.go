@@ -482,6 +482,11 @@ func isOpenAIImageGenerationModel(model string) bool {
 	return IsGPTImageGenerationModel(model) || isGrokImageGenerationModel(model)
 }
 
+// IsOpenAIImageGenerationModel reports GPT and Grok native image-generation models.
+func IsOpenAIImageGenerationModel(model string) bool {
+	return isOpenAIImageGenerationModel(model)
+}
+
 // IsGPTImageGenerationModel identifies the GPT native image-generation model family.
 func IsGPTImageGenerationModel(model string) bool {
 	model = strings.ToLower(strings.TrimSpace(model))
