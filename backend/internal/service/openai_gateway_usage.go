@@ -640,12 +640,11 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCost(
 			// the channel image_output_price. The per-image fee above is the
 			// image charge; the text card must not bill those tokens again.
 			tokens.ImageOutputTokens = 0
-		} else if pureImageModel := openAIPureImageBillingModel(imageBillingModel, billingModel); pureImageModel != "" {
-			// A token-priced channel skips per-image billing only for a pure
-			// image-model request. A text model's token card must not.
-			if resolved := s.resolveOpenAIChannelPricing(ctx, pureImageModel, apiKey); resolved == nil || resolved.Mode != BillingModeToken {
-				return s.calculateOpenAIImageCost(ctx, pureImageModel, apiKey, result, imageMultiplier), nil
-			}
+		} else if resolved := s.resolveOpenAIChannelPricing(ctx, billingModel, apiKey); resolved == nil || resolved.Mode != BillingModeToken {
+			// Gemini compatible images, image-priced cards, and a pure
+			// gpt-image request stay on the per-image price. A token-priced
+			// channel card is the only case that bills the image as tokens.
+			return s.calculateOpenAIImageCost(ctx, billingModel, apiKey, result, imageMultiplier), nil
 		}
 	}
 
@@ -740,18 +739,6 @@ func openAIHostedImageBillingModel(result *OpenAIForwardResult, billingModels []
 		if model := strings.TrimSpace(candidate); isOpenAIImageGenerationModel(model) {
 			return model
 		}
-	}
-	return ""
-}
-
-// openAIPureImageBillingModel is the image model whose channel card may stay on
-// token billing. Empty when this is not a pure image-model request.
-func openAIPureImageBillingModel(imageBillingModel, candidate string) string {
-	if isOpenAIImageGenerationModel(imageBillingModel) {
-		return strings.TrimSpace(imageBillingModel)
-	}
-	if isOpenAIImageGenerationModel(candidate) {
-		return strings.TrimSpace(candidate)
 	}
 	return ""
 }
