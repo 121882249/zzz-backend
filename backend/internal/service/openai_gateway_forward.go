@@ -448,6 +448,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		if codexImageGenerationBridgeEnabled && ensureOpenAIResponsesImageGenerationTool(decoded) {
 			markDecodedModified()
 			logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Injected /responses image_generation tool for Codex client")
+			// Desktop does not render image_generation_call. Keep this upstream
+			// image and its text-row bill, and deliver the bytes through the
+			// local download flow. A second image-group generation would charge again.
+			armTokenProHostedImageDelivery(c, body)
 		}
 		if codexImageGenerationBridgeEnabled && ensureOpenAIResponsesImageGenerationToolChoiceAuto(decoded) {
 			markDecodedModified()

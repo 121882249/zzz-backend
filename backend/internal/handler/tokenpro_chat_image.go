@@ -61,25 +61,7 @@ func (h *OpenAIGatewayHandler) TokenProChatImageDownload(c *gin.Context) {
 }
 
 func (h *OpenAIGatewayHandler) dispatchTokenProChatImage(c *gin.Context, apiKey *service.APIKey, model string, body []byte, stream bool, streamStarted *bool) bool {
-	if follow, ok := service.ParseTokenProLocalImageFollowUp(body); ok {
-		imageURL := follow.URL
-		if imageURL == "" {
-			imageURL = h.lookupTokenProLocalImageURL(c, apiKey, follow.CallID)
-		}
-		text := service.TokenProLocalImageAssistantText(follow.Output, imageURL)
-		mode := "url-v1"
-		choice := "url"
-		if strings.HasPrefix(text, "![") {
-			mode = "local-v1"
-			choice = "local"
-		}
-		h.logTokenProChatImageDispatch(c, body, choice)
-		var sse *tokenProChatImageSSE
-		if stream {
-			sse = h.startTokenProChatImageSSE(c, model, streamStarted, mode)
-			defer sse.stop()
-		}
-		h.finishTokenProChatImage(c, sse, model, text, nil, stream, mode)
+	if h.finishTokenProLocalImageFollowUp(c, apiKey, model, body, stream, streamStarted) {
 		return true
 	}
 	if text, ok := service.TokenProChatImageCheapReply(body); ok {
@@ -151,6 +133,35 @@ func (h *OpenAIGatewayHandler) dispatchTokenProChatImage(c *gin.Context, apiKey 
 	text := service.TokenProChatImageSuccessText(imageURL, generated.Revised)
 	h.finishTokenProChatImage(c, sse, model, text, generated.Result, stream, "url-v1")
 	succeeded = true
+	return true
+}
+
+// finishTokenProLocalImageFollowUp answers the download Codex already ran.
+// The image was billed on the generation turn. This turn does not generate,
+// publish, or record usage, including when the selected model is a text model.
+func (h *OpenAIGatewayHandler) finishTokenProLocalImageFollowUp(c *gin.Context, apiKey *service.APIKey, model string, body []byte, stream bool, streamStarted *bool) bool {
+	follow, ok := service.ParseTokenProLocalImageFollowUp(body)
+	if !ok {
+		return false
+	}
+	imageURL := follow.URL
+	if imageURL == "" {
+		imageURL = h.lookupTokenProLocalImageURL(c, apiKey, follow.CallID)
+	}
+	text := service.TokenProLocalImageAssistantText(follow.Output, imageURL)
+	mode := "url-v1"
+	choice := "url"
+	if strings.HasPrefix(text, "![") {
+		mode = "local-v1"
+		choice = "local"
+	}
+	h.logTokenProChatImageDispatch(c, body, choice)
+	var sse *tokenProChatImageSSE
+	if stream {
+		sse = h.startTokenProChatImageSSE(c, model, streamStarted, mode)
+		defer sse.stop()
+	}
+	h.finishTokenProChatImage(c, sse, model, text, nil, stream, mode)
 	return true
 }
 

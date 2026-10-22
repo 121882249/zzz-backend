@@ -665,6 +665,12 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	if h.rejectIfCyberSessionBlocked(c, apiKey, sessionHashBody, reqModel, cyberBlockFormatResponses) {
 		return
 	}
+	// A desktop download follow-up is not a new generation. Text models never
+	// enter the image-group dispatcher, so answer call_tp_local_ here, before
+	// account selection, and do not record usage.
+	if h.finishTokenProLocalImageFollowUp(c, apiKey, reqModel, body, reqStream, &streamStarted) {
+		return
+	}
 	// Pure image models dispatch the client's native Images tool after all
 	// admission checks, without selecting or charging an unrelated text driver.
 	if !nativeV2 && h.dispatchTokenProNativeImage(c, apiKey, reqModel, requestPlatform, body, reqStream, &streamStarted) {
@@ -828,6 +834,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		// 从不可变的 canonical forwardBody 派生本次尝试 body 并整块剔除上游私有的加密
 		// reasoning item（含耦合的 id/summary），避免非透传上游 400 拒绝 Kiro reasoning 形态。
 		attemptBody := h.deriveOpenAIForwardAttemptBody(reqLog, forwardBody, account, &passthroughFailoverState)
+		service.SetTokenProHostedImagePublisher(c, h.publishTokenProChatImage)
 		result, err := func() (*service.OpenAIForwardResult, error) {
 			defer func() {
 				if accountReleaseFunc != nil {
