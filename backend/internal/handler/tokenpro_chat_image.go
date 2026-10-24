@@ -61,6 +61,19 @@ func (h *OpenAIGatewayHandler) TokenProChatImageDownload(c *gin.Context) {
 }
 
 func (h *OpenAIGatewayHandler) dispatchTokenProChatImage(c *gin.Context, apiKey *service.APIKey, model string, body []byte, stream bool, streamStarted *bool) bool {
+	if h.finishTokenProLocalImageFollowUp(c, apiKey, model, body, stream, streamStarted) {
+		return true
+	}
+	if text, ok := service.TokenProChatImageCheapReply(body); ok {
+		h.logTokenProChatImageDispatch(c, body, "text")
+		var sse *tokenProChatImageSSE
+		if stream {
+			sse = h.startTokenProChatImageSSE(c, model, streamStarted, "text-v1")
+			defer sse.stop()
+		}
+		h.finishTokenProChatImage(c, sse, model, text, nil, stream, "text-v1")
+		return true
+	}
 	prompt, err := service.ExtractTokenProChatImage(body)
 	if err != nil {
 		h.writeTokenProChatImageClientError(c, err, *streamStarted)
@@ -81,33 +94,74 @@ func (h *OpenAIGatewayHandler) dispatchTokenProChatImage(c *gin.Context, apiKey 
 		defer func() { _ = finishReceipt(succeeded) }()
 	}
 
+	mode := "url-v1"
+	if service.TokenProLocalImageDownloadAvailable(body) {
+		mode = "local-v1"
+	}
 	var sse *tokenProChatImageSSE
 	if stream {
-		sse = h.startTokenProChatImageSSE(c, model, streamStarted)
+		sse = h.startTokenProChatImageSSE(c, model, streamStarted, mode)
 		defer sse.stop()
 	}
 	generated, genErr := h.generateTokenProChatImage(c.Request.Context(), c, apiKey, model, prompt)
 	if genErr != nil {
 		service.LogTokenProChatImageUpstreamError(genErr)
-		h.finishTokenProChatImage(c, sse, model, service.TokenProChatImageFailureText(genErr), nil, stream)
+		h.finishTokenProChatImage(c, sse, model, service.TokenProChatImageFailureText(genErr), nil, stream, mode)
 		return true
 	}
 	if generated == nil || len(generated.Bytes) == 0 {
-		h.finishTokenProChatImage(c, sse, model, service.TokenProChatImageFailureText(service.ErrTokenProChatImageEmpty), nil, stream)
+		h.finishTokenProChatImage(c, sse, model, service.TokenProChatImageFailureText(service.ErrTokenProChatImageEmpty), nil, stream, mode)
 		return true
 	}
 	imageURL, pubErr := h.publishTokenProChatImage(c.Request.Context(), generated.ContentType, generated.Bytes)
 	if pubErr != nil || !strings.HasPrefix(imageURL, "https://") || strings.Contains(imageURL, "data:") {
 		service.LogTokenProChatImageUpstreamError(pubErr)
-		h.finishTokenProChatImage(c, sse, model, service.TokenProChatImageFailureText(service.ErrTokenProChatImagePublish), nil, stream)
+		h.finishTokenProChatImage(c, sse, model, service.TokenProChatImageFailureText(service.ErrTokenProChatImagePublish), nil, stream, mode)
 		return true
 	}
 	if generated.Result != nil && generated.Result.ImageCount > 0 {
 		h.recordTokenProChatImageUsage(c, apiKey, generated.Account, generated.Result, body)
 	}
+	if item, ok := service.BuildTokenProLocalImageCall(body, imageURL, tokenProChatImageThreadID(c, body)); ok {
+		h.logTokenProChatImageDispatch(c, body, "local")
+		h.rememberTokenProLocalImage(c, apiKey, item, imageURL)
+		h.writeTokenProChatImageOutput(c, sse, model, item, generated.Result, stream, "local-v1")
+		succeeded = true
+		return true
+	}
+	h.logTokenProChatImageDispatch(c, body, "url")
 	text := service.TokenProChatImageSuccessText(imageURL, generated.Revised)
-	h.finishTokenProChatImage(c, sse, model, text, generated.Result, stream)
+	h.finishTokenProChatImage(c, sse, model, text, generated.Result, stream, "url-v1")
 	succeeded = true
+	return true
+}
+
+// finishTokenProLocalImageFollowUp answers the download Codex already ran.
+// The image was billed on the generation turn. This turn does not generate,
+// publish, or record usage, including when the selected model is a text model.
+func (h *OpenAIGatewayHandler) finishTokenProLocalImageFollowUp(c *gin.Context, apiKey *service.APIKey, model string, body []byte, stream bool, streamStarted *bool) bool {
+	follow, ok := service.ParseTokenProLocalImageFollowUp(body)
+	if !ok {
+		return false
+	}
+	imageURL := follow.URL
+	if imageURL == "" {
+		imageURL = h.lookupTokenProLocalImageURL(c, apiKey, follow.CallID)
+	}
+	text := service.TokenProLocalImageAssistantText(follow.Output, imageURL)
+	mode := "url-v1"
+	choice := "url"
+	if strings.HasPrefix(text, "![") {
+		mode = "local-v1"
+		choice = "local"
+	}
+	h.logTokenProChatImageDispatch(c, body, choice)
+	var sse *tokenProChatImageSSE
+	if stream {
+		sse = h.startTokenProChatImageSSE(c, model, streamStarted, mode)
+		defer sse.stop()
+	}
+	h.finishTokenProChatImage(c, sse, model, text, nil, stream, mode)
 	return true
 }
 
@@ -486,13 +540,16 @@ type tokenProChatImageSSE struct {
 	model    string
 }
 
-func (h *OpenAIGatewayHandler) startTokenProChatImageSSE(c *gin.Context, model string, streamStarted *bool) *tokenProChatImageSSE {
+func (h *OpenAIGatewayHandler) startTokenProChatImageSSE(c *gin.Context, model string, streamStarted *bool, mode string) *tokenProChatImageSSE {
+	if mode == "" {
+		mode = "url-v1"
+	}
 	id := "resp_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	writer := &tokenProChatImageSSE{c: c, stopCh: make(chan struct{}), id: id, model: model}
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("X-Accel-Buffering", "no")
-	c.Header("X-TokenPro-Chat-Image", "url-v1")
+	c.Header("X-TokenPro-Chat-Image", mode)
 	c.Status(http.StatusOK)
 	c.Writer.WriteHeaderNow()
 	if streamStarted != nil {
@@ -549,14 +606,24 @@ func (w *tokenProChatImageSSE) write(event gin.H) error {
 	return nil
 }
 
-func (h *OpenAIGatewayHandler) finishTokenProChatImage(c *gin.Context, sse *tokenProChatImageSSE, model, text string, result *service.OpenAIForwardResult, stream bool) {
-	if sse != nil {
-		sse.stop()
-	}
-	item := gin.H{
+func (h *OpenAIGatewayHandler) finishTokenProChatImage(c *gin.Context, sse *tokenProChatImageSSE, model, text string, result *service.OpenAIForwardResult, stream bool, mode string) {
+	h.writeTokenProChatImageOutput(c, sse, model, tokenProChatImageMessage(text), result, stream, mode)
+}
+
+func tokenProChatImageMessage(text string) map[string]any {
+	return map[string]any{
 		"type": "message", "id": "msg_" + strings.ReplaceAll(uuid.NewString(), "-", ""),
 		"role": "assistant", "status": "completed",
 		"content": []any{gin.H{"type": "output_text", "text": text, "annotations": []any{}}},
+	}
+}
+
+func (h *OpenAIGatewayHandler) writeTokenProChatImageOutput(c *gin.Context, sse *tokenProChatImageSSE, model string, item map[string]any, result *service.OpenAIForwardResult, stream bool, mode string) {
+	if sse != nil {
+		sse.stop()
+	}
+	if mode == "" {
+		mode = "url-v1"
 	}
 	usage := tokenProChatImageUsage(result)
 	id := "resp_" + strings.ReplaceAll(uuid.NewString(), "-", "")
@@ -569,13 +636,134 @@ func (h *OpenAIGatewayHandler) finishTokenProChatImage(c *gin.Context, sse *toke
 	}
 	if !stream || sse == nil {
 		c.Header("Cache-Control", "no-store")
-		c.Header("X-TokenPro-Chat-Image", "url-v1")
+		c.Header("X-TokenPro-Chat-Image", mode)
 		c.JSON(http.StatusOK, response)
 		return
 	}
-	_ = sse.write(gin.H{"type": "response.output_item.added", "output_index": 0, "item": item})
+	switch itemType, _ := item["type"].(string); itemType {
+	case "function_call":
+		added := make(map[string]any, len(item))
+		for key, value := range item {
+			added[key] = value
+		}
+		added["arguments"] = ""
+		_ = sse.write(gin.H{"type": "response.output_item.added", "output_index": 0, "item": added})
+		_ = sse.write(gin.H{
+			"type": "response.function_call_arguments.delta", "output_index": 0,
+			"item_id": item["id"], "call_id": item["call_id"], "name": item["name"],
+			"delta": item["arguments"],
+		})
+		_ = sse.write(gin.H{
+			"type": "response.function_call_arguments.done", "output_index": 0,
+			"item_id": item["id"], "call_id": item["call_id"], "name": item["name"],
+			"arguments": item["arguments"],
+		})
+	case "custom_tool_call":
+		added := make(map[string]any, len(item))
+		for key, value := range item {
+			added[key] = value
+		}
+		added["input"] = ""
+		_ = sse.write(gin.H{"type": "response.output_item.added", "output_index": 0, "item": added})
+		_ = sse.write(gin.H{
+			"type": "response.custom_tool_call_input.delta", "output_index": 0,
+			"item_id": item["id"], "call_id": item["call_id"], "name": item["name"],
+			"delta": item["input"],
+		})
+		_ = sse.write(gin.H{
+			"type": "response.custom_tool_call_input.done", "output_index": 0,
+			"item_id": item["id"], "call_id": item["call_id"], "name": item["name"],
+			"input": item["input"],
+		})
+	default:
+		_ = sse.write(gin.H{"type": "response.output_item.added", "output_index": 0, "item": item})
+	}
 	_ = sse.write(gin.H{"type": "response.output_item.done", "output_index": 0, "item": item})
 	_ = sse.write(gin.H{"type": "response.completed", "response": response})
+}
+
+func (h *OpenAIGatewayHandler) logTokenProChatImageDispatch(c *gin.Context, body []byte, mode string) {
+	ua, originator := "", ""
+	if c != nil && c.Request != nil {
+		ua = strings.TrimSpace(c.Request.UserAgent())
+		originator = strings.TrimSpace(c.GetHeader("originator"))
+	}
+	ua = tokenProChatImageLogValue(ua, 256)
+	originator = tokenProChatImageLogValue(originator, 128)
+	requestLogger(c, "handler.tokenpro_chat_image").Info("tokenpro.chat_image.dispatch",
+		zap.String("mode", mode),
+		zap.Strings("tools", service.TokenProChatImageToolNames(body)),
+		zap.String("originator", originator),
+		zap.String("user_agent", ua),
+	)
+}
+
+func tokenProChatImageLogValue(value string, limit int) string {
+	value = strings.ReplaceAll(value, "\n", " ")
+	value = strings.ReplaceAll(value, "\r", " ")
+	if len(value) > limit {
+		value = value[:limit]
+	}
+	return value
+}
+
+func tokenProChatImageThreadID(c *gin.Context, body []byte) string {
+	if c != nil {
+		v, ok := c.Get(service.TokenProImageTurnContextKey)
+		if ok {
+			pending, pendingOK := v.(*service.TokenProPendingImageTurn)
+			if pendingOK && pending != nil && strings.TrimSpace(pending.ThreadID) != "" {
+				return pending.ThreadID
+			}
+		}
+	}
+	return service.TokenProRequestThreadID(body)
+}
+
+func (h *OpenAIGatewayHandler) tokenProLocalImageStore(c *gin.Context) service.TokenProLocalImageStore {
+	if c == nil {
+		return nil
+	}
+	v, ok := c.Get(service.TokenProImageTurnContextKey)
+	if !ok {
+		return nil
+	}
+	pending, ok := v.(*service.TokenProPendingImageTurn)
+	if !ok || pending == nil || pending.Store == nil {
+		return nil
+	}
+	store, ok := pending.Store.(service.TokenProLocalImageStore)
+	if !ok {
+		return nil
+	}
+	return store
+}
+
+func (h *OpenAIGatewayHandler) lookupTokenProLocalImageURL(c *gin.Context, apiKey *service.APIKey, callID string) string {
+	store := h.tokenProLocalImageStore(c)
+	if store == nil || apiKey == nil || c == nil || c.Request == nil {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+	defer cancel()
+	record, err := store.LookupLocalImage(ctx, service.TokenProLocalImageKey(apiKey, callID))
+	if err != nil {
+		return ""
+	}
+	return record.URL
+}
+
+func (h *OpenAIGatewayHandler) rememberTokenProLocalImage(c *gin.Context, apiKey *service.APIKey, item map[string]any, imageURL string) {
+	store := h.tokenProLocalImageStore(c)
+	callID, ok := item["call_id"].(string)
+	if store == nil || !ok || callID == "" || apiKey == nil || c == nil || c.Request == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+	defer cancel()
+	if err := store.RememberLocalImage(ctx, service.TokenProLocalImageKey(apiKey, callID), service.TokenProLocalImageRecord{URL: imageURL}); err != nil {
+		requestLogger(c, "handler.tokenpro_chat_image", zap.Int64("api_key_id", apiKey.ID)).Warn("tokenpro.chat_image.local_remember_failed", zap.Error(err))
+	}
 }
 
 func tokenProChatImageUsage(result *service.OpenAIForwardResult) gin.H {

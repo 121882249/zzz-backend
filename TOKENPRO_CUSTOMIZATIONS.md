@@ -1,6 +1,6 @@
 # TokenPro 二次开发清单
 
-当前分支以 Sub2API `v0.2.17`（`060d016`）为底层版本，发行名 `TokenPro-R83-v0.2.17`。`backend/internal/service/update_service.go` 中的 `tokenProUpstreamVersion` 为 `0.2.17`，`backend/cmd/server/VERSION` 为 `TokenPro-R83-v0.2.17`。此文件用于后续升级时区分上游改动和本项目改动。
+当前分支以 Sub2API `v0.2.18`（`ac1b8f1`）为底层版本。构建版本是 `0.2.18-tp.1`：`backend/cmd/server/VERSION` 为 `0.2.18-tp.1`，`backend/internal/service/update_service.go` 中的 `tokenProUpstreamVersion` 为 `0.2.18`。管理端按数字核心比较上游，`0.2.18-tp.N` 与上游 `v0.2.18` 相同，不会提示可更新。此文件用于后续升级时区分上游改动和本项目改动。
 
 下文路径中 `backend/internal/` 简写为 `be/`，`frontend/src/` 简写为 `fe/`。
 
@@ -115,10 +115,10 @@ v0.2.17 重写了退款（待定期间保留扣减，网关失败后原子回退
 
 ## 9. 品牌、文档与部署
 
-- TokenPro 版本号显示 `TokenPro-Rxx-v0.2.x`，以及上游版本映射 `tokenProUpstreamVersion`。
+- 构建版本号是 semver `X.Y.Z-tp.N`（当前 `0.2.18-tp.1`）。管理端徽章对非 `TokenPro-` 前缀补一个 `v`，所以界面显示 `v0.2.18-tp.1`。上游是否可更新只比较 `tokenProUpstreamVersion` 解析出的 `X.Y.Z`。
 - 管理员登录后检查底层新版本；同一浏览器会话对同一版本只提醒一次。
 - Agent 使用文档页面、菜单、样式和中英文内容。
-- 低内存 Docker 构建文件 `deploy/Dockerfile.lowmem`（Go 1.27.2，需与 `go.mod` 一致）。
+- 低内存 Docker 构建文件 `deploy/Dockerfile.lowmem`（Go 1.27.3，需与 `go.mod` 一致）。
 - CI 工作流 `.github/workflows/tokenpro-server-image.yml` 推送镜像到 ghcr.io，使用 `GITHUB_TOKEN`，需要 packages 写权限。
 - 服务器配置沿用 `deploy/config.example.yaml`。v0.2.17 新增可选项 `gateway.min_output_tokens`，默认 128。
 
@@ -141,7 +141,7 @@ Fork 自有迁移（按完整文件名执行，与上游同编号文件不冲突
 - `237_global_api_key_repair.sql`：幂等补齐曾被旧版本删除或遗漏的全局 Key，历史软删除记录保留用于审计。
 - `238_global_api_key_group_invariant.sql`：强制全局 Key 的 `group_id` 为空。
 
-上游同编号文件包括 `196_channel_monitor_v2_...`、`234_channel_max_...`、`234_group_codex_...`、`237_add_minimax_platform`、`238_opencode_go_platform`、`238_purge_unlimited_...`。今后新增 fork 迁移建议使用 `9xx_tokenpro_*.sql`，并先确认执行器排序规则。v0.2.16 到 v0.2.17 上游没有新增迁移。
+上游同编号文件包括 `196_channel_monitor_v2_...`、`234_channel_max_...`、`234_group_codex_...`、`237_add_minimax_platform`、`238_opencode_go_platform`、`238_purge_unlimited_...`。今后新增 fork 迁移建议使用 `9xx_tokenpro_*.sql`，并先确认执行器排序规则。v0.2.16 到 v0.2.17 上游没有新增迁移。v0.2.18 新增 `246_enable_gemini_image_generation_groups.sql`：把已有 `gemini` / `antigravity` 分组的 `allow_image_generation` 置为 true。`composite` 不在该 UPDATE 里，升级后保持原开关。该迁移不改 `api_keys`、`users` 或支付表，与 234/237/238 的约束不冲突。
 
 ## 12. 已删除的遗留备份
 
@@ -155,12 +155,33 @@ R83 升级删除了以下误提交的备份文件，后续不要再提交 `*.bef
 - `fe/views/user/StripePaymentView.vue.before-operation-complete-20260905`
 - `fe/views/user/StripePaymentView.vue.before-payment-guard-20260905`
 
+## 构建版本号
+
+生产包曾经把 `PR7-a34e450` 写进 `-X main.Version`。管理端显示 `vPR7-a34e450`，更新检查把它解析成 `0.0.0`，于是基于上游 `v0.2.17` 的构建也被提示“有新版本 v0.2.17”。
+
+版本从这三处进入二进制，后者覆盖前者：
+
+1. `backend/cmd/server/VERSION`，由 `backend/cmd/server/main.go` 的 `//go:embed VERSION` 打进二进制。
+2. 精确 git 标签（`vX.Y.Z`、`X.Y.Z-tp.N` 或旧的 `TokenPro-R<N>-vX.Y.Z`）。`backend/scripts/resolve-version.sh` 会去掉一个前导 `v`。
+3. 编译参数 `-X main.Version=`。Docker 的 `VERSION` 构建参数走这个路径。根目录 `Dockerfile`、`backend/Dockerfile`、`deploy/Dockerfile`、`deploy/Dockerfile.lowmem` 都调用 `./scripts/resolve-version.sh "${VERSION:-}"`。
+
+脚本只接受 `X.Y.Z`、`X.Y.Z-tp.N` 和 `TokenPro-R<N>-vX.Y.Z`。`PR7-a34e450` 这类标签会被丢掉，然后改用 VERSION 文件；文件本身也不合法时构建失败。镜像 CI（`.github/workflows/tokenpro-server-image.yml`）用同一规则校验 VERSION 文件，再把它作为 `VERSION` 构建参数传入。
+
+以后这样改版本：
+
+- 仍基于当前上游、只发 TokenPro 改动：把 `backend/cmd/server/VERSION` 的 `tp.N` 加一，例如 `0.2.18-tp.2`。不要改 `tokenProUpstreamVersion`。
+- 合并新的上游正式标签：把 `tokenProUpstreamVersion` 改成该标签的 `X.Y.Z`，并把 VERSION 文件写成 `X.Y.Z-tp.1`。
+- 手工或 CI 构建时，`VERSION` 构建参数必须是上述三种格式之一，并且和 VERSION 文件一致。不要再传入 PR 号或短 SHA。
+- 更新检查比较的是数字核心，不把 `-tp.N` 当成预发布。`0.2.18-tp.1` 等于上游 `0.2.18`。无法解析的当前版本按 `tokenProUpstreamVersion` 比较，不再当成 `0.0.0`。旧发行名 `TokenPro-R28`（没有 `-vX.Y.Z`）仍回落到这个常量。
+
+本地确认：`backend/scripts/resolve-version.sh`、`backend/scripts/resolve-version.sh 0.2.18-tp.1` 应打印版本；`backend/scripts/resolve-version.sh PR7-a34e450` 应忽略参数并打印 VERSION 文件。
+
 ## 后续升级约定
 
 1. 只合并上游正式标签，使用 `git merge`，不用 rebase。先读 `tokenProUpstreamVersion` 和 `VERSION`，确认上一个底层标签是历史合并提交的第二父提交。
 2. 冲突优先同时保留上游修复和上述 TokenPro 行为，不以整文件覆盖。Gemini 与平台校验类冲突按第 3 节的四步顺序处理。
 3. schema 冲突时先合 `ent/schema/*.go`，再 `go generate ./ent`；wire 变更后重新生成 `cmd/server/wire_gen.go`，然后 `go mod tidy`。
-4. 每次升级同步 `tokenProUpstreamVersion` 与 `backend/cmd/server/VERSION`，并让 `deploy/Dockerfile.lowmem` 的 Go 版本与 `go.mod` 一致。
+4. 每次升级按上一节同步 `tokenProUpstreamVersion` 与 `backend/cmd/server/VERSION`，并让 `deploy/Dockerfile.lowmem` 的 Go 版本与 `go.mod` 一致。
 5. 检查上游新增迁移是否改动 `api_keys`、`users` 或支付相关表，是否与 234/237/238 的约束冲突。旧迁移一律不改。
 6. 上线前至少执行后端 `go build` / `go vet` / `go test`、前端类型检查与 vitest、数据库迁移检查，以及全局 Key 的并发、流式和普通分组 Key 回归测试。
 
@@ -203,3 +224,28 @@ R83 已在生产环境运行。本分支用合并提交把 `main`（`9ed03e9`，
 - **composite 分组 `/v1beta`**：与全局 Key 的 Gemini 决策在同一处代码，按第 3 节顺序合并。
 - **OpenAI API Key 账号的 Web Search 模拟，以及 count_tokens 使用 Anthropic base URL**：这些路径仍先解析全局 Key。
 - 新增配置 `gateway.min_output_tokens`（默认 128，最低 16）。
+
+### v0.2.18 升级记录
+
+本分支用合并提交把生产分支 `cursor/codex-desktop-inline-4391`（`89819a9`，尚未并入 main）升到上游标签 `v0.2.18`（`ac1b8f1`），不 rebase。三个冲突的处理：
+
+- `backend/cmd/server/VERSION`：写成 `0.2.18-tp.1`，`tokenProUpstreamVersion` 改为 `0.2.18`。
+- `frontend/package.json`：依赖与 override 采用上游 DOMPurify `3.4.17`；`follow-redirects` 继续钉死 TokenPro 已升级的 `1.16.1`。
+- `frontend/pnpm-lock.yaml`：override 与 package.json 对齐，锁定 DOMPurify `3.4.17` 与 follow-redirects `1.16.1`。
+
+其余双方都改过的文件由 git 自动合并，并核对过网关与生图门禁：
+
+- Gemini `/v1beta` 仍按第 3 节四步处理全局 Key。新的 `allow_image_generation` 检查在 `resolveGlobalAPIKeyForModel` 之后，用解析出的分组，不看解析前的空分组。
+- OpenAI 分组不进入 Gemini 门禁。全局 Key 文本模型的托管生图（注入 `image_generation`、`output_format=png`、local-v1 下载路径、技能目录中和、标题请求不生图不计费）保持原样。
+- `openai_gateway_usage.go` 的托管生图计费未被上游改动：`ImageCount>0 && isOpenAIImageGenerationModel(result.BillingModel)` 与 `billing_model_source` 无关；按次费走纯图片价乘 `resolveImageRateMultiplier`，只加一次；文本部分用 token 倍率；图片输出 token 清零。Gemini 等非 GPT 生图模型继续按次，除非渠道是 token 模式。
+
+没有重新生成 Ent 或 wire：上游没有改到 fork 的 schema。Go 工具链两边都已是 1.27.3，`deploy/Dockerfile.lowmem` 无需再改。
+
+影响 TokenPro 的上游行为：
+
+- **迁移 246**：已有 Gemini / Antigravity 分组的生图开关被置为开启。composite 分组不在这条 UPDATE 里，升级后保持原值；未开启的混合分组发起 Gemini 生图会返回 400，需要到分组设置里手动打开「允许当前分组生图」。同一开关本来就约束该分组上的 OpenAI 生图。
+- **Grok 4.7 Fast**：内置价卡改为官方 Fast 价（标准 grok-4.7 的 2 倍：输入 $4 / 缓存 $1 / 输出 $12 每百万 token；满 200k 后 $6 / $1.50 / $18，即标准长上下文价的 1.5 倍）。`grok-4.7-fast` 与 `grok-4.7-build-fast` 都走这张卡。分组或渠道若单独写了模型价，仍以那张卡为准，需要核对是不是还停在旧的标准价。
+- **异步生图转存**：下载拒绝内网、回环等非公网地址，含每次重定向；非图片内容直接失败。
+- **流式计费**：Anthropic 兼容流客户端断开后读完上游再计费；上游未正常结束时返回协议内错误；Gemini 流式中断按已收集用量计费；prompt 被拦截且只报缓存命中时 input token 不再为负。
+- **Codex 重试**：`response.queued` 与 `response.metadata` 不再算作已开始输出，随后的 overload 仍可安全重试。
+- **Vertex service account** 支持总额/日/周配额上限。新建 Gemini / Antigravity 分组默认允许生图；新建 composite 分组默认关闭。
