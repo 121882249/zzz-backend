@@ -336,6 +336,117 @@ func TestOpenAIRecordUsage_PureImageTokenChannelStillSkipsPerImageFee(t *testing
 	require.NotEqual(t, imagePrice, usageRepo.lastLog.TotalCost)
 }
 
+// Gemini and other non-GPT image models stay on the per-image price even when
+// the turn also reports text tokens and billing_model_source is requested.
+// A token-mode channel card is the only path that prices those tokens instead.
+// The image multiplier is applied once and is not combined with the text rate.
+func TestOpenAIRecordUsage_GeminiImageKeepsPerImageUnlessTokenChannel(t *testing.T) {
+	const (
+		inputTokens       = 1000
+		outputTokens      = 200
+		imageOutputTokens = 50
+		groupRate         = 0.3
+		imageRate         = 1.5
+		imagePrice2K      = 0.08
+		inputPrice        = 3e-6
+		outputPrice       = 1.5e-5
+		imageOutputPrice  = 3e-5
+	)
+	groupID := int64(16018)
+	price2K := imagePrice2K
+	group := &Group{
+		ID:                   groupID,
+		Platform:             PlatformGemini,
+		RateMultiplier:       groupRate,
+		ImageRateIndependent: true,
+		ImageRateMultiplier:  imageRate,
+		ImagePrice2K:         &price2K,
+	}
+	result := &OpenAIForwardResult{
+		RequestID:    "resp_gemini_image",
+		Model:        "gemini-3-pro-image",
+		BillingModel: "gemini-3-pro-image",
+		Usage: OpenAIUsage{
+			InputTokens:       inputTokens,
+			OutputTokens:      outputTokens,
+			ImageOutputTokens: imageOutputTokens,
+		},
+		ImageCount: 1,
+		ImageSize:  "2K",
+		Duration:   time.Second,
+	}
+	apiKey := &APIKey{
+		ID:      12,
+		GroupID: i64p(groupID),
+		Group:   group,
+	}
+	fields := ChannelUsageFields{
+		OriginalModel:      "gemini-3-pro-image",
+		BillingModelSource: BillingModelSourceRequested,
+	}
+
+	t.Run("per-image", func(t *testing.T) {
+		usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+		userRepo := &openAIRecordUsageUserRepoStub{}
+		svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, &openAIRecordUsageSubRepoStub{}, nil)
+		err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+			Result:             result,
+			APIKey:             apiKey,
+			User:               &User{ID: 22},
+			Account:            &Account{ID: 32, Platform: PlatformGemini, Type: AccountTypeAPIKey},
+			ChannelUsageFields: fields,
+		})
+		require.NoError(t, err)
+		require.Equal(t, 1, usageRepo.calls)
+		require.Equal(t, 1, userRepo.deductCalls)
+		log := usageRepo.lastLog
+		require.NotNil(t, log)
+		require.NotNil(t, log.BillingMode)
+		require.Equal(t, string(BillingModeImage), *log.BillingMode)
+		require.Equal(t, 1, log.ImageCount)
+		require.Zero(t, log.InputCost)
+		require.Zero(t, log.OutputCost)
+		require.Zero(t, log.ImageOutputCost)
+		require.InDelta(t, imagePrice2K, log.TotalCost, 1e-12)
+		require.InDelta(t, imagePrice2K*imageRate, log.ActualCost, 1e-12)
+		require.InDelta(t, imageRate, log.RateMultiplier, 1e-12)
+		require.InDelta(t, imagePrice2K*imageRate, userRepo.lastAmount, 1e-12)
+	})
+
+	t.Run("token channel", func(t *testing.T) {
+		usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+		userRepo := &openAIRecordUsageUserRepoStub{}
+		svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, &openAIRecordUsageSubRepoStub{}, nil)
+		svc.resolver = newHostedTextImageChannelResolver(t, groupID, map[string]hostedTextImageChannelPrices{
+			"gemini-3-pro-image": {input: inputPrice, output: outputPrice, imageOutput: imageOutputPrice},
+		})
+		textOutput := outputTokens - imageOutputTokens
+		list := float64(inputTokens)*inputPrice + float64(textOutput)*outputPrice + float64(imageOutputTokens)*imageOutputPrice
+		err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+			Result:             result,
+			APIKey:             apiKey,
+			User:               &User{ID: 23},
+			Account:            &Account{ID: 33, Platform: PlatformGemini, Type: AccountTypeAPIKey},
+			ChannelUsageFields: fields,
+		})
+		require.NoError(t, err)
+		require.Equal(t, 1, usageRepo.calls)
+		require.Equal(t, 1, userRepo.deductCalls)
+		log := usageRepo.lastLog
+		require.NotNil(t, log)
+		require.NotNil(t, log.BillingMode)
+		require.Equal(t, string(BillingModeToken), *log.BillingMode)
+		require.InDelta(t, float64(inputTokens)*inputPrice, log.InputCost, 1e-12)
+		require.InDelta(t, float64(textOutput)*outputPrice, log.OutputCost, 1e-12)
+		require.InDelta(t, float64(imageOutputTokens)*imageOutputPrice, log.ImageOutputCost, 1e-12)
+		require.InDelta(t, list, log.TotalCost, 1e-12)
+		require.InDelta(t, list*groupRate, log.ActualCost, 1e-12)
+		require.NotEqual(t, imagePrice2K, log.TotalCost)
+		require.InDelta(t, groupRate, log.RateMultiplier, 1e-12)
+		require.InDelta(t, list*groupRate, userRepo.lastAmount, 1e-12)
+	})
+}
+
 type hostedTextImageChannelPrices struct {
 	input       float64
 	output      float64
