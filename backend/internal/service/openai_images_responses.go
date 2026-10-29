@@ -1809,13 +1809,18 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 	direct := usesCodexDirectImages(upstreamModel) && !isOpenAIImagesForceResponses(ctx)
 	beginUpstreamResponseModelObservation(c)
 	SetOpsUpstreamModel(c, upstreamModel)
+	uploadParts := make([]string, 0, len(parsed.Uploads))
+	for _, upload := range parsed.Uploads {
+		uploadParts = append(uploadParts, fmt.Sprintf("%s:%d", upload.ContentType, len(upload.Data)))
+	}
 	logger.LegacyPrintf(
 		"service.openai_gateway",
-		"[OpenAI] Images request routing request_model=%s endpoint=%s account_type=%s uploads=%d",
+		"[OpenAI] Images request routing request_model=%s endpoint=%s account_type=%s uploads=%d upload_parts=%v",
 		requestModel,
 		parsed.Endpoint,
 		account.Type,
 		len(parsed.Uploads),
+		uploadParts,
 	)
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 	defer releaseUpstreamCtx()
@@ -1962,6 +1967,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 					ResponseHeaders:               resp.Header.Clone(),
 					Duration:                      time.Since(startTime),
 					FirstTokenMs:                  firstTokenMs,
+					ImageEndpoint:                 true,
 					ImageCount:                    imageCount,
 					ImageSize:                     parsed.SizeTier,
 					ImageInputSize:                parsed.Size,
@@ -1998,8 +2004,9 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 			)
 		}
 	}
-	// Do not assume parsed.N images when none were observed: billing must
-	// reflect images actually delivered to the client.
+	// Switch off: bill only images actually delivered. Switch on uses the
+	// upstream count, falling back to one image when none were parsed.
+	imageCount = deliveredImageBillingCount(imageCount, parsed.N, imageCountBillingEnabled(getAPIKeyFromContext(c)))
 	return &OpenAIForwardResult{
 		RequestID:                     resp.Header.Get("x-request-id"),
 		UpstreamHeaders:               resp.Header,
@@ -2013,6 +2020,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		ResponseHeaders:               resp.Header.Clone(),
 		Duration:                      time.Since(startTime),
 		FirstTokenMs:                  firstTokenMs,
+		ImageEndpoint:                 true,
 		ImageCount:                    imageCount,
 		ImageSize:                     parsed.SizeTier,
 		ImageInputSize:                parsed.Size,

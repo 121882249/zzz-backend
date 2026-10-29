@@ -618,9 +618,41 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCost(
 		return s.billingService.CalculateAudioCost(result.AudioUsage.Mode, result.AudioUsage.DurationOrUnits, cfg, webSearchMultiplier), nil
 	}
 
+	// hostedTextImageCost is the per-image price for a text-model turn that also
+	// produced hosted image_generation output. It is added to that same text row.
+	// Detect it from the image billing model (gpt-image-2), not from candidate
+	// order: billing_model_source requested/channel_mapped rewrites the first
+	// candidate to the text model, and requiring that candidate to be an image
+	// model dropped the per-image fee. A pure image model keeps the image-only
+	// return below, so its token usage is not priced a second time.
+	var hostedTextImageCost *CostBreakdown
 	if result != nil && result.ImageCount > 0 {
-		// 渠道定价为 token 计费时走 token 路径，否则走图片计费
-		if resolved := s.resolveOpenAIChannelPricing(ctx, billingModel, apiKey); resolved == nil || resolved.Mode != BillingModeToken {
+		imageBillingModel := openAIHostedImageBillingModel(result, billingModels)
+		textModels := openAITextModelsAlongsideImage(imageBillingModel, billingModels)
+		if imageBillingModel != "" && len(textModels) > 0 && openAIUsageHasTextTokens(tokens) {
+			// Hosted text+image bridge. image_count_billing must not replace
+			// this row with an image-only charge, and must not add a second
+			// image fee. Text stays on the token multiplier; the image fee
+			// below is applied once.
+			hostedTextImageCost = s.calculateOpenAIImageCost(ctx, imageBillingModel, apiKey, result, imageMultiplier)
+			billingModels = textModels
+			billingModel = textModels[0]
+			// tool_usage.image_gen reports image tokens that are not a subset of
+			// response output_tokens (515 image tokens next to 162 text output
+			// tokens). computeTokenBreakdown subtracts them from output, clamps
+			// at 0 — so output_cost becomes 0 — and prices the image tokens at
+			// the channel image_output_price. The per-image fee above is the
+			// image charge; the text card must not bill those tokens again.
+			tokens.ImageOutputTokens = 0
+		} else if imageCountBillingApplies(apiKey, result.ImageEndpoint) {
+			// Dedicated image endpoint with the group switch on: per-image
+			// even when the channel card is token mode. Mixed Responses/Chat/WS
+			// turns have ImageEndpoint false, so they keep their text charge.
+			return s.calculateOpenAIImageCost(ctx, billingModel, apiKey, result, imageMultiplier), nil
+		} else if resolved := s.resolveOpenAIChannelPricing(ctx, billingModel, apiKey); resolved == nil || resolved.Mode != BillingModeToken {
+			// Gemini compatible images, image-priced cards, and a pure
+			// gpt-image request stay on the per-image price. A token-priced
+			// channel card is the only case that bills the image as tokens.
 			return s.calculateOpenAIImageCost(ctx, billingModel, apiKey, result, imageMultiplier), nil
 		}
 	}
@@ -671,6 +703,11 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCost(
 
 	tokenBillingAttempted := len(billingModels) > 0 && billingModel != ""
 	if tokenCost == nil {
+		if hostedTextImageCost != nil {
+			// Text-card pricing is missing. Keep the image charge instead of
+			// failing the whole row down to $0.
+			return hostedTextImageCost, nil
+		}
 		if tokenBillingAttempted {
 			if lastErr == nil {
 				lastErr = fmt.Errorf("%w: no non-empty billing model candidates", ErrModelPricingUnavailable)
@@ -689,13 +726,83 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCost(
 		}
 		return nil, fmt.Errorf("calculate OpenAI usage cost failed for billing models %s: %w", strings.Join(billingModels, ","), lastErr)
 	}
-	if searchCost == nil || (searchCost.TotalCost == 0 && searchCost.ActualCost == 0) {
-		return tokenCost, nil
+	if searchCost != nil && (searchCost.TotalCost != 0 || searchCost.ActualCost != 0) {
+		// Additive: tokens + search surcharge.
+		tokenCost.TotalCost += searchCost.TotalCost
+		tokenCost.ActualCost += searchCost.ActualCost
 	}
-	// Additive: tokens + search surcharge.
-	tokenCost.TotalCost += searchCost.TotalCost
-	tokenCost.ActualCost += searchCost.ActualCost
-	return tokenCost, nil
+	return addHostedTextImageCost(tokenCost, hostedTextImageCost), nil
+}
+
+// openAIHostedImageBillingModel is the image-generation model a hosted
+// text+image turn should use for the per-image fee. The forward result keeps
+// that model even when billing_model_source puts the text model first.
+func openAIHostedImageBillingModel(result *OpenAIForwardResult, billingModels []string) string {
+	if result == nil || result.ImageCount <= 0 {
+		return ""
+	}
+	if model := strings.TrimSpace(result.BillingModel); isOpenAIImageGenerationModel(model) {
+		return model
+	}
+	for _, candidate := range billingModels {
+		if model := strings.TrimSpace(candidate); isOpenAIImageGenerationModel(model) {
+			return model
+		}
+	}
+	return ""
+}
+
+// openAITextModelsAlongsideImage returns the non-image candidates that should
+// keep their token price beside a hosted image. imageModel is the image
+// generation model, which is not necessarily the first billing candidate.
+// Pure image requests have no such candidate and stay on per-image billing.
+func openAITextModelsAlongsideImage(imageModel string, billingModels []string) []string {
+	if !isOpenAIImageGenerationModel(imageModel) {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(billingModels))
+	textModels := make([]string, 0, len(billingModels))
+	for _, candidate := range billingModels {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" || isOpenAIImageGenerationModel(candidate) {
+			continue
+		}
+		key := strings.ToLower(candidate)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		textModels = append(textModels, candidate)
+	}
+	return textModels
+}
+
+func openAIUsageHasTextTokens(tokens UsageTokens) bool {
+	return tokens.InputTokens > 0 || tokens.OutputTokens > 0 ||
+		tokens.CacheCreationTokens > 0 || tokens.CacheReadTokens > 0 ||
+		tokens.CacheCreation5mTokens > 0 || tokens.CacheCreation1hTokens > 0
+}
+
+// addHostedTextImageCost folds one per-image charge into the text-model row.
+// Input and output costs stay the text token amounts. The image price is added
+// once to the totals, and the row is labeled image so the per-image component
+// is visible next to image_count.
+func addHostedTextImageCost(tokenCost, imageCost *CostBreakdown) *CostBreakdown {
+	if tokenCost == nil || imageCost == nil {
+		return tokenCost
+	}
+	if imageCost.TotalCost == 0 && imageCost.ActualCost == 0 &&
+		imageCost.ImageInputCost == 0 && imageCost.ImageOutputCost == 0 {
+		return tokenCost
+	}
+	tokenCost.TotalCost += imageCost.TotalCost
+	tokenCost.ActualCost += imageCost.ActualCost
+	tokenCost.ImageInputCost += imageCost.ImageInputCost
+	tokenCost.ImageOutputCost += imageCost.ImageOutputCost
+	if imageCost.BillingMode != "" {
+		tokenCost.BillingMode = imageCost.BillingMode
+	}
+	return tokenCost
 }
 
 func isGrokVideoBillingModel(model string) bool {
@@ -795,12 +902,23 @@ func (s *OpenAIGatewayService) calculateOpenAIImageCost(
 	}
 	if resolved != nil && resolved.Source == PricingSourceChannel &&
 		(resolved.Mode == BillingModePerRequest || resolved.Mode == BillingModeImage) {
+		// Tokens do not set the per-image price, but a context-tier per-call
+		// card misses every interval and bills $0 when they are omitted.
+		imageTokens := UsageTokens{}
+		if result != nil {
+			imageTokens = UsageTokens{
+				InputTokens:       result.Usage.InputTokens,
+				OutputTokens:      result.Usage.OutputTokens,
+				ImageOutputTokens: result.Usage.ImageOutputTokens,
+			}
+		}
 		gid := apiKey.Group.ID
 		cost, err := s.billingService.CalculateCostUnified(CostInput{
 			Ctx:             ctx,
 			Model:           billingModel,
 			GroupID:         &gid,
 			Group:           apiKey.Group,
+			Tokens:          imageTokens,
 			RequestCount:    result.ImageCount,
 			SizeTier:        sizeTier,
 			ReasoningEffort: optionalStringValue(result.ReasoningEffort),
