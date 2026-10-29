@@ -630,6 +630,10 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCost(
 		imageBillingModel := openAIHostedImageBillingModel(result, billingModels)
 		textModels := openAITextModelsAlongsideImage(imageBillingModel, billingModels)
 		if imageBillingModel != "" && len(textModels) > 0 && openAIUsageHasTextTokens(tokens) {
+			// Hosted text+image bridge. image_count_billing must not replace
+			// this row with an image-only charge, and must not add a second
+			// image fee. Text stays on the token multiplier; the image fee
+			// below is applied once.
 			hostedTextImageCost = s.calculateOpenAIImageCost(ctx, imageBillingModel, apiKey, result, imageMultiplier)
 			billingModels = textModels
 			billingModel = textModels[0]
@@ -640,6 +644,11 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCost(
 			// the channel image_output_price. The per-image fee above is the
 			// image charge; the text card must not bill those tokens again.
 			tokens.ImageOutputTokens = 0
+		} else if imageCountBillingApplies(apiKey, result.ImageEndpoint) {
+			// Dedicated image endpoint with the group switch on: per-image
+			// even when the channel card is token mode. Mixed Responses/Chat/WS
+			// turns have ImageEndpoint false, so they keep their text charge.
+			return s.calculateOpenAIImageCost(ctx, billingModel, apiKey, result, imageMultiplier), nil
 		} else if resolved := s.resolveOpenAIChannelPricing(ctx, billingModel, apiKey); resolved == nil || resolved.Mode != BillingModeToken {
 			// Gemini compatible images, image-priced cards, and a pure
 			// gpt-image request stay on the per-image price. A token-priced
@@ -893,12 +902,23 @@ func (s *OpenAIGatewayService) calculateOpenAIImageCost(
 	}
 	if resolved != nil && resolved.Source == PricingSourceChannel &&
 		(resolved.Mode == BillingModePerRequest || resolved.Mode == BillingModeImage) {
+		// Tokens do not set the per-image price, but a context-tier per-call
+		// card misses every interval and bills $0 when they are omitted.
+		imageTokens := UsageTokens{}
+		if result != nil {
+			imageTokens = UsageTokens{
+				InputTokens:       result.Usage.InputTokens,
+				OutputTokens:      result.Usage.OutputTokens,
+				ImageOutputTokens: result.Usage.ImageOutputTokens,
+			}
+		}
 		gid := apiKey.Group.ID
 		cost, err := s.billingService.CalculateCostUnified(CostInput{
 			Ctx:             ctx,
 			Model:           billingModel,
 			GroupID:         &gid,
 			Group:           apiKey.Group,
+			Tokens:          imageTokens,
 			RequestCount:    result.ImageCount,
 			SizeTier:        sizeTier,
 			ReasoningEffort: optionalStringValue(result.ReasoningEffort),

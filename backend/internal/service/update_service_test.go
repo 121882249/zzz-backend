@@ -80,12 +80,14 @@ func TestCompareVersionsUsesNumericCoreForCustomBuilds(t *testing.T) {
 	require.Equal(t, 1, compareVersions("TokenPro-R28", "0.2.4"))
 	require.Equal(t, 1, compareVersions("TokenPro-R28", "0.2.16"))
 	require.Equal(t, 1, compareVersions("TokenPro-R28", "0.2.17"))
-	require.Equal(t, 0, compareVersions("TokenPro-R28", "0.2.18"))
-	require.Equal(t, -1, compareVersions("TokenPro-R28", "0.2.19"))
+	require.Equal(t, 1, compareVersions("TokenPro-R28", "0.2.18"))
+	require.Equal(t, 0, compareVersions("TokenPro-R28", "0.2.19"))
+	require.Equal(t, -1, compareVersions("TokenPro-R28", "0.2.20"))
 	require.Equal(t, 1, compareVersions("TokenPro-R28", "0.1.185"))
 	require.Equal(t, 0, compareVersions("0.2.17-tp.84", "0.2.17"))
 	require.Equal(t, -1, compareVersions("0.2.17-tp.84", "0.2.18"))
 	require.Equal(t, 0, compareVersions("0.2.18-tp.1", "0.2.18"))
+	require.Equal(t, 0, compareVersions("0.2.19-tp.1", "0.2.19"))
 }
 
 func TestUpdateServiceReportsTokenProUpstreamVersion(t *testing.T) {
@@ -135,25 +137,25 @@ func TestUpdateServiceTokenProSemverMatchesUpstream(t *testing.T) {
 func TestUpdateServiceNonSemverBuildUsesUpstreamBaseline(t *testing.T) {
 	svc := NewUpdateService(
 		&updateServiceCacheStub{},
-		&updateServiceGitHubClientStub{release: &GitHubRelease{TagName: "v0.2.18", Name: "v0.2.18"}},
+		&updateServiceGitHubClientStub{release: &GitHubRelease{TagName: "v0.2.19", Name: "v0.2.19"}},
 		"vPR7-a34e450",
 		"release",
 	)
 	info, err := svc.CheckUpdate(context.Background(), true)
 	require.NoError(t, err)
 	require.Equal(t, "vPR7-a34e450", info.CurrentVersion)
-	require.Equal(t, "0.2.18", info.CurrentUpstreamVersion)
+	require.Equal(t, "0.2.19", info.CurrentUpstreamVersion)
 	require.False(t, info.HasUpdate)
 
 	plain := NewUpdateService(
 		&updateServiceCacheStub{},
-		&updateServiceGitHubClientStub{release: &GitHubRelease{TagName: "v0.2.18", Name: "v0.2.18"}},
+		&updateServiceGitHubClientStub{release: &GitHubRelease{TagName: "v0.2.19", Name: "v0.2.19"}},
 		"PR7-a34e450",
 		"release",
 	)
 	info, err = plain.CheckUpdate(context.Background(), true)
 	require.NoError(t, err)
-	require.Equal(t, "0.2.18", info.CurrentUpstreamVersion)
+	require.Equal(t, "0.2.19", info.CurrentUpstreamVersion)
 	require.False(t, info.HasUpdate)
 }
 

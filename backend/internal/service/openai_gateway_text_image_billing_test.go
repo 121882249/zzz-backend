@@ -336,6 +336,163 @@ func TestOpenAIRecordUsage_PureImageTokenChannelStillSkipsPerImageFee(t *testing
 	require.NotEqual(t, imagePrice, usageRepo.lastLog.TotalCost)
 }
 
+// image_count_billing must not replace a hosted text+image row with an
+// image-only charge, and must not add a second image fee. The text cost uses
+// the token rate once; the gpt-image-2 fee uses the image rate once.
+func TestOpenAIRecordUsage_HostedBridgeIgnoresImageCountBilling(t *testing.T) {
+	const (
+		inputTokens       = 1000
+		outputTokens      = 162
+		imageOutputTokens = 515
+		groupRate         = 0.3
+		imageRate         = 1.0
+		imagePrice2K      = 0.08
+		inputPrice        = 3e-6
+		outputPrice       = 1.5e-5
+		imageOutputPrice  = 3e-5
+	)
+	textList := float64(inputTokens)*inputPrice + float64(outputTokens)*outputPrice
+	textActual := textList * groupRate
+	imageActual := imagePrice2K * imageRate
+	groupID := int64(16019)
+	price2K := imagePrice2K
+
+	cases := []struct {
+		name     string
+		endpoint bool
+		switchOn bool
+	}{
+		{name: "switch off", endpoint: false, switchOn: false},
+		{name: "switch on mixed turn", endpoint: false, switchOn: true},
+		{name: "switch on does not bypass bridge", endpoint: true, switchOn: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+			userRepo := &openAIRecordUsageUserRepoStub{}
+			svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, &openAIRecordUsageSubRepoStub{}, nil)
+			svc.resolver = newHostedTextImageChannelResolver(t, groupID, map[string]hostedTextImageChannelPrices{
+				"gpt-6-sol": {input: inputPrice, output: outputPrice, imageOutput: imageOutputPrice},
+			})
+			err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+				Result: &OpenAIForwardResult{
+					RequestID:     "resp_bridge_" + tc.name,
+					Model:         "gpt-6-sol",
+					BillingModel:  "gpt-image-2",
+					UpstreamModel: "gpt-6-sol",
+					ImageEndpoint: tc.endpoint,
+					Usage: OpenAIUsage{
+						InputTokens:       inputTokens,
+						OutputTokens:      outputTokens,
+						ImageOutputTokens: imageOutputTokens,
+					},
+					ImageCount: 1,
+					ImageSize:  "2K",
+					Duration:   time.Second,
+				},
+				APIKey: &APIKey{
+					ID:      13,
+					GroupID: i64p(groupID),
+					Group: &Group{
+						ID:                   groupID,
+						Platform:             PlatformOpenAI,
+						RateMultiplier:       groupRate,
+						ImageRateIndependent: true,
+						ImageRateMultiplier:  imageRate,
+						ImagePrice2K:         &price2K,
+						ImageCountBilling:    tc.switchOn,
+					},
+				},
+				User:    &User{ID: 24},
+				Account: &Account{ID: 34, Platform: PlatformOpenAI, Type: AccountTypeAPIKey},
+				ChannelUsageFields: ChannelUsageFields{
+					OriginalModel:      "gpt-6-sol",
+					BillingModelSource: BillingModelSourceRequested,
+				},
+			})
+			require.NoError(t, err)
+			require.Equal(t, 1, usageRepo.calls)
+			require.Equal(t, 1, userRepo.deductCalls)
+			log := usageRepo.lastLog
+			require.NotNil(t, log)
+			require.NotNil(t, log.BillingMode)
+			require.Equal(t, string(BillingModeImage), *log.BillingMode)
+			require.Equal(t, 1, log.ImageCount)
+			require.Equal(t, outputTokens, log.OutputTokens)
+			require.InDelta(t, float64(inputTokens)*inputPrice, log.InputCost, 1e-12)
+			require.InDelta(t, float64(outputTokens)*outputPrice, log.OutputCost, 1e-12)
+			require.Zero(t, log.ImageOutputCost)
+			require.InDelta(t, textList+imagePrice2K, log.TotalCost, 1e-12)
+			require.InDelta(t, textActual+imageActual, log.ActualCost, 1e-12)
+			require.InDelta(t, textActual+imageActual, userRepo.lastAmount, 1e-12)
+			require.NotEqual(t, imagePrice2K*2, log.TotalCost)
+		})
+	}
+}
+
+// A dedicated image endpoint with the switch on stays on one per-image fee.
+// A token-priced channel card must not be added on top of that fee.
+func TestOpenAIRecordUsage_ImageCountBillingDoesNotStackOnPureImageEndpoint(t *testing.T) {
+	groupID := int64(16020)
+	imagePrice := 0.08
+	inputPrice := 3e-6
+	outputPrice := 1.5e-5
+	imageOutputPrice := 3e-5
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	userRepo := &openAIRecordUsageUserRepoStub{}
+	svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, &openAIRecordUsageSubRepoStub{}, nil)
+	svc.resolver = newHostedTextImageChannelResolver(t, groupID, map[string]hostedTextImageChannelPrices{
+		"gpt-image-2": {input: inputPrice, output: outputPrice, imageOutput: imageOutputPrice},
+	})
+	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{
+			RequestID:     "resp_pure_count_switch",
+			Model:         "gpt-image-2",
+			BillingModel:  "gpt-image-2",
+			ImageEndpoint: true,
+			Usage: OpenAIUsage{
+				InputTokens:       10,
+				OutputTokens:      20,
+				ImageOutputTokens: 20,
+			},
+			ImageCount: 1,
+			ImageSize:  "2K",
+			Duration:   time.Second,
+		},
+		APIKey: &APIKey{
+			ID:      14,
+			GroupID: i64p(groupID),
+			Group: &Group{
+				ID:                   groupID,
+				Platform:             PlatformOpenAI,
+				RateMultiplier:       0.3,
+				ImageRateIndependent: true,
+				ImageRateMultiplier:  1,
+				ImagePrice2K:         &imagePrice,
+				ImageCountBilling:    true,
+			},
+		},
+		User:    &User{ID: 25},
+		Account: &Account{ID: 35, Platform: PlatformOpenAI, Type: AccountTypeAPIKey},
+		ChannelUsageFields: ChannelUsageFields{
+			OriginalModel:      "gpt-image-2",
+			BillingModelSource: BillingModelSourceRequested,
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, usageRepo.calls)
+	require.Equal(t, 1, userRepo.deductCalls)
+	log := usageRepo.lastLog
+	require.NotNil(t, log)
+	require.NotNil(t, log.BillingMode)
+	require.Equal(t, string(BillingModeImage), *log.BillingMode)
+	require.Zero(t, log.InputCost)
+	require.Zero(t, log.OutputCost)
+	require.Zero(t, log.ImageOutputCost)
+	require.InDelta(t, imagePrice, log.TotalCost, 1e-12)
+	require.InDelta(t, imagePrice, userRepo.lastAmount, 1e-12)
+}
+
 // Gemini and other non-GPT image models stay on the per-image price even when
 // the turn also reports text tokens and billing_model_source is requested.
 // A token-mode channel card is the only path that prices those tokens instead.

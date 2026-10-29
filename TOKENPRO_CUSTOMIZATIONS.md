@@ -1,6 +1,6 @@
 # TokenPro 二次开发清单
 
-当前分支以 Sub2API `v0.2.18`（`ac1b8f1`）为底层版本。构建版本是 `0.2.18-tp.1`：`backend/cmd/server/VERSION` 为 `0.2.18-tp.1`，`backend/internal/service/update_service.go` 中的 `tokenProUpstreamVersion` 为 `0.2.18`。管理端按数字核心比较上游，`0.2.18-tp.N` 与上游 `v0.2.18` 相同，不会提示可更新。此文件用于后续升级时区分上游改动和本项目改动。
+当前分支以 Sub2API `v0.2.19`（`dece261`）为底层版本。构建版本是 `0.2.19-tp.1`：`backend/cmd/server/VERSION` 为 `0.2.19-tp.1`，`backend/internal/service/update_service.go` 中的 `tokenProUpstreamVersion` 为 `0.2.19`。管理端按数字核心比较上游，`0.2.19-tp.N` 与上游 `v0.2.19` 相同，不会提示可更新。此文件用于后续升级时区分上游改动和本项目改动。
 
 下文路径中 `backend/internal/` 简写为 `be/`，`frontend/src/` 简写为 `fe/`。
 
@@ -115,7 +115,7 @@ v0.2.17 重写了退款（待定期间保留扣减，网关失败后原子回退
 
 ## 9. 品牌、文档与部署
 
-- 构建版本号是 semver `X.Y.Z-tp.N`（当前 `0.2.18-tp.1`）。管理端徽章对非 `TokenPro-` 前缀补一个 `v`，所以界面显示 `v0.2.18-tp.1`。上游是否可更新只比较 `tokenProUpstreamVersion` 解析出的 `X.Y.Z`。
+- 构建版本号是 semver `X.Y.Z-tp.N`（当前 `0.2.19-tp.1`）。管理端徽章对非 `TokenPro-` 前缀补一个 `v`，所以界面显示 `v0.2.19-tp.1`。上游是否可更新只比较 `tokenProUpstreamVersion` 解析出的 `X.Y.Z`。
 - 管理员登录后检查底层新版本；同一浏览器会话对同一版本只提醒一次。
 - Agent 使用文档页面、菜单、样式和中英文内容。
 - 低内存 Docker 构建文件 `deploy/Dockerfile.lowmem`（Go 1.27.3，需与 `go.mod` 一致）。
@@ -141,7 +141,7 @@ Fork 自有迁移（按完整文件名执行，与上游同编号文件不冲突
 - `237_global_api_key_repair.sql`：幂等补齐曾被旧版本删除或遗漏的全局 Key，历史软删除记录保留用于审计。
 - `238_global_api_key_group_invariant.sql`：强制全局 Key 的 `group_id` 为空。
 
-上游同编号文件包括 `196_channel_monitor_v2_...`、`234_channel_max_...`、`234_group_codex_...`、`237_add_minimax_platform`、`238_opencode_go_platform`、`238_purge_unlimited_...`。今后新增 fork 迁移建议使用 `9xx_tokenpro_*.sql`，并先确认执行器排序规则。v0.2.16 到 v0.2.17 上游没有新增迁移。v0.2.18 新增 `246_enable_gemini_image_generation_groups.sql`：把已有 `gemini` / `antigravity` 分组的 `allow_image_generation` 置为 true。`composite` 不在该 UPDATE 里，升级后保持原开关。该迁移不改 `api_keys`、`users` 或支付表，与 234/237/238 的约束不冲突。
+上游同编号文件包括 `196_channel_monitor_v2_...`、`234_channel_max_...`、`234_group_codex_...`、`237_add_minimax_platform`、`238_opencode_go_platform`、`238_purge_unlimited_...`。今后新增 fork 迁移建议使用 `9xx_tokenpro_*.sql`，并先确认执行器排序规则。v0.2.16 到 v0.2.17 上游没有新增迁移。v0.2.18 新增 `246_enable_gemini_image_generation_groups.sql`：把已有 `gemini` / `antigravity` 分组的 `allow_image_generation` 置为 true。`composite` 不在该 UPDATE 里。v0.2.19 在它之后按文件名执行 `247_scoped_admin_api_keys.sql`（管理员 API Key 表）和 `248_group_image_count_billing.sql`（`groups.image_count_billing`，默认 false）。248 不改 246 的开关，也不改 `api_keys`、`users` 或支付表。
 
 ## 12. 已删除的遗留备份
 
@@ -169,12 +169,12 @@ R83 升级删除了以下误提交的备份文件，后续不要再提交 `*.bef
 
 以后这样改版本：
 
-- 仍基于当前上游、只发 TokenPro 改动：把 `backend/cmd/server/VERSION` 的 `tp.N` 加一，例如 `0.2.18-tp.2`。不要改 `tokenProUpstreamVersion`。
+- 仍基于当前上游、只发 TokenPro 改动：把 `backend/cmd/server/VERSION` 的 `tp.N` 加一，例如 `0.2.19-tp.2`。不要改 `tokenProUpstreamVersion`。
 - 合并新的上游正式标签：把 `tokenProUpstreamVersion` 改成该标签的 `X.Y.Z`，并把 VERSION 文件写成 `X.Y.Z-tp.1`。
 - 手工或 CI 构建时，`VERSION` 构建参数必须是上述三种格式之一，并且和 VERSION 文件一致。不要再传入 PR 号或短 SHA。
-- 更新检查比较的是数字核心，不把 `-tp.N` 当成预发布。`0.2.18-tp.1` 等于上游 `0.2.18`。无法解析的当前版本按 `tokenProUpstreamVersion` 比较，不再当成 `0.0.0`。旧发行名 `TokenPro-R28`（没有 `-vX.Y.Z`）仍回落到这个常量。
+- 更新检查比较的是数字核心，不把 `-tp.N` 当成预发布。`0.2.19-tp.1` 等于上游 `0.2.19`。无法解析的当前版本按 `tokenProUpstreamVersion` 比较，不再当成 `0.0.0`。旧发行名 `TokenPro-R28`（没有 `-vX.Y.Z`）仍回落到这个常量。
 
-本地确认：`backend/scripts/resolve-version.sh`、`backend/scripts/resolve-version.sh 0.2.18-tp.1` 应打印版本；`backend/scripts/resolve-version.sh PR7-a34e450` 应忽略参数并打印 VERSION 文件。
+本地确认：`backend/scripts/resolve-version.sh`、`backend/scripts/resolve-version.sh 0.2.19-tp.1` 应打印版本；`backend/scripts/resolve-version.sh PR7-a34e450` 应忽略参数并打印 VERSION 文件。
 
 ## 后续升级约定
 
@@ -249,3 +249,22 @@ R83 已在生产环境运行。本分支用合并提交把 `main`（`9ed03e9`，
 - **流式计费**：Anthropic 兼容流客户端断开后读完上游再计费；上游未正常结束时返回协议内错误；Gemini 流式中断按已收集用量计费；prompt 被拦截且只报缓存命中时 input token 不再为负。
 - **Codex 重试**：`response.queued` 与 `response.metadata` 不再算作已开始输出，随后的 overload 仍可安全重试。
 - **Vertex service account** 支持总额/日/周配额上限。新建 Gemini / Antigravity 分组默认允许生图；新建 composite 分组默认关闭。
+
+### v0.2.19 升级记录
+
+本分支用合并提交把 `upgrade/sub2api-v0.2.18-tokenpro`（`1091152`）升到上游标签 `v0.2.19`（`dece261`），不 rebase。五个冲突的处理：
+
+- `backend/cmd/server/VERSION`：写成 `0.2.19-tp.1`，`tokenProUpstreamVersion` 改为 `0.2.19`。
+- `api_key_auth_cache_impl.go`：快照版本升到 26，同时保留 key 类型、模型白名单、Codex manifest，并写入 `image_count_billing`。
+- `openai_gateway_usage.go`：托管文本生图仍先识别 `ImageCount>0 && isOpenAIImageGenerationModel(result.BillingModel)`。文本按 token 倍率计一次，gpt-image-2 按次费按图片倍率计一次。`image_count_billing` 只在这不是托管桥接、且请求来自专用图片端点时强制按张，避免把桥接行改成纯图片价或再加一笔图片费。渠道按次图片档把 token 用量传进档位匹配。
+- `openai_images.go` 与 `openai_images_responses.go`：开关关闭时仍只按响应里真正交付的图片计费，不用请求的 `n` 补账。开关打开时走上游 `resolveBillableImageCount`（有图按张数，成功但数不出图则按 1 张）。
+
+Gemini `/v1beta` 仍按第 3 节四步处理全局 Key，`allow_image_generation` 仍在解析分组之后。`X-TokenPro-Group-Id` 与 `tp-g` 路由未改。迁移按文件名排序，246、247、248 依次执行。Ent schema 由 git 合并（分组新增 `image_count_billing`，fork 的 `api_keys.key_type` 仍在），没有手工拼接生成代码。
+
+影响 TokenPro 的上游行为：
+
+- **按张计费默认关闭**。打开后只作用于 OpenAI / Composite 的专用图片端点。托管文本生图不走这条开关。
+- **Gemini fileData**：上游用 `fileData` / `file_data` 回图时也计入图片张数。
+- **渠道按次图片档**：尺寸档未命中时用 token 用量匹配上下文档，避免记成 $0。
+- Gemini 默认模型列表去掉 2.0/2.5 和 3-pro-preview。仍要这些模型需在白名单或映射里自行配置。
+- 管理员 API Key 是新表，与用户全局 Key 的 `key_type` 无关。
