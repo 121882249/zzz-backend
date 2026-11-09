@@ -338,6 +338,106 @@ func TokenProChatImageFailureText(err error) string {
 	}
 }
 
+// TokenProChatImageCheapReply is a local text answer for an image-group chat
+// turn that is not an image request. Codex asks the same model for a thread
+// title with tools: [], a json_schema, or its title prompt. Generating an
+// image for that turn would bill a second picture.
+func TokenProChatImageCheapReply(body []byte) (string, bool) {
+	if !tokenProChatImageSkipsGeneration(body) {
+		return "", false
+	}
+	title := tokenProLocalTitleText(body)
+	payload := map[string]string{}
+	schema := gjson.GetBytes(body, "text.format.schema")
+	if schema.Get("type").String() != "object" {
+		schema = gjson.GetBytes(body, "response_format.json_schema.schema")
+	}
+	properties := schema.Get("properties")
+	if properties.IsObject() {
+		properties.ForEach(func(key, value gjson.Result) bool {
+			kind := value.Get("type").String()
+			if kind != "" && kind != "string" {
+				return true
+			}
+			text := title
+			if max := value.Get("maxLength").Int(); max > 0 {
+				text = truncateRunes(text, int(max))
+			}
+			payload[key.String()] = text
+			return true
+		})
+	}
+	if len(payload) == 0 {
+		payload["title"] = title
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return "", false
+	}
+	return string(encoded), true
+}
+
+func tokenProChatImageSkipsGeneration(body []byte) bool {
+	if !gjson.ValidBytes(body) {
+		return false
+	}
+	return tokenProChatImageNoTools(body) || tokenProChatImageStructuredOutput(body) || tokenProChatImageTitlePrompt(body)
+}
+
+func tokenProChatImageNoTools(body []byte) bool {
+	tools := gjson.GetBytes(body, "tools")
+	return tools.Exists() && tools.IsArray() && len(tools.Array()) == 0
+}
+
+func tokenProChatImageStructuredOutput(body []byte) bool {
+	for _, path := range []string{"text.format.type", "response_format.type"} {
+		switch strings.ToLower(strings.TrimSpace(gjson.GetBytes(body, path).String())) {
+		case "json_schema", "json_object":
+			return true
+		}
+	}
+	return false
+}
+
+func tokenProChatImageTitlePrompt(body []byte) bool {
+	if tokenProChatImageThreadSource(body) == "thread_title" {
+		return true
+	}
+	text := strings.ToLower(tokenProChatImagePromptBlob(body) + "\n" + gjson.GetBytes(body, "instructions").String())
+	return strings.Contains(text, "single-line task title") ||
+		(strings.Contains(text, "do not answer the request") && strings.Contains(text, "user prompt:"))
+}
+
+func tokenProChatImageThreadSource(body []byte) string {
+	if source := gjson.GetBytes(body, "client_metadata.thread_source").String(); source != "" {
+		return source
+	}
+	raw := gjson.GetBytes(body, "client_metadata.x-codex-turn-metadata").String()
+	if gjson.Valid(raw) {
+		return gjson.Get(raw, "thread_source").String()
+	}
+	return ""
+}
+
+func tokenProChatImagePromptBlob(body []byte) string {
+	input := gjson.GetBytes(body, "input")
+	if input.Type == gjson.String {
+		return input.String()
+	}
+	var b strings.Builder
+	for _, item := range input.Array() {
+		if item.Get("content").Type == gjson.String {
+			_, _ = b.WriteString(item.Get("content").String())
+			_, _ = b.WriteString("\n")
+		}
+		for _, part := range item.Get("content").Array() {
+			_, _ = b.WriteString(part.Get("text").String())
+			_, _ = b.WriteString("\n")
+		}
+	}
+	return b.String()
+}
+
 // TokenProChatImageSuccessText is the assistant text Codex can display.
 // The URL is plain HTTPS text, never a data URI.
 func TokenProChatImageSuccessText(imageURL, revised string) string {

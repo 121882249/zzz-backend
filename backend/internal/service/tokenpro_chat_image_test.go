@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestExtractTokenProChatImagePromptAndEdit(t *testing.T) {
@@ -207,6 +208,66 @@ func TestTokenProChatImageURLDiskSurvivesNewStore(t *testing.T) {
 	require.Equal(t, "image/jpeg", contentType)
 	require.Equal(t, []byte{0xff, 0xd8, 0xff}, data)
 }
+
+func TestTokenProChatImageCheapReplySkipsTitleCapture(t *testing.T) {
+	t.Parallel()
+	text, ok := TokenProChatImageCheapReply(tokenProTitleCaptureBody)
+	require.True(t, ok)
+	require.Equal(t, "画一只猫", gjson.Get(text, "title").String())
+	require.False(t, gjson.Get(text, "description").Exists())
+
+	withShell := []byte(strings.Replace(string(tokenProTitleCaptureBody), `"tools": []`, `"tools":[{"type":"function","name":"exec_command","description":"run"}]`, 1))
+	require.Contains(t, string(withShell), "exec_command")
+	text, ok = TokenProChatImageCheapReply(withShell)
+	require.True(t, ok)
+	require.Equal(t, "画一只猫", gjson.Get(text, "title").String())
+
+	emptyTools, ok := TokenProChatImageCheapReply([]byte(`{"input":"画一只猫","tools":[]}`))
+	require.True(t, ok)
+	require.Equal(t, "画一只猫", gjson.Get(emptyTools, "title").String())
+
+	schemaOnly, ok := TokenProChatImageCheapReply([]byte(`{"input":"画一只猫","tools":[{"type":"function","name":"exec_command"}],"response_format":{"type":"json_schema","json_schema":{"schema":{"type":"object","properties":{"title":{"type":"string","maxLength":8}}}}}}`))
+	require.True(t, ok)
+	require.Equal(t, "画一只猫", gjson.Get(schemaOnly, "title").String())
+
+	_, ok = TokenProChatImageCheapReply([]byte(`{"input":"画一只猫"}`))
+	require.False(t, ok)
+	_, ok = TokenProChatImageCheapReply([]byte(`{"input":"draw a danger-full-access title","tools":[{"type":"function","name":"exec_command"}]}`))
+	require.False(t, ok)
+}
+
+// tokenProTitleCaptureBody matches the Codex TUI thread-title turn: a different
+// thread id, no tools, and a json_schema whose only property is title.
+var tokenProTitleCaptureBody = []byte(`{
+  "model": "gpt-image-2.5-flare",
+  "stream": true,
+  "client_metadata": {
+    "thread_id": "22222222-2222-4222-8222-222222222222",
+    "x-codex-turn-metadata": "{\"thread_id\":\"22222222-2222-4222-8222-222222222222\",\"thread_source\":\"thread_title\"}"
+  },
+  "tools": [],
+  "text": {
+    "format": {
+      "type": "json_schema",
+      "name": "thread_title",
+      "strict": true,
+      "schema": {
+        "type": "object",
+        "properties": {"title": {"type": "string", "minLength": 1, "maxLength": 36}},
+        "required": ["title"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "input": [{
+    "type": "message",
+    "role": "user",
+    "content": [{
+      "type": "input_text",
+      "text": "Generate a concise, single-line task title of at most 36 characters and under five words where possible. Start with an imperative verb. Capitalize only the first word unless the user's language, proper nouns, acronyms, or code terms require otherwise. Preserve ticket references exactly. Write in the user's language. Do not use quotes, markdown, or trailing punctuation. Do not answer the request.\n\nUser prompt:\n画一只猫"
+    }]
+  }]
+}`)
 
 func splitChatImageURL(t *testing.T, raw string) (string, string, string) {
 	t.Helper()

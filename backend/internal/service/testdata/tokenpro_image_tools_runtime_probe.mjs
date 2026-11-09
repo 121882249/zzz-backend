@@ -27,13 +27,17 @@ async function probe(mode) {
       assert.equal(adapted.status,200);
       body=await adapted.json();
       assert.deepEqual(body.tools,JSON.parse(raw).tools,'adapter must preserve the real client tool registry');
-      if(requests.length === 0 && !body.instructions?.includes('[TokenPro text image tool compatibility v1]')) {
-        const snippets=(body.input??[]).filter(item=>item.role==='developer').map(item=>JSON.stringify(item.content)).filter(text=>text.includes('TokenPro')).map(text=>{const i=text.indexOf('TokenPro');return text.slice(Math.max(0,i-220),i+500);});
+      const developer = (body.input??[]).filter(item=>item.role==='developer').map(item=>JSON.stringify(item.content)).join('\n');
+      const rawDeveloper = (JSON.parse(raw).input??[]).filter(item=>item.role==='developer').map(item=>JSON.stringify(item.content)).join('\n');
+      if(requests.length === 0 && !/tokenpro-imagegen|imagegen:/.test(rawDeveloper)) {
+        const snippets=(JSON.parse(raw).input??[]).filter(item=>item.role==='developer').map(item=>JSON.stringify(item.content)).filter(text=>text.includes('TokenPro')).map(text=>{const i=text.indexOf('TokenPro');return text.slice(Math.max(0,i-220),i+500);});
         throw new Error('actual client Skill catalog not recognized: '+JSON.stringify(snippets));
       }
-      assert(body.instructions?.includes('[TokenPro fast image delivery v1]'));
-      assert(body.instructions.includes('yield_time_ms: 30000'));
-      assert(body.instructions.includes('exit code 0 and an actual saved absolute image path'));
+      assert(!body.instructions?.includes('[TokenPro text image tool compatibility v1]'));
+      assert(!body.instructions?.includes('[TokenPro fast image delivery v1]'));
+      assert(!developer.includes('/imagegen/SKILL.md'));
+      assert(!developer.includes('/tokenpro-imagegen/SKILL.md'));
+      assert(developer.includes('Do not read or run imagegen or tokenpro-imagegen'));
       assert.deepEqual(body.reasoning,JSON.parse(raw).reasoning,'image delivery must not override user reasoning effort');
     }
     requests.push(body);

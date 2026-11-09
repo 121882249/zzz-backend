@@ -67,6 +67,17 @@ func TestTokenProImagesAuthorizationScope(t *testing.T) {
 	require.Equal(t, "gpt-6-astra", tokenProImagesChannelAuthorizationModel(ctx, key.GroupID, "gpt-6-astra"))
 }
 
+func TestTokenProImagesAuthorizationSurvivesSizeRouting(t *testing.T) {
+	c, key, ctx := textImagesAuthorizationFixture("/v1/images/generations")
+	ctx = WithOpenAIImageSizeRouting(ctx, "1536x1024")
+	ctx = WithTokenProImagesAuthorization(ctx, c, key, "gpt-image-2")
+
+	require.Equal(t, "gpt-6.1-sol", tokenProImagesChannelAuthorizationModel(ctx, key.GroupID, "gpt-image-2"))
+	size, ok := openAIImageSizeRoutingFromContext(ctx)
+	require.True(t, ok)
+	require.Equal(t, "1536x1024", size)
+}
+
 func TestTokenProImagesAuthorizationChannelRestriction(t *testing.T) {
 	for _, source := range []string{BillingModelSourceRequested, BillingModelSourceChannelMapped, BillingModelSourceResponse, BillingModelSourceUpstream} {
 		t.Run(source, func(t *testing.T) {

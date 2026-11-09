@@ -14,8 +14,9 @@ RUN go mod download
 # 复制源代码
 COPY . .
 
-# 构建应用
-RUN VERSION_VALUE="$(./scripts/resolve-version.sh)" && \
+# 构建应用。VERSION 必须是 X.Y.Z、X.Y.Z-tp.N 或 TokenPro-R<N>-vX.Y.Z，否则用 VERSION 文件。
+ARG VERSION=
+RUN VERSION_VALUE="$(./scripts/resolve-version.sh "${VERSION:-}")" && \
     go build -ldflags="-s -w -X main.Version=${VERSION_VALUE}" -o main ./cmd/server/
 
 # 暴露端口

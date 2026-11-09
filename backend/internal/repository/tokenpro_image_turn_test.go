@@ -80,3 +80,20 @@ func TestImageThreadStoreLatestWinsAndIsolatesKeys(t *testing.T) {
 	_, err = store.LookupThread(ctx, index)
 	require.ErrorIs(t, err, service.ErrImageTurnMissing)
 }
+
+func TestLocalImageStoreKeepsSignedURLForFollowUp(t *testing.T) {
+	r := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: r.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	store, ok := NewTokenProImageTurnStore(client).(service.TokenProLocalImageStore)
+	require.True(t, ok)
+	ctx := context.Background()
+	key := &service.APIKey{ID: 7, UserID: 8, Key: "key-a"}
+	index := service.TokenProLocalImageKey(key, "call_tp_local_abc")
+	require.NoError(t, store.RememberLocalImage(ctx, index, service.TokenProLocalImageRecord{URL: "https://tokenpro.work/cat.png"}))
+	got, err := store.LookupLocalImage(ctx, index)
+	require.NoError(t, err)
+	require.Equal(t, "https://tokenpro.work/cat.png", got.URL)
+	_, err = store.LookupLocalImage(ctx, service.TokenProLocalImageKey(key, "call_tp_local_other"))
+	require.ErrorIs(t, err, service.ErrImageTurnMissing)
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/redis/go-redis/v9"
@@ -60,4 +61,30 @@ func (s *redisImageTurnStore) Lookup(ctx context.Context, key string) (service.T
 		return route, service.ErrImageTurnMissing
 	}
 	return route, nil
+}
+
+func (s *redisImageTurnStore) RememberLocalImage(ctx context.Context, key string, record service.TokenProLocalImageRecord) error {
+	if strings.TrimSpace(key) == "" || !strings.HasPrefix(record.URL, "https://") {
+		return service.ErrTokenProChatImagePublish
+	}
+	data, err := json.Marshal(record)
+	if err != nil {
+		return err
+	}
+	return s.client.Set(ctx, key, data, service.TokenProLocalImageTTL).Err()
+}
+
+func (s *redisImageTurnStore) LookupLocalImage(ctx context.Context, key string) (service.TokenProLocalImageRecord, error) {
+	var record service.TokenProLocalImageRecord
+	data, err := s.client.Get(ctx, key).Bytes()
+	if errors.Is(err, redis.Nil) {
+		return record, service.ErrImageTurnMissing
+	}
+	if err != nil {
+		return record, err
+	}
+	if err := json.Unmarshal(data, &record); err != nil || !strings.HasPrefix(record.URL, "https://") {
+		return service.TokenProLocalImageRecord{}, service.ErrImageTurnMissing
+	}
+	return record, nil
 }
