@@ -323,9 +323,10 @@ func (h *OpenAIGatewayHandler) recordTokenProChatImageUsage(c *gin.Context, apiK
 	if apiKey.User != nil {
 		subjectUserID = apiKey.User.ID
 	}
+	reqLog := requestLogger(c, "handler.tokenpro_chat_image", zap.Int64("user_id", subjectUserID), zap.Int64("api_key_id", apiKey.ID))
 	h.submitMandatoryUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 		if err := h.gatewayService.RecordUsage(ctx, input); err != nil {
-			requestLogger(c, "handler.tokenpro_chat_image", zap.Int64("user_id", subjectUserID), zap.Int64("api_key_id", apiKey.ID)).Error("tokenpro.chat_image.record_usage_failed", zap.Error(err))
+			reqLog.Error("tokenpro.chat_image.record_usage_failed", zap.Error(err))
 		}
 	})
 }

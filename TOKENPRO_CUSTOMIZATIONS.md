@@ -1,6 +1,6 @@
 # TokenPro 二次开发清单
 
-当前分支以 Sub2API `v0.2.19`（`dece261`）为底层版本。构建版本是 `0.2.19-tp.1`：`backend/cmd/server/VERSION` 为 `0.2.19-tp.1`，`backend/internal/service/update_service.go` 中的 `tokenProUpstreamVersion` 为 `0.2.19`。管理端按数字核心比较上游，`0.2.19-tp.N` 与上游 `v0.2.19` 相同，不会提示可更新。此文件用于后续升级时区分上游改动和本项目改动。
+当前分支以 Sub2API `v0.2.20`（`dab829a`）为底层版本。构建版本是 `0.2.20-tp.1`：`backend/cmd/server/VERSION` 为 `0.2.20-tp.1`，`backend/internal/service/update_service.go` 中的 `tokenProUpstreamVersion` 为 `0.2.20`。管理端按数字核心比较上游，`0.2.20-tp.N` 与上游 `v0.2.20` 相同，不会提示可更新。此文件用于后续升级时区分上游改动和本项目改动。已部署回滚点仍是 `619e567b`（`0.2.19-tp.1`），在分支 `upgrade/sub2api-v0.2.18-tokenpro`，没有被改写。
 
 下文路径中 `backend/internal/` 简写为 `be/`，`frontend/src/` 简写为 `fe/`。
 
@@ -115,7 +115,7 @@ v0.2.17 重写了退款（待定期间保留扣减，网关失败后原子回退
 
 ## 9. 品牌、文档与部署
 
-- 构建版本号是 semver `X.Y.Z-tp.N`（当前 `0.2.19-tp.1`）。管理端徽章对非 `TokenPro-` 前缀补一个 `v`，所以界面显示 `v0.2.19-tp.1`。上游是否可更新只比较 `tokenProUpstreamVersion` 解析出的 `X.Y.Z`。
+- 构建版本号是 semver `X.Y.Z-tp.N`（当前 `0.2.20-tp.1`）。管理端徽章对非 `TokenPro-` 前缀补一个 `v`，所以界面显示 `v0.2.20-tp.1`。上游是否可更新只比较 `tokenProUpstreamVersion` 解析出的 `X.Y.Z`。
 - 管理员登录后检查底层新版本；同一浏览器会话对同一版本只提醒一次。
 - Agent 使用文档页面、菜单、样式和中英文内容。
 - 低内存 Docker 构建文件 `deploy/Dockerfile.lowmem`（Go 1.27.3，需与 `go.mod` 一致）。
@@ -141,7 +141,7 @@ Fork 自有迁移（按完整文件名执行，与上游同编号文件不冲突
 - `237_global_api_key_repair.sql`：幂等补齐曾被旧版本删除或遗漏的全局 Key，历史软删除记录保留用于审计。
 - `238_global_api_key_group_invariant.sql`：强制全局 Key 的 `group_id` 为空。
 
-上游同编号文件包括 `196_channel_monitor_v2_...`、`234_channel_max_...`、`234_group_codex_...`、`237_add_minimax_platform`、`238_opencode_go_platform`、`238_purge_unlimited_...`。今后新增 fork 迁移建议使用 `9xx_tokenpro_*.sql`，并先确认执行器排序规则。v0.2.16 到 v0.2.17 上游没有新增迁移。v0.2.18 新增 `246_enable_gemini_image_generation_groups.sql`：把已有 `gemini` / `antigravity` 分组的 `allow_image_generation` 置为 true。`composite` 不在该 UPDATE 里。v0.2.19 在它之后按文件名执行 `247_scoped_admin_api_keys.sql`（管理员 API Key 表）和 `248_group_image_count_billing.sql`（`groups.image_count_billing`，默认 false）。248 不改 246 的开关，也不改 `api_keys`、`users` 或支付表。
+上游同编号文件包括 `196_channel_monitor_v2_...`、`234_channel_max_...`、`234_group_codex_...`、`237_add_minimax_platform`、`238_opencode_go_platform`、`238_purge_unlimited_...`。今后新增 fork 迁移建议使用 `9xx_tokenpro_*.sql`，并先确认执行器排序规则。v0.2.16 到 v0.2.17 上游没有新增迁移。v0.2.18 新增 `246_enable_gemini_image_generation_groups.sql`：把已有 `gemini` / `antigravity` 分组的 `allow_image_generation` 置为 true。`composite` 不在该 UPDATE 里。v0.2.19 在它之后按文件名执行 `247_scoped_admin_api_keys.sql`（管理员 API Key 表）和 `248_group_image_count_billing.sql`（`groups.image_count_billing`，默认 false）。248 不改 246 的开关，也不改 `api_keys`、`users` 或支付表。v0.2.20 新增 `249_mcp_oauth.sql`，只建 `mcp_oauth_grants` / `mcp_oauth_codes` / `mcp_oauth_credentials`，`CREATE TABLE IF NOT EXISTS`，不改 `api_keys`、`users` 列或支付表。回滚二进制到 `0.2.19-tp.1` 时这些表可以留下；只有确认从未启用 MCP 时才按外键逆序删除这三张表。
 
 ## 12. 已删除的遗留备份
 
@@ -169,12 +169,12 @@ R83 升级删除了以下误提交的备份文件，后续不要再提交 `*.bef
 
 以后这样改版本：
 
-- 仍基于当前上游、只发 TokenPro 改动：把 `backend/cmd/server/VERSION` 的 `tp.N` 加一，例如 `0.2.19-tp.2`。不要改 `tokenProUpstreamVersion`。
+- 仍基于当前上游、只发 TokenPro 改动：把 `backend/cmd/server/VERSION` 的 `tp.N` 加一，例如 `0.2.20-tp.2`。不要改 `tokenProUpstreamVersion`。
 - 合并新的上游正式标签：把 `tokenProUpstreamVersion` 改成该标签的 `X.Y.Z`，并把 VERSION 文件写成 `X.Y.Z-tp.1`。
 - 手工或 CI 构建时，`VERSION` 构建参数必须是上述三种格式之一，并且和 VERSION 文件一致。不要再传入 PR 号或短 SHA。
-- 更新检查比较的是数字核心，不把 `-tp.N` 当成预发布。`0.2.19-tp.1` 等于上游 `0.2.19`。无法解析的当前版本按 `tokenProUpstreamVersion` 比较，不再当成 `0.0.0`。旧发行名 `TokenPro-R28`（没有 `-vX.Y.Z`）仍回落到这个常量。
+- 更新检查比较的是数字核心，不把 `-tp.N` 当成预发布。`0.2.20-tp.1` 等于上游 `0.2.20`。无法解析的当前版本按 `tokenProUpstreamVersion` 比较，不再当成 `0.0.0`。旧发行名 `TokenPro-R28`（没有 `-vX.Y.Z`）仍回落到这个常量。
 
-本地确认：`backend/scripts/resolve-version.sh`、`backend/scripts/resolve-version.sh 0.2.19-tp.1` 应打印版本；`backend/scripts/resolve-version.sh PR7-a34e450` 应忽略参数并打印 VERSION 文件。
+本地确认：`backend/scripts/resolve-version.sh`、`backend/scripts/resolve-version.sh 0.2.20-tp.1` 应打印版本；`backend/scripts/resolve-version.sh PR7-a34e450` 应忽略参数并打印 VERSION 文件。
 
 ## 后续升级约定
 
@@ -268,3 +268,21 @@ Gemini `/v1beta` 仍按第 3 节四步处理全局 Key，`allow_image_generation
 - **渠道按次图片档**：尺寸档未命中时用 token 用量匹配上下文档，避免记成 $0。
 - Gemini 默认模型列表去掉 2.0/2.5 和 3-pro-preview。仍要这些模型需在白名单或映射里自行配置。
 - 管理员 API Key 是新表，与用户全局 Key 的 `key_type` 无关。
+
+### v0.2.20 升级记录
+
+新分支 `upgrade/sub2api-v0.2.20-tokenpro` 从已部署提交 `619e567b`（`0.2.19-tp.1`，分支 `upgrade/sub2api-v0.2.18-tokenpro`）拉出，用 merge 合入官方标签 `v0.2.20`（`dab829a`，tag 对象 `ec41309`，tagger `shaw <dev@sub2api.org>`）。不 rebase，不改写已部署提交。PR #8 和 PR #9 保持打开。
+
+冲突处理：
+
+- `VERSION` 写成 `0.2.20-tp.1`。
+- 认证快照版本升到 27，带上 `require_privacy_set`，并保留 key 类型、白名单、Codex manifest 和 `image_count_billing`。
+- 图片 handler 同时套上尺寸档位分流和 TokenPro 生图授权。真实图片模型仍由图片账号映射决定，`gpt-image-2` 只作为托管桥接的计费实现细节。
+- 网关路由保留签名图片下载和 `TokenProImageTurnStore`，并把请求体内存预算传给 `RequestBodyLimit`。
+- 路由同时注册 MCP（默认关闭）和原来的全局 Key 网关。
+- 示例配置保留 TokenPro 图片链接配置，SSE 单行上限改为上游默认 500MiB。
+- 前端依赖采用 `follow-redirects >= 1.16.2` 和 `decode-uri-component >= 0.5.1`。侧栏测试同时保留模型广场和 MCP 入口。
+
+请求体预算的生效键是 `gateway.request_body_memory_budget_bytes`（默认 1GiB）、`gateway.request_body_read_timeout_seconds` 和 `gateway.downstream_write_timeout_seconds`（默认都是 120，0 表示关闭）。发行说明写的 `security.request_body_*` 不会被读取。MCP 只有 `mcp.public_url` / `MCP_PUBLIC_URL` 非空才启用，默认空。
+
+客户端断开后的上游 drain 有上限（默认跟随流间隔 180 秒，OpenAI 图片 API Key/OAuth 转发 900 秒）。窗口结束只结算已经观察到的用量。托管文本生图的计费公式没有改：文本一次，图像费一次。

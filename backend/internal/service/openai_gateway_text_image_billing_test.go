@@ -336,6 +336,56 @@ func TestOpenAIRecordUsage_PureImageTokenChannelStillSkipsPerImageFee(t *testing
 	require.NotEqual(t, imagePrice, usageRepo.lastLog.TotalCost)
 }
 
+// A hosted turn that produced no image bills the text tokens only, once.
+func TestOpenAIRecordUsage_HostedImageMissChargesTextOnly(t *testing.T) {
+	const (
+		inputTokens  = 1000
+		outputTokens = 162
+		groupRate    = 0.3
+		inputPrice   = 3e-6
+		outputPrice  = 1.5e-5
+	)
+	groupID := int64(16021)
+	imagePrice := 0.08
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	userRepo := &openAIRecordUsageUserRepoStub{}
+	svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, &openAIRecordUsageSubRepoStub{}, nil)
+	svc.resolver = newHostedTextImageChannelResolver(t, groupID, map[string]hostedTextImageChannelPrices{
+		"gpt-6-sol": {input: inputPrice, output: outputPrice, imageOutput: 3e-5},
+	})
+	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{
+			RequestID:    "resp_bridge_miss",
+			Model:        "gpt-6-sol",
+			BillingModel: "gpt-image-2",
+			Usage:        OpenAIUsage{InputTokens: inputTokens, OutputTokens: outputTokens},
+			ImageCount:   0,
+			Duration:     time.Second,
+		},
+		APIKey: &APIKey{
+			ID: 15, GroupID: i64p(groupID),
+			Group: &Group{
+				ID: groupID, Platform: PlatformOpenAI, RateMultiplier: groupRate,
+				ImageRateIndependent: true, ImageRateMultiplier: 1, ImagePrice2K: &imagePrice,
+				ImageCountBilling: true,
+			},
+		},
+		User:    &User{ID: 26},
+		Account: &Account{ID: 36, Platform: PlatformOpenAI, Type: AccountTypeAPIKey},
+		ChannelUsageFields: ChannelUsageFields{
+			OriginalModel: "gpt-6-sol", BillingModelSource: BillingModelSourceRequested,
+		},
+	})
+	text := (float64(inputTokens)*inputPrice + float64(outputTokens)*outputPrice) * groupRate
+	require.NoError(t, err)
+	require.Equal(t, 1, usageRepo.calls)
+	require.Equal(t, 1, userRepo.deductCalls)
+	require.Equal(t, 0, usageRepo.lastLog.ImageCount)
+	require.Zero(t, usageRepo.lastLog.ImageOutputCost)
+	require.InDelta(t, text, usageRepo.lastLog.ActualCost, 1e-12)
+	require.NotEqual(t, imagePrice, usageRepo.lastLog.TotalCost)
+}
+
 // image_count_billing must not replace a hosted text+image row with an
 // image-only charge, and must not add a second image fee. The text cost uses
 // the token rate once; the gpt-image-2 fee uses the image rate once.
