@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -15,9 +16,26 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 const tokenProHostedImagePublisherKey = "tokenpro_hosted_image_publisher"
+
+// TokenProInlineImageContextKey is set when the client sends
+// X-TokenPro-Image-Mode: native-v2. Those clients render a Responses
+// image_generation_call whose result is standard base64. Older clients keep
+// the local download or the signed URL.
+const TokenProInlineImageContextKey = "tokenpro_inline_image_v1"
+
+// tokenProReplayImageResultLimit is the largest image_generation_call result
+// kept on a later turn. Codex resends the full PNG base64 in input; multi-MB
+// values would be billed as text tokens. Short results stay so a placeholder
+// does not change shape.
+const tokenProReplayImageResultLimit = 8192
+
+func TokenProInlineImageDelivery(c *gin.Context) bool {
+	return c != nil && c.GetBool(TokenProInlineImageContextKey)
+}
 
 // TokenProHostedImagePublisher stores one upstream image and returns an HTTPS URL.
 // It must not record usage: the text-row forward already billed the image.
@@ -63,6 +81,7 @@ func armTokenProHostedImageDelivery(c *gin.Context, clientBody []byte) {
 		ginCtx:         c,
 		clientBody:     append([]byte(nil), clientBody...),
 		publish:        hostedImagePublisherFromContext(c),
+		inline:         TokenProInlineImageDelivery(c),
 	}
 }
 
@@ -85,6 +104,7 @@ type tokenProHostedImageWriter struct {
 	itemReady   bool
 	emitted     bool
 	logged      bool
+	inline      bool
 	maxIndex    int
 	sawIndex    bool
 	outputIndex int
@@ -201,6 +221,22 @@ func (w *tokenProHostedImageWriter) writeFrame(frame []byte) error {
 		return w.writeRaw(frame)
 	}
 	kind := gjson.GetBytes(data, "type").String()
+	if w.inline {
+		if strings.Contains(kind, "partial") || bytes.Contains(data, []byte("partial_image")) {
+			return nil
+		}
+		next, action, changed := normalizeInlineImagePayload(data)
+		if action == inlinePass {
+			w.noteIndex(data)
+			if changed {
+				w.logInline()
+			}
+			if bytes.Equal(next, data) {
+				return w.writeRaw(frame)
+			}
+			return w.writeRaw(replaceDataPayload(frame, next))
+		}
+	}
 	if dropHostedImageEvent(kind, data) {
 		w.capture(data)
 		return nil
@@ -242,6 +278,15 @@ func (w *tokenProHostedImageWriter) writeTerminal(frame, data []byte) error {
 }
 
 func (w *tokenProHostedImageWriter) rewriteDocument(p []byte) []byte {
+	if w.inline {
+		next, action, changed := normalizeInlineImagePayload(p)
+		if action == inlinePass {
+			if changed {
+				w.logInline()
+			}
+			return next
+		}
+	}
 	if !gjson.ValidBytes(p) || !bytes.Contains(p, []byte(`"image_generation_call"`)) {
 		return p
 	}
@@ -256,6 +301,14 @@ func (w *tokenProHostedImageWriter) rewriteDocument(p []byte) []byte {
 		w.logDelivery()
 	}
 	return rewritten
+}
+
+func (w *tokenProHostedImageWriter) logInline() {
+	if w.logged {
+		return
+	}
+	w.logged = true
+	logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Rewrote hosted image_generation_call as inline-v1")
 }
 
 func (w *tokenProHostedImageWriter) logDelivery() {
@@ -452,6 +505,148 @@ func (w *tokenProHostedImageWriter) writeData(event map[string]any) error {
 func (w *tokenProHostedImageWriter) writeRaw(frame []byte) error {
 	_, err := w.ResponseWriter.Write(append(append([]byte{}, frame...), []byte("\n\n")...))
 	return err
+}
+
+const (
+	inlinePass = iota
+	inlineFallback
+)
+
+// normalizeInlineImagePayload keeps a Responses image_generation_call that
+// Codex can paint. parse_turn_item requires id, status, and result; result is
+// decoded with the standard base64 alphabet. A terminal item that already
+// carries image bytes is marked completed, including upstream status
+// "generating", because that is the shape Codex persists and renders.
+// Events with no decodable image fall back to the local download or URL.
+func normalizeInlineImagePayload(data []byte) ([]byte, int, bool) {
+	if len(data) == 0 || !gjson.ValidBytes(data) || !bytes.Contains(data, []byte("image_generation_call")) {
+		return data, inlinePass, false
+	}
+	updated := data
+	changed := false
+	bad := false
+	var walk func(prefix string, value gjson.Result)
+	walk = func(prefix string, value gjson.Result) {
+		if bad {
+			return
+		}
+		if value.IsArray() {
+			for i, item := range value.Array() {
+				path := strconv.Itoa(i)
+				if prefix != "" {
+					path = prefix + "." + path
+				}
+				walk(path, item)
+			}
+			return
+		}
+		if !value.IsObject() {
+			return
+		}
+		if value.Get("type").String() == "image_generation_call" {
+			result := strings.TrimSpace(value.Get("result").String())
+			if result == "" {
+				result = strings.TrimSpace(value.Get("b64_json").String())
+			}
+			if strings.HasPrefix(result, "https://") || strings.HasPrefix(result, "http://") {
+				// Codex base64-decodes result. A URL there does not paint, so
+				// keep the signed-link fallback.
+				bad = true
+				return
+			}
+			if result == "" {
+				return
+			}
+			decoded, err := decodeHostedImage(result)
+			if err != nil || len(decoded) == 0 {
+				bad = true
+				return
+			}
+			path := func(field string) string {
+				if prefix == "" {
+					return field
+				}
+				return prefix + "." + field
+			}
+			encoded := base64.StdEncoding.EncodeToString(decoded)
+			changed = true
+			if encoded != value.Get("result").String() {
+				next, setErr := sjson.SetBytes(updated, path("result"), encoded)
+				if setErr != nil {
+					bad = true
+					return
+				}
+				updated = next
+			}
+			status := value.Get("status").String()
+			if status == "" || status == "generating" || status == "in_progress" {
+				next, setErr := sjson.SetBytes(updated, path("status"), "completed")
+				if setErr != nil {
+					bad = true
+					return
+				}
+				updated = next
+				changed = true
+			}
+			if strings.TrimSpace(value.Get("id").String()) == "" {
+				next, setErr := sjson.SetBytes(updated, path("id"), "ig_"+strings.ReplaceAll(uuid.NewString(), "-", ""))
+				if setErr != nil {
+					bad = true
+					return
+				}
+				updated = next
+				changed = true
+			}
+			return
+		}
+		value.ForEach(func(key, child gjson.Result) bool {
+			if child.IsArray() || child.IsObject() {
+				path := key.String()
+				if prefix != "" {
+					path = prefix + "." + path
+				}
+				walk(path, child)
+			}
+			return !bad
+		})
+	}
+	walk("", gjson.ParseBytes(data))
+	if bad {
+		return data, inlineFallback, false
+	}
+	return updated, inlinePass, changed
+}
+
+// StripTokenProReplayImageResults removes bulky image bytes from a later
+// turn's input. Codex sends the previous image_generation_call back with its
+// base64 result. The item stays, so the request shape is unchanged, but the
+// text model is not billed for the PNG.
+func StripTokenProReplayImageResults(body []byte) ([]byte, bool) {
+	if len(body) == 0 || !gjson.ValidBytes(body) || !bytes.Contains(body, []byte(`"image_generation_call"`)) {
+		return body, false
+	}
+	input := gjson.GetBytes(body, "input")
+	if !input.IsArray() {
+		return body, false
+	}
+	updated := body
+	changed := false
+	for i, item := range input.Array() {
+		if item.Get("type").String() != "image_generation_call" {
+			continue
+		}
+		result := item.Get("result").String()
+		if len(result) <= tokenProReplayImageResultLimit {
+			continue
+		}
+		next, err := sjson.SetBytes(updated, "input."+strconv.Itoa(i)+".result", "")
+		if err != nil {
+			return body, false
+		}
+		updated = next
+		changed = true
+	}
+	return updated, changed
 }
 
 func dropHostedImageEvent(kind string, data []byte) bool {

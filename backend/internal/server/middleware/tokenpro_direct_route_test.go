@@ -68,6 +68,41 @@ func TestDecodeTokenProDirectModelSupportsLegacyAndReadableRoutes(t *testing.T) 
 	}
 }
 
+func TestTokenProNativeV2MarksInlineImage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct {
+		name, mode, keyType string
+		want                bool
+	}{
+		{"desktop native-v2", "native-v2", service.APIKeyTypeGlobal, true},
+		{"legacy native-v1", "native-v1", service.APIKeyTypeGlobal, false},
+		{"no mode", "", service.APIKeyTypeGlobal, false},
+		{"group key still marked", "native-v2", "group", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := gin.New()
+			r.Use(func(c *gin.Context) {
+				c.Set(string(ContextKeyAPIKey), &service.APIKey{KeyType: tc.keyType})
+				c.Next()
+			})
+			r.Use(TokenProDirectRoute())
+			r.POST("/v1/responses", func(c *gin.Context) {
+				require.Equal(t, tc.want, service.TokenProInlineImageDelivery(c))
+				require.Empty(t, c.GetHeader("X-TokenPro-Image-Mode"))
+				c.Status(http.StatusNoContent)
+			})
+			req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.6-sol","input":"hi"}`))
+			req.Header.Set("Content-Type", "application/json")
+			if tc.mode != "" {
+				req.Header.Set("X-TokenPro-Image-Mode", tc.mode)
+			}
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			require.Equal(t, http.StatusNoContent, w.Code)
+		})
+	}
+}
+
 func TestTokenProNativeModeRequiresRoutedGlobalRequest(t *testing.T) {
 	for _, tc := range []struct {
 		name, model, keyType, path string

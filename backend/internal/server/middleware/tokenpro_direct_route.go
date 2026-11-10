@@ -43,6 +43,12 @@ func TokenProDirectRoute(stores ...service.TokenProImageTurnStore) gin.HandlerFu
 		// This is client configuration, never an upstream provider header.
 		imageRoute := strings.TrimSpace(c.GetHeader(tokenProImageRouteHeader))
 		imageMode := strings.TrimSpace(c.GetHeader("X-TokenPro-Image-Mode"))
+		if imageMode == "native-v2" {
+			// Codex desktop renders image_generation_call.result inline. The
+			// header is removed before upstream, so the delivery mode stays on
+			// the request.
+			c.Set(service.TokenProInlineImageContextKey, true)
+		}
 		imageTurnID := strings.TrimSpace(c.GetHeader("X-Codex-Image-Turn-Id"))
 		imageTurnHeaders := c.Request.Header.Values("X-Codex-Image-Turn-Id")
 		c.Request.Header.Del("X-Codex-Image-Turn-Id")

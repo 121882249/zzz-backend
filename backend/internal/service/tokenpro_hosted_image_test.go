@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -172,6 +173,103 @@ func TestCodexDesktopHostedImagePublishFailureStripsCall(t *testing.T) {
 	require.Contains(t, body, "图片没有保存下来，请再试一次。")
 }
 
+func TestCodexNativeV2HostedImageStreamsInlineCall(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tools := []any{
+		map[string]any{"type": "web_search"},
+		map[string]any{"type": "function", "name": "wait"},
+	}
+	var publishes atomic.Int32
+	c, rec, _ := armDesktopHostedImageMode(t, desktopCodeModeBody(t, tools), func(context.Context, string, []byte) (string, error) {
+		publishes.Add(1)
+		return "https://tokenpro.work/cat.png?exp=1&sig=ff", nil
+	}, true)
+
+	counter := newOpenAIImageOutputCounter()
+	writeHostedSSE(t, c, counter, `{"type":"response.output_item.done","output_index":0,"item":{"type":"message","content":[{"type":"output_text","text":"画好啦"}]}}`)
+	writeHostedSSE(t, c, counter, `{"type":"response.image_generation_call.partial_image","output_index":1,"item_id":"ig_cat","partial_image_b64":"`+hostedTestPNG+`"}`)
+	imageDone := `{"type":"response.output_item.done","output_index":1,"item":{"id":"ig_cat","type":"image_generation_call","status":"generating","output_format":"png","result":"` + hostedTestPNG + `"}}`
+	writeHostedSSE(t, c, counter, imageDone)
+	writeHostedSSE(t, c, counter, `{"type":"response.completed","response":{"id":"resp_cat","output":[{"type":"message","content":[{"type":"output_text","text":"画好啦"}]},{"id":"ig_cat","type":"image_generation_call","status":"generating","result":"`+hostedTestPNG+`"}],"usage":{"input_tokens":11,"output_tokens":22,"total_tokens":33}}}`)
+	c.Writer.Flush()
+
+	require.Equal(t, 1, counter.Count(), "upstream image billing still sees the hosted result once")
+	require.Equal(t, int32(0), publishes.Load(), "inline delivery does not store a second copy")
+	body := rec.Body.String()
+	require.NotContains(t, body, "partial_image")
+	require.NotContains(t, body, "图片已生成")
+	require.NotContains(t, body, "custom_tool_call")
+	require.Equal(t, 1, countOpenAIImageOutputsFromSSEBody(body))
+
+	var done gjson.Result
+	var completed gjson.Result
+	for _, event := range gjsonEvents(body) {
+		switch event.Get("type").String() {
+		case "response.output_item.done":
+			if event.Get("item.type").String() == "image_generation_call" {
+				done = event
+			}
+		case "response.completed":
+			completed = event
+		}
+	}
+	require.Equal(t, "ig_cat", done.Get("item.id").String())
+	require.Equal(t, "completed", done.Get("item.status").String())
+	require.Equal(t, hostedTestPNG, done.Get("item.result").String())
+	require.Equal(t, "image_generation_call", completed.Get("response.output.1.type").String())
+	require.Equal(t, "completed", completed.Get("response.output.1.status").String())
+	require.Equal(t, hostedTestPNG, completed.Get("response.output.1.result").String())
+	require.Equal(t, "画好啦", completed.Get("response.output.0.content.0.text").String())
+	require.Equal(t, int64(11), completed.Get("response.usage.input_tokens").Int())
+	require.Equal(t, int64(22), completed.Get("response.usage.output_tokens").Int())
+}
+
+func TestCodexNativeV2HostedImageJSON(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	var publishes atomic.Int32
+	c, rec, _ := armDesktopHostedImageMode(t, desktopCodeModeBody(t, nil), func(context.Context, string, []byte) (string, error) {
+		publishes.Add(1)
+		return "https://tokenpro.work/cat.png?exp=1&sig=ff", nil
+	}, true)
+	c.Writer.Header().Set("Content-Type", "application/json")
+	payload := []byte(`{"id":"resp_cat","object":"response","model":"gpt-6-sol","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"画好啦"}]},{"id":"ig_cat","type":"image_generation_call","status":"completed","output_format":"png","result":"` + hostedTestPNG + `"}],"usage":{"input_tokens":11,"output_tokens":22,"total_tokens":33}}`)
+	counter := newOpenAIImageOutputCounter()
+	counter.AddJSONResponse(payload)
+	_, err := c.Writer.Write(payload)
+	require.NoError(t, err)
+
+	require.Equal(t, 1, counter.Count())
+	require.Equal(t, int32(0), publishes.Load())
+	body := rec.Body.String()
+	require.NotContains(t, body, "图片已生成")
+	require.NotContains(t, body, "custom_tool_call")
+	require.Equal(t, "image_generation_call", gjson.Get(body, "output.1.type").String())
+	require.Equal(t, hostedTestPNG, gjson.Get(body, "output.1.result").String())
+	require.Equal(t, int64(11), gjson.Get(body, "usage.input_tokens").Int())
+	require.Equal(t, 1, countOpenAIResponseImageOutputsFromJSONBytes([]byte(body)))
+}
+
+func TestStripTokenProReplayImageResults(t *testing.T) {
+	big := strings.Repeat("A", tokenProReplayImageResultLimit+8)
+	body := []byte(`{"model":"gpt-6-sol","input":[{"type":"image_generation_call","id":"ig_1","status":"completed","result":"` + big + `"},{"type":"message","role":"user","content":"再改一下"}]}`)
+	out, changed := StripTokenProReplayImageResults(body)
+	require.True(t, changed)
+	require.Empty(t, gjson.GetBytes(out, "input.0.result").String())
+	require.Equal(t, "ig_1", gjson.GetBytes(out, "input.0.id").String())
+	require.Equal(t, "image_generation_call", gjson.GetBytes(out, "input.0.type").String())
+	require.Equal(t, "再改一下", gjson.GetBytes(out, "input.1.content").String())
+
+	short := []byte(`{"input":[{"type":"image_generation_call","id":"ig_1","result":"Zm9v"}]}`)
+	out, changed = StripTokenProReplayImageResults(short)
+	require.False(t, changed)
+	require.Equal(t, "Zm9v", gjson.GetBytes(out, "input.0.result").String())
+
+	plain := []byte(`{"input":"hello"}`)
+	out, changed = StripTokenProReplayImageResults(plain)
+	require.False(t, changed)
+	require.Equal(t, plain, out)
+}
+
 func TestHostedImageWriterLeavesTextOnlyStream(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	var publishes atomic.Int32
@@ -240,12 +338,20 @@ func (m *hostedImageMem) snapshot() map[string]TokenProLocalImageRecord {
 
 func armDesktopHostedImage(t *testing.T, clientBody []byte, publish TokenProHostedImagePublisher) (*gin.Context, *httptest.ResponseRecorder, *hostedImageMem) {
 	t.Helper()
+	return armDesktopHostedImageMode(t, clientBody, publish, false)
+}
+
+func armDesktopHostedImageMode(t *testing.T, clientBody []byte, publish TokenProHostedImagePublisher, inline bool) (*gin.Context, *httptest.ResponseRecorder, *hostedImageMem) {
+	t.Helper()
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 	req.Header.Set("User-Agent", "Codex Desktop/0.163.0-alpha.10.2 (Codex Desktop; 26.1013.40934)")
 	req.Header.Set("originator", "codex_chatgpt_desktop")
 	c.Request = req
+	if inline {
+		c.Set(TokenProInlineImageContextKey, true)
+	}
 	groupID := int64(16)
 	c.Set("api_key", &APIKey{
 		ID: 9, UserID: 7, Key: "global-desktop", KeyType: APIKeyTypeGlobal, GroupID: &groupID,
