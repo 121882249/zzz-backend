@@ -70,6 +70,8 @@ Codex OAuth/SetupToken 账号的原生图片接口独立于文本模型映射。
 
 当聊天模型本身是生图模型（分组 `description` 去空白后等于 `生图`），并且请求**没有**携带 `image_gen.imagegen` 工具时，后端直接生图，在 Responses 的 assistant `output_text` 里返回 HTTPS 链接，例如 `图片已生成：https://tokenpro.work/...`。请求工具里真有 `image_gen.imagegen`，或历史里已有 `call_tp_pure_` / `call_tp_receipt_` 时，仍走原来的 native-v1 function call，不在这里生图。
 
+文本模型经 Codex 图片桥生成的图，按客户端分开交付。请求头 `X-TokenPro-Image-Mode: native-v2` 时，Responses 流式和非流式都保留 `image_generation_call`，`result` 是标准 base64，终态 `status` 为 `completed`，对应 Codex 的 `response.output_item.done`。不带这个头的客户端仍走本机下载或签名链接。后续轮次输入里过长的 `image_generation_call.result` 会清空后再转发，避免把 PNG 当成文本 token 计费；本轮图片费仍只按上游实际生成的张数记一次。
+
 链接优先来自已启用的 `image_storage`（必须是 HTTPS，公开域名或 presigned 都可以）。没有可用对象存储时，使用签名下载：
 
 - `gateway.tokenpro_image_public_base_url`：公网 HTTPS 源站，例如 `https://tokenpro.work`，不要带 `/v1`。
