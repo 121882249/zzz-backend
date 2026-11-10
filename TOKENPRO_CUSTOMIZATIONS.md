@@ -1,6 +1,6 @@
 # TokenPro 二次开发清单
 
-当前分支以 Sub2API `v0.2.20`（`dab829a`）为底层版本。构建版本是 `0.2.20-tp.1`：`backend/cmd/server/VERSION` 为 `0.2.20-tp.1`，`backend/internal/service/update_service.go` 中的 `tokenProUpstreamVersion` 为 `0.2.20`。管理端按数字核心比较上游，`0.2.20-tp.N` 与上游 `v0.2.20` 相同，不会提示可更新。此文件用于后续升级时区分上游改动和本项目改动。已部署回滚点仍是 `619e567b`（`0.2.19-tp.1`），在分支 `upgrade/sub2api-v0.2.18-tokenpro`，没有被改写。
+当前分支以 Sub2API `v0.2.20`（`dab829a`）为底层版本。构建版本是 `0.2.20-tp.2`：`backend/cmd/server/VERSION` 为 `0.2.20-tp.2`，`backend/internal/service/update_service.go` 中的 `tokenProUpstreamVersion` 为 `0.2.20`。管理端按数字核心比较上游，`0.2.20-tp.N` 与上游 `v0.2.20` 相同，不会提示可更新。此文件用于后续升级时区分上游改动和本项目改动。已部署回滚点仍是 `619e567b`（`0.2.19-tp.1`），在分支 `upgrade/sub2api-v0.2.18-tokenpro`，没有被改写。
 
 下文路径中 `backend/internal/` 简写为 `be/`，`frontend/src/` 简写为 `fe/`。
 
@@ -117,7 +117,7 @@ v0.2.17 重写了退款（待定期间保留扣减，网关失败后原子回退
 
 ## 9. 品牌、文档与部署
 
-- 构建版本号是 semver `X.Y.Z-tp.N`（当前 `0.2.20-tp.1`）。管理端徽章对非 `TokenPro-` 前缀补一个 `v`，所以界面显示 `v0.2.20-tp.1`。上游是否可更新只比较 `tokenProUpstreamVersion` 解析出的 `X.Y.Z`。
+- 构建版本号是 semver `X.Y.Z-tp.N`（当前 `0.2.20-tp.2`）。管理端徽章对非 `TokenPro-` 前缀补一个 `v`，所以界面显示 `v0.2.20-tp.2`。上游是否可更新只比较 `tokenProUpstreamVersion` 解析出的 `X.Y.Z`。
 - 管理员登录后检查底层新版本；同一浏览器会话对同一版本只提醒一次。
 - Agent 使用文档页面、菜单、样式和中英文内容。
 - 低内存 Docker 构建文件 `deploy/Dockerfile.lowmem`（Go 1.27.3，需与 `go.mod` 一致）。
