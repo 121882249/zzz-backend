@@ -298,7 +298,7 @@ Gemini `/v1beta` 仍按第 3 节四步处理全局 Key，`allow_image_generation
 - `VERSION` 写成 `0.2.21-tp.1`，`tokenProUpstreamVersion` 改为 `0.2.21`。
 - `PaymentView.vue`：文案仍用 TokenPro 的 `{balance}`（「1 {currency} = {balance} USD 余额」），数值改走上游 `formatBalanceRechargeMultiplier`，最多 6 位小数。
 - `KeysView.spec.ts`：表格桩同时渲染全局 Key 的 `cell-actions` 和上游新增的 `cell-usage`。
-- `refresh_token_cache.go`：双方都加了原子消费方法，合并后出现两个 `ConsumeRefreshToken`。保留一份，Lua 脚本用上游版本，空值判断用 `errors.Is`。桌面登录票据仍走原来的 `RefreshTokenConsumer`。
+- `refresh_token_cache.go`：双方都加了原子消费方法和同名 Lua 脚本，合并后各出现两份。保留上游脚本和一份 `ConsumeRefreshToken`，空值判断用 `errors.Is`。桌面登录票据仍走原来的 `RefreshTokenConsumer`。
 
 其余双方都改过的文件由 git 自动合并，并核对过：
 
