@@ -3,12 +3,25 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/redis/go-redis/v9"
 )
+
+// consumeRefreshTokenScript atomically reads and deletes a refresh token.
+// Rotation must only succeed for one concurrent caller, otherwise the same
+// token can be exchanged twice (double-spend).
+var consumeRefreshTokenScript = redis.NewScript(`
+	local value = redis.call('GET', KEYS[1])
+	if not value then
+		return nil
+	end
+	redis.call('DEL', KEYS[1])
+	return value
+`)
 
 const (
 	refreshTokenKeyPrefix   = "refresh_token:"
@@ -34,14 +47,6 @@ func tokenFamilyKey(familyID string) string {
 type refreshTokenCache struct {
 	rdb *redis.Client
 }
-
-var consumeRefreshTokenScript = redis.NewScript(`
-local value = redis.call("GET", KEYS[1])
-if value then
-  redis.call("DEL", KEYS[1])
-end
-return value
-`)
 
 // NewRefreshTokenCache creates a new RefreshTokenCache implementation.
 func NewRefreshTokenCache(rdb *redis.Client) service.RefreshTokenCache {
@@ -76,7 +81,7 @@ func (c *refreshTokenCache) GetRefreshToken(ctx context.Context, tokenHash strin
 func (c *refreshTokenCache) ConsumeRefreshToken(ctx context.Context, tokenHash string) (*service.RefreshTokenData, error) {
 	val, err := consumeRefreshTokenScript.Run(ctx, c.rdb, []string{refreshTokenKey(tokenHash)}).Text()
 	if err != nil {
-		if err == redis.Nil {
+		if errors.Is(err, redis.Nil) {
 			return nil, service.ErrRefreshTokenNotFound
 		}
 		return nil, err
