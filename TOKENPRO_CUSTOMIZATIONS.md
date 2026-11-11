@@ -120,7 +120,7 @@ v0.2.17 重写了退款（待定期间保留扣减，网关失败后原子回退
 - 构建版本号是 semver `X.Y.Z-tp.N`（当前 `0.2.21-tp.1`）。管理端徽章对非 `TokenPro-` 前缀补一个 `v`，所以界面显示 `v0.2.21-tp.1`。上游是否可更新只比较 `tokenProUpstreamVersion` 解析出的 `X.Y.Z`。
 - 管理员登录后检查底层新版本；同一浏览器会话对同一版本只提醒一次。
 - Agent 使用文档页面、菜单、样式和中英文内容。
-- 低内存 Docker 构建文件 `deploy/Dockerfile.lowmem`（Go 1.27.3，需与 `go.mod` 一致）。
+- 低内存 Docker 构建文件 `deploy/Dockerfile.lowmem`（Go 1.27.4，需与 `go.mod` 一致）。
 - CI 工作流 `.github/workflows/tokenpro-server-image.yml` 推送镜像到 ghcr.io，使用 `GITHUB_TOKEN`，需要 packages 写权限。
 - 服务器配置沿用 `deploy/config.example.yaml`。v0.2.17 新增可选项 `gateway.min_output_tokens`，默认 128。
 
@@ -308,4 +308,4 @@ Gemini `/v1beta` 仍按第 3 节四步处理全局 Key，`allow_image_generation
 - Codex 页面上下文规范化发生在图片结果清空和全局 Key 解析之后，只改 `function_call_output`，不改 `image_generation_call`。
 - 原生 Codex 生图请求（带 `X-Codex-Image-Turn-Id`）不再被 Images JSON 心跳提前写成 200。文本模型的托管桥接不走这条心跳。
 
-没有重新生成 Ent 或 wire：`usage_log` schema 与生成代码由 git 合并，fork 的 `api_keys.key_type` 和 `groups.image_rate_*` 仍在。Go 工具链仍是 1.27.3。
+没有重新生成 Ent 或 wire：`usage_log` schema 与生成代码由 git 合并，fork 的 `api_keys.key_type` 和 `groups.image_rate_*` 仍在。合并当时工具链是 1.27.3。随后 `govulncheck` 报标准库 `GO-2026-6859`（`net/http` 的 `MaxBytesReader` 头竞争，可打崩 HTTP/1 服务），修复版本是 Go 1.27.4。`go.mod`、CI 版本检查、根目录与 `deploy/`、`backend/` 的 Dockerfile 都改到 1.27.4，应用代码没动。
