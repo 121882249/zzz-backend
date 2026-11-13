@@ -43,8 +43,10 @@
             <div class="card p-5" data-testid="recharge-account-card">
               <p class="text-xs font-medium text-gray-400 dark:text-gray-500">{{ t('payment.rechargeAccount') }}</p>
               <p class="mt-1 text-base font-semibold text-gray-900 dark:text-white">{{ user?.username || '' }}</p>
-              <p class="mt-0.5 text-sm font-medium text-green-600 dark:text-green-400">{{ t('payment.currentBalance') }}: {{ user?.balance?.toFixed(2) || '0.00' }}</p>
-              <p class="mt-2 text-sm font-medium text-amber-600 dark:text-amber-400" data-testid="large-recharge-hint">{{ t('payment.largeRechargeHint') }}</p>
+              <p class="mt-0.5 flex flex-wrap items-baseline gap-x-3 gap-y-1" data-testid="recharge-balance-row">
+                <span class="text-sm font-medium text-green-600 dark:text-green-400">{{ t('payment.currentBalance') }}: {{ user?.balance?.toFixed(2) || '0.00' }}</span>
+                <span class="text-xs font-medium text-amber-600 dark:text-amber-400" data-testid="large-recharge-hint">{{ t('payment.largeRechargeHint') }}</span>
+              </p>
             </div>
             <div v-if="enabledMethods.length === 0" class="card py-16 text-center">
               <p class="text-gray-500 dark:text-gray-400">{{ t('payment.notAvailable') }}</p>
