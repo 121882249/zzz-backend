@@ -428,7 +428,7 @@ describe('PaymentView large recharge hint', () => {
     expect(en.payment.largeRechargeHint).toBe('For large top-ups, message the site owner privately for a discount.')
   })
 
-  it('shows the hint on the same row as the current balance, after the amount', async () => {
+  it('shows the hint on the same row as the current balance, aligned to the right', async () => {
     routeState.path = '/purchase'
     routeState.query = {}
     getCheckoutInfo.mockReset().mockResolvedValue(checkoutInfoFixture())
@@ -445,9 +445,10 @@ describe('PaymentView large recharge hint', () => {
 
     const card = wrapper.get('[data-testid="recharge-account-card"]')
     const row = card.get('[data-testid="recharge-balance-row"]')
-    expect(row.classes()).toEqual(expect.arrayContaining(['flex', 'flex-wrap']))
+    expect(row.classes()).toEqual(expect.arrayContaining(['flex', 'flex-wrap', 'justify-between']))
     const hint = row.get('[data-testid="large-recharge-hint"]')
     expect(hint.text()).toBe('payment.largeRechargeHint')
+    expect(hint.classes()).toEqual(expect.arrayContaining(['ml-auto', 'text-right']))
     expect(hint.element.parentElement).toBe(row.element)
     const text = row.text()
     expect(text.indexOf('payment.currentBalance')).toBeGreaterThanOrEqual(0)

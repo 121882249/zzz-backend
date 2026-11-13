@@ -89,7 +89,7 @@ Codex OAuth/SetupToken 账号的原生图片接口独立于文本模型映射。
 - 支付渠道配置、渠道限额、固定手续费、到账倍率、订阅倍率、币种名称、负载均衡。
 - 订单保存渠道快照；旧的全局商业配置和产品名一次性迁移到渠道。
 - 保留 TokenPro 结果页和 Stripe 手动返回。
-- 充值账户卡把「大额充值私聊站长 优惠」（`payment.largeRechargeHint`）放在「当前余额」同一行、紧跟余额数字；窄屏可以整段换行。后台充值赠送公告和帮助文案仍在各自卡片里，不替代这句。
+- 充值账户卡把「大额充值私聊站长 优惠」（`payment.largeRechargeHint`）放在「当前余额」同一行的最右侧；窄屏换行后提示仍靠右。后台充值赠送公告和帮助文案仍在各自卡片里，不替代这句。
 
 关键文件：`be/service/payment_order.go`、`payment_order_provider_snapshot.go`、`payment_config_{limits,providers,service}.go`、`payment_fulfillment.go`、`payment_service.go`、`payment_provider_commercial_migration.go`、`payment_provider_product_name_migration.go`、`be/payment/fee.go`、`load_balancer.go`、`be/handler/payment_handler.go`、`be/handler/admin/payment_handler.go`。前端：`fe/views/user/PaymentView.vue`、`StripePaymentView.vue`、`PaymentResultView.vue`、`fe/components/payment/`。后台旧全局商业设置用 `v-if="false"` 隐藏。
 
