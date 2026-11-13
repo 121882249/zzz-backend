@@ -418,6 +418,54 @@ describe('PaymentView per-method recharge pricing', () => {
   })
 })
 
+describe('PaymentView large recharge hint', () => {
+  afterEach(() => {
+    appStoreState.setPublicSettings(undefined)
+  })
+
+  it('keeps the requested Chinese copy and an equivalent English line', () => {
+    expect(zh.payment.largeRechargeHint).toBe('大额充值私聊站长 优惠')
+    expect(en.payment.largeRechargeHint).toBe('For large top-ups, message the site owner privately for a discount.')
+  })
+
+  it('shows the hint on the same row as the current balance, aligned to the right', async () => {
+    routeState.path = '/purchase'
+    routeState.query = {}
+    getCheckoutInfo.mockReset().mockResolvedValue(checkoutInfoFixture())
+    const wrapper = shallowMount(PaymentView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          Teleport: true,
+          Transition: false,
+        },
+      },
+    })
+    await flushPromises()
+
+    const card = wrapper.get('[data-testid="recharge-account-card"]')
+    const row = card.get('[data-testid="recharge-balance-row"]')
+    expect(row.classes()).toEqual(expect.arrayContaining(['flex', 'flex-wrap', 'justify-between']))
+    const hint = row.get('[data-testid="large-recharge-hint"]')
+    expect(hint.text()).toBe('payment.largeRechargeHint')
+    expect(hint.classes()).toEqual(expect.arrayContaining(['ml-auto', 'text-right']))
+    expect(hint.element.parentElement).toBe(row.element)
+    const text = row.text()
+    expect(text.indexOf('payment.currentBalance')).toBeGreaterThanOrEqual(0)
+    expect(text.indexOf('payment.currentBalance')).toBeLessThan(text.indexOf('payment.largeRechargeHint'))
+    wrapper.unmount()
+  })
+
+  it('hides the hint when neither top-up nor subscriptions are available', async () => {
+    appStoreState.setPublicSettings({ subscription_enabled: false })
+    const wrapper = await mountSubscriptionConfirm({ checkout: { balance_disabled: true } })
+
+    expect(wrapper.find('[data-testid="recharge-account-card"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('payment.largeRechargeHint')
+    wrapper.unmount()
+  })
+})
+
 describe('PaymentView recharge rate preview', () => {
   it('uses the selected payment method currency in both locale templates', async () => {
     translate.mockClear()
