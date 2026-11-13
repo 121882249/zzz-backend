@@ -418,6 +418,49 @@ describe('PaymentView per-method recharge pricing', () => {
   })
 })
 
+describe('PaymentView large recharge hint', () => {
+  afterEach(() => {
+    appStoreState.setPublicSettings(undefined)
+  })
+
+  it('keeps the requested Chinese copy and an equivalent English line', () => {
+    expect(zh.payment.largeRechargeHint).toBe('大额充值私聊站长 优惠')
+    expect(en.payment.largeRechargeHint).toBe('For large top-ups, message the site owner privately for a discount.')
+  })
+
+  it('shows the hint on the recharge account card, under the current balance', async () => {
+    routeState.path = '/purchase'
+    routeState.query = {}
+    getCheckoutInfo.mockReset().mockResolvedValue(checkoutInfoFixture())
+    const wrapper = shallowMount(PaymentView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          Teleport: true,
+          Transition: false,
+        },
+      },
+    })
+    await flushPromises()
+
+    const card = wrapper.get('[data-testid="recharge-account-card"]')
+    const text = card.text()
+    expect(text).toContain('payment.currentBalance')
+    expect(text.indexOf('payment.currentBalance')).toBeLessThan(text.indexOf('payment.largeRechargeHint'))
+    expect(card.get('[data-testid="large-recharge-hint"]').text()).toBe('payment.largeRechargeHint')
+    wrapper.unmount()
+  })
+
+  it('hides the hint when neither top-up nor subscriptions are available', async () => {
+    appStoreState.setPublicSettings({ subscription_enabled: false })
+    const wrapper = await mountSubscriptionConfirm({ checkout: { balance_disabled: true } })
+
+    expect(wrapper.find('[data-testid="recharge-account-card"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('payment.largeRechargeHint')
+    wrapper.unmount()
+  })
+})
+
 describe('PaymentView recharge rate preview', () => {
   it('uses the selected payment method currency in both locale templates', async () => {
     translate.mockClear()

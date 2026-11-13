@@ -396,6 +396,7 @@ export default {
     currentBalance: 'Current Balance',
     groupFallback: 'Group #{id}',
     rechargeAccount: 'Recharge Account',
+    largeRechargeHint: 'For large top-ups, message the site owner privately for a discount.',
     activeSubscription: 'Active Subscription',
     noActiveSubscription: 'No active subscription',
     tabTopUp: 'Top Up',
