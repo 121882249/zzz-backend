@@ -93,16 +93,25 @@ func ParseTokenProLocalImageFollowUp(body []byte) (TokenProLocalImageFollowUp, b
 	return follow, true
 }
 
-// TokenProLocalImageAssistantText is the desktop markdown image, or the HTTPS
-// link when the download did not print an absolute path.
+// TokenProLocalImageAssistantText is the desktop markdown image. When the
+// download did not print an allowed path, the reply is a markdown image plus
+// one clickable link, never the plain "图片已生成：" sentence.
 func TokenProLocalImageAssistantText(output, imageURL string) string {
 	if path, ok := tokenProLocalImagePath(output); ok {
 		return "![](" + path + ")\n图片已保存，可在对话里直接查看。"
 	}
-	if strings.HasPrefix(strings.TrimSpace(imageURL), "https://") {
-		return TokenProChatImageSuccessText(imageURL, "")
+	if url := strings.TrimSpace(imageURL); strings.HasPrefix(url, "https://") {
+		return "![](" + url + ")\n[" + url + "](" + url + ")"
 	}
 	return "图片已生成，但没有保存到本机。请再试一次。"
+}
+
+// TokenProLocalImageMissReason explains why a download follow-up did not yield
+// an allowed local path. The reason is a short code. It never includes the
+// output, the URL, or image bytes.
+func TokenProLocalImageMissReason(output string) string {
+	_, reason := classifyTokenProLocalImagePath(output)
+	return reason
 }
 
 // TokenProLocalImageDownloadAvailable reports a shell or exec tool Codex can
@@ -648,21 +657,35 @@ func flattenLocalImageOutput(output gjson.Result) string {
 var tokenProLocalImagePathPattern = regexp.MustCompile(`TOKENPRO_IMAGE_PATH\s+([A-Za-z]:/[A-Za-z0-9._~/-]+|/[A-Za-z0-9._~/-]+)`)
 
 func tokenProLocalImagePath(output string) (string, bool) {
-	if strings.Contains(output, tokenProLocalImageFail) {
-		return "", false
-	}
-	match := tokenProLocalImagePathPattern.FindStringSubmatch(output)
-	if len(match) != 2 {
-		return "", false
-	}
-	path := match[1]
-	if strings.Contains(path, "..") || strings.Contains(path, ")") {
-		return "", false
-	}
-	if !strings.Contains(path, "/"+tokenProLocalImageDir+"/") {
+	path, reason := classifyTokenProLocalImagePath(output)
+	if reason != "" {
 		return "", false
 	}
 	return path, true
+}
+
+func classifyTokenProLocalImagePath(output string) (string, string) {
+	if strings.TrimSpace(output) == "" {
+		return "", "empty_output"
+	}
+	if strings.Contains(output, tokenProLocalImageFail) {
+		return "", "fail_marker"
+	}
+	match := tokenProLocalImagePathPattern.FindStringSubmatch(output)
+	if len(match) != 2 {
+		if strings.Contains(output, strings.TrimSpace(tokenProLocalImageMarker)) {
+			return "", "path_unparsed"
+		}
+		return "", "no_marker"
+	}
+	path := match[1]
+	if strings.Contains(path, "..") || strings.Contains(path, ")") {
+		return "", "path_rejected"
+	}
+	if !strings.Contains(path, "/"+tokenProLocalImageDir+"/") {
+		return "", "path_outside_dir"
+	}
+	return path, ""
 }
 
 func localImageURLFromCommand(command string) string {

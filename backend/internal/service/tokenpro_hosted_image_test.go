@@ -18,7 +18,7 @@ import (
 
 const hostedTestPNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
 
-func TestCodexDesktopTextModelHostedImageStreamsLocalExec(t *testing.T) {
+func TestOtherClientTextModelHostedImageStreamsLocalExec(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	clientBody := desktopCodeModeBody(t, nil)
 	var decoded map[string]any
@@ -28,7 +28,7 @@ func TestCodexDesktopTextModelHostedImageStreamsLocalExec(t *testing.T) {
 
 	var publishes atomic.Int32
 	var published []byte
-	c, rec, mem := armDesktopHostedImage(t, clientBody, func(_ context.Context, contentType string, data []byte) (string, error) {
+	c, rec, mem := armOtherClientHostedImage(t, clientBody, func(_ context.Context, contentType string, data []byte) (string, error) {
 		publishes.Add(1)
 		require.Equal(t, "image/png", contentType)
 		published = append([]byte(nil), data...)
@@ -41,8 +41,9 @@ func TestCodexDesktopTextModelHostedImageStreamsLocalExec(t *testing.T) {
 	require.True(t, apiKey.IsGlobal())
 	require.True(t, GroupAllowsImageGeneration(apiKey.Group))
 	require.Equal(t, int64(16), apiKey.Group.ID)
-	require.Equal(t, "Codex Desktop/0.163.0-alpha.10.2 (Codex Desktop; 26.1013.40934)", c.Request.UserAgent())
-	require.Equal(t, "codex_chatgpt_desktop", c.GetHeader("originator"))
+	require.Equal(t, "claude-code/1.0.0", c.Request.UserAgent())
+	require.Equal(t, "claude-code", c.GetHeader("originator"))
+	require.False(t, TokenProResponsesInlineImage(c))
 
 	counter := newOpenAIImageOutputCounter()
 	writeHostedSSE(t, c, counter, `{"type":"response.output_item.done","output_index":0,"item":{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"画好啦","annotations":[]}]}}`)
@@ -98,11 +99,11 @@ func TestCodexDesktopTextModelHostedImageStreamsLocalExec(t *testing.T) {
 	}
 }
 
-func TestCodexDesktopTextModelHostedImageJSON(t *testing.T) {
+func TestOtherClientTextModelHostedImageJSON(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	clientBody := desktopCodeModeBody(t, nil)
 	var publishes atomic.Int32
-	c, rec, _ := armDesktopHostedImage(t, clientBody, func(context.Context, string, []byte) (string, error) {
+	c, rec, _ := armOtherClientHostedImage(t, clientBody, func(context.Context, string, []byte) (string, error) {
 		publishes.Add(1)
 		return "https://tokenpro.work/cat.png?exp=1&sig=ff", nil
 	})
@@ -124,14 +125,14 @@ func TestCodexDesktopTextModelHostedImageJSON(t *testing.T) {
 	require.Equal(t, int64(11), gjson.Get(body, "usage.input_tokens").Int())
 }
 
-func TestCodexDesktopHostedImageFallsBackToLink(t *testing.T) {
+func TestOtherClientHostedImageFallsBackToLink(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	tools := []any{
 		map[string]any{"type": "web_search"},
 		map[string]any{"type": "function", "name": "wait"},
 		map[string]any{"type": "function", "name": "request_user_input"},
 	}
-	c, rec, mem := armDesktopHostedImage(t, desktopCodeModeBody(t, tools), func(context.Context, string, []byte) (string, error) {
+	c, rec, mem := armOtherClientHostedImage(t, desktopCodeModeBody(t, tools), func(context.Context, string, []byte) (string, error) {
 		return "https://tokenpro.work/cat.png?exp=1&sig=ff", nil
 	})
 	counter := newOpenAIImageOutputCounter()
@@ -154,9 +155,9 @@ func TestCodexDesktopHostedImageFallsBackToLink(t *testing.T) {
 	require.Empty(t, mem.snapshot())
 }
 
-func TestCodexDesktopHostedImagePublishFailureStripsCall(t *testing.T) {
+func TestOtherClientHostedImagePublishFailureStripsCall(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	c, rec, _ := armDesktopHostedImage(t, desktopCodeModeBody(t, nil), func(context.Context, string, []byte) (string, error) {
+	c, rec, _ := armOtherClientHostedImage(t, desktopCodeModeBody(t, nil), func(context.Context, string, []byte) (string, error) {
 		return "", errTokenProHostedImageURL
 	})
 	counter := newOpenAIImageOutputCounter()
@@ -247,6 +248,109 @@ func TestCodexNativeV2HostedImageJSON(t *testing.T) {
 	require.Equal(t, hostedTestPNG, gjson.Get(body, "output.1.result").String())
 	require.Equal(t, int64(11), gjson.Get(body, "usage.input_tokens").Int())
 	require.Equal(t, 1, countOpenAIResponseImageOutputsFromJSONBytes([]byte(body)))
+}
+
+func TestOfficialCodexWithoutHeaderKeepsInlineImage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, client := range []struct {
+		name, ua, originator string
+	}{
+		{"desktop", "Codex Desktop/0.167.0-alpha.4.1 (Windows 10.0.19045; x86_64)", "Codex Desktop"},
+		{"cli rs", "codex_cli_rs/0.99.0", ""},
+		{"codex cli", "Codex CLI/1.2.3", ""},
+	} {
+		t.Run(client.name, func(t *testing.T) {
+			var publishes atomic.Int32
+			c, rec, _ := armClientHostedImage(t, client.ua, client.originator, desktopCodeModeBody(t, nil), func(context.Context, string, []byte) (string, error) {
+				publishes.Add(1)
+				return "https://tokenpro.work/cat.png?exp=1&sig=ff", nil
+			}, false)
+			require.True(t, TokenProResponsesInlineImage(c))
+			require.False(t, TokenProInlineImageDelivery(c))
+			c.Writer.Header().Set("Content-Type", "application/json")
+			payload := []byte(`{"id":"resp_cat","object":"response","model":"gpt-6-sol","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"画好啦"}]},{"id":"ig_cat","type":"image_generation_call","status":"generating","output_format":"png","result":"` + hostedTestPNG + `"}],"usage":{"input_tokens":11,"output_tokens":22,"total_tokens":33}}`)
+			counter := newOpenAIImageOutputCounter()
+			counter.AddJSONResponse(payload)
+			_, err := c.Writer.Write(payload)
+			require.NoError(t, err)
+			require.Equal(t, 1, counter.Count())
+			require.Equal(t, int32(0), publishes.Load())
+			body := rec.Body.String()
+			require.NotContains(t, body, "图片已生成")
+			require.NotContains(t, body, "custom_tool_call")
+			require.Equal(t, "image_generation_call", gjson.Get(body, "output.1.type").String())
+			require.Equal(t, "completed", gjson.Get(body, "output.1.status").String())
+			require.Equal(t, hostedTestPNG, gjson.Get(body, "output.1.result").String())
+			require.Equal(t, int64(11), gjson.Get(body, "usage.input_tokens").Int())
+			require.Equal(t, 1, countOpenAIResponseImageOutputsFromJSONBytes([]byte(body)))
+		})
+	}
+}
+
+func TestOfficialCodexWithoutHeaderStreamsInlineImage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	var publishes atomic.Int32
+	c, rec, _ := armClientHostedImage(t,
+		"Codex Desktop/0.167.0-alpha.4.1 (Windows 10.0.19045; x86_64)",
+		"Codex Desktop",
+		desktopCodeModeBody(t, nil),
+		func(context.Context, string, []byte) (string, error) {
+			publishes.Add(1)
+			return "https://tokenpro.work/cat.png?exp=1&sig=ff", nil
+		},
+		false,
+	)
+	require.False(t, TokenProInlineImageDelivery(c))
+	counter := newOpenAIImageOutputCounter()
+	writeHostedSSE(t, c, counter, `{"type":"response.output_item.done","output_index":0,"item":{"type":"message","content":[{"type":"output_text","text":"画好啦"}]}}`)
+	writeHostedSSE(t, c, counter, `{"type":"response.image_generation_call.partial_image","output_index":1,"item_id":"ig_cat","partial_image_b64":"`+hostedTestPNG+`"}`)
+	imageDone := `{"type":"response.output_item.done","output_index":1,"item":{"id":"ig_cat","type":"image_generation_call","status":"generating","output_format":"png","result":"` + hostedTestPNG + `"}}`
+	writeHostedSSE(t, c, counter, imageDone)
+	writeHostedSSE(t, c, counter, `{"type":"response.completed","response":{"id":"resp_cat","output":[{"type":"message","content":[{"type":"output_text","text":"画好啦"}]},{"id":"ig_cat","type":"image_generation_call","status":"generating","result":"`+hostedTestPNG+`"}],"usage":{"input_tokens":11,"output_tokens":22,"total_tokens":33}}}`)
+	c.Writer.Flush()
+
+	require.Equal(t, 1, counter.Count())
+	require.Equal(t, int32(0), publishes.Load())
+	body := rec.Body.String()
+	require.NotContains(t, body, "partial_image")
+	require.NotContains(t, body, "图片已生成")
+	require.NotContains(t, body, "custom_tool_call")
+	var done gjson.Result
+	var completed gjson.Result
+	for _, event := range gjsonEvents(body) {
+		switch event.Get("type").String() {
+		case "response.output_item.done":
+			if event.Get("item.type").String() == "image_generation_call" {
+				done = event
+			}
+		case "response.completed":
+			completed = event
+		}
+	}
+	require.Equal(t, "ig_cat", done.Get("item.id").String())
+	require.Equal(t, "completed", done.Get("item.status").String())
+	require.Equal(t, hostedTestPNG, done.Get("item.result").String())
+	require.Equal(t, "image_generation_call", completed.Get("response.output.1.type").String())
+	require.Equal(t, "completed", completed.Get("response.output.1.status").String())
+	require.Equal(t, hostedTestPNG, completed.Get("response.output.1.result").String())
+	require.Equal(t, int64(11), completed.Get("response.usage.input_tokens").Int())
+	require.Equal(t, int64(22), completed.Get("response.usage.output_tokens").Int())
+}
+
+func TestBuildTokenProInlineImageCallUsesStandardBase64(t *testing.T) {
+	png := []byte{0x89, 'P', 'N', 'G'}
+	item, ok := BuildTokenProInlineImageCall(png, "image/png")
+	require.True(t, ok)
+	require.Equal(t, "image_generation_call", item["type"])
+	require.Equal(t, "completed", item["status"])
+	require.Equal(t, "png", item["output_format"])
+	require.Equal(t, base64.StdEncoding.EncodeToString(png), item["result"])
+	require.True(t, strings.HasPrefix(item["id"].(string), "ig_"))
+	jpeg, ok := BuildTokenProInlineImageCall(png, "image/jpeg")
+	require.True(t, ok)
+	require.Equal(t, "jpeg", jpeg["output_format"])
+	_, ok = BuildTokenProInlineImageCall(nil, "image/png")
+	require.False(t, ok)
 }
 
 func TestStripTokenProReplayImageResults(t *testing.T) {
@@ -341,13 +445,25 @@ func armDesktopHostedImage(t *testing.T, clientBody []byte, publish TokenProHost
 	return armDesktopHostedImageMode(t, clientBody, publish, false)
 }
 
+func armOtherClientHostedImage(t *testing.T, clientBody []byte, publish TokenProHostedImagePublisher) (*gin.Context, *httptest.ResponseRecorder, *hostedImageMem) {
+	t.Helper()
+	return armClientHostedImage(t, "claude-code/1.0.0", "claude-code", clientBody, publish, false)
+}
+
 func armDesktopHostedImageMode(t *testing.T, clientBody []byte, publish TokenProHostedImagePublisher, inline bool) (*gin.Context, *httptest.ResponseRecorder, *hostedImageMem) {
+	t.Helper()
+	return armClientHostedImage(t, "Codex Desktop/0.163.0-alpha.10.2 (Codex Desktop; 26.1013.40934)", "codex_chatgpt_desktop", clientBody, publish, inline)
+}
+
+func armClientHostedImage(t *testing.T, userAgent, originator string, clientBody []byte, publish TokenProHostedImagePublisher, inline bool) (*gin.Context, *httptest.ResponseRecorder, *hostedImageMem) {
 	t.Helper()
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-	req.Header.Set("User-Agent", "Codex Desktop/0.163.0-alpha.10.2 (Codex Desktop; 26.1013.40934)")
-	req.Header.Set("originator", "codex_chatgpt_desktop")
+	req.Header.Set("User-Agent", userAgent)
+	if originator != "" {
+		req.Header.Set("originator", originator)
+	}
 	c.Request = req
 	if inline {
 		c.Set(TokenProInlineImageContextKey, true)

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
@@ -23,8 +24,9 @@ const tokenProHostedImagePublisherKey = "tokenpro_hosted_image_publisher"
 
 // TokenProInlineImageContextKey is set when the client sends
 // X-TokenPro-Image-Mode: native-v2. Those clients render a Responses
-// image_generation_call whose result is standard base64. Older clients keep
-// the local download or the signed URL.
+// image_generation_call whose result is standard base64. Official Codex
+// clients get the same item without the header. Other clients keep the local
+// download or the signed URL.
 const TokenProInlineImageContextKey = "tokenpro_inline_image_v1"
 
 // tokenProReplayImageResultLimit is the largest image_generation_call result
@@ -35,6 +37,49 @@ const tokenProReplayImageResultLimit = 8192
 
 func TokenProInlineImageDelivery(c *gin.Context) bool {
 	return c != nil && c.GetBool(TokenProInlineImageContextKey)
+}
+
+// TokenProResponsesInlineImage is the native-v2 image_generation_call delivery.
+// The header opts any client in. Official Codex (Desktop, CLI, codex_cli_rs,
+// and the rest of the first-party family) paints that item without the header,
+// so those requests must not be sent down the exec download path.
+func TokenProResponsesInlineImage(c *gin.Context) bool {
+	if TokenProInlineImageDelivery(c) {
+		return true
+	}
+	if c == nil || c.Request == nil {
+		return false
+	}
+	return openai.IsCodexOfficialClientByHeaders(c.Request.UserAgent(), c.GetHeader("originator"))
+}
+
+// BuildTokenProInlineImageCall is the Responses item Codex paints. id, status,
+// and result are required; result is standard base64 and status is completed.
+func BuildTokenProInlineImageCall(data []byte, contentType string) (map[string]any, bool) {
+	if len(data) == 0 {
+		return nil, false
+	}
+	return map[string]any{
+		"id":            "ig_" + strings.ReplaceAll(uuid.NewString(), "-", ""),
+		"type":          "image_generation_call",
+		"status":        "completed",
+		"output_format": tokenProInlineImageFormat(contentType),
+		"result":        base64.StdEncoding.EncodeToString(data),
+	}, true
+}
+
+func tokenProInlineImageFormat(contentType string) string {
+	value := strings.ToLower(strings.TrimSpace(contentType))
+	switch {
+	case strings.Contains(value, "jpeg"), strings.Contains(value, "jpg"):
+		return "jpeg"
+	case strings.Contains(value, "webp"):
+		return "webp"
+	case strings.Contains(value, "gif"):
+		return "gif"
+	default:
+		return "png"
+	}
 }
 
 // TokenProHostedImagePublisher stores one upstream image and returns an HTTPS URL.
@@ -81,7 +126,7 @@ func armTokenProHostedImageDelivery(c *gin.Context, clientBody []byte) {
 		ginCtx:         c,
 		clientBody:     append([]byte(nil), clientBody...),
 		publish:        hostedImagePublisherFromContext(c),
-		inline:         TokenProInlineImageDelivery(c),
+		inline:         TokenProResponsesInlineImage(c),
 	}
 }
 
