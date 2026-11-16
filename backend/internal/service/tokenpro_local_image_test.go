@@ -152,14 +152,21 @@ func TestParseTokenProLocalImageFollowUp(t *testing.T) {
 	failed := followUpBody(t, "画一只猫", "TOKENPRO_IMAGE_FAIL\ncurl: (6) could not resolve", "tokenpro_image_url=https://tokenpro.work/cat.png", false)
 	follow, ok = ParseTokenProLocalImageFollowUp(failed)
 	require.True(t, ok)
-	require.Equal(t, "图片已生成：https://tokenpro.work/cat.png", TokenProLocalImageAssistantText(follow.Output, follow.URL))
+	require.Equal(t, tokenProHTTPSImageMarkdown("https://tokenpro.work/cat.png"), TokenProLocalImageAssistantText(follow.Output, follow.URL))
+	require.Equal(t, "fail_marker", TokenProLocalImageMissReason(follow.Output))
 	require.Equal(t, "图片已生成，但没有保存到本机。请再试一次。", TokenProLocalImageAssistantText("boom", ""))
-	require.Equal(t, "图片已生成：https://tokenpro.work/cat.png", TokenProLocalImageAssistantText("no marker", "https://tokenpro.work/cat.png"))
+	require.Equal(t, "no_marker", TokenProLocalImageMissReason("no marker"))
+	require.Equal(t, tokenProHTTPSImageMarkdown("https://tokenpro.work/cat.png"), TokenProLocalImageAssistantText("no marker", "https://tokenpro.work/cat.png"))
+	require.Equal(t, "empty_output", TokenProLocalImageMissReason("  "))
+	require.Empty(t, TokenProLocalImageMissReason("TOKENPRO_IMAGE_PATH "+path))
 
 	outside := "TOKENPRO_IMAGE_PATH /tmp/evil.png"
-	require.Equal(t, "图片已生成：https://tokenpro.work/cat.png", TokenProLocalImageAssistantText(outside, "https://tokenpro.work/cat.png"))
+	require.Equal(t, "path_outside_dir", TokenProLocalImageMissReason(outside))
+	require.Equal(t, tokenProHTTPSImageMarkdown("https://tokenpro.work/cat.png"), TokenProLocalImageAssistantText(outside, "https://tokenpro.work/cat.png"))
 	traversal := "TOKENPRO_IMAGE_PATH /Users/me/.codex/generated_images/tokenpro/../secret.png"
-	require.Equal(t, "图片已生成：https://tokenpro.work/cat.png", TokenProLocalImageAssistantText(traversal, "https://tokenpro.work/cat.png"))
+	require.Equal(t, "path_rejected", TokenProLocalImageMissReason(traversal))
+	require.Equal(t, tokenProHTTPSImageMarkdown("https://tokenpro.work/cat.png"), TokenProLocalImageAssistantText(traversal, "https://tokenpro.work/cat.png"))
+	require.Equal(t, "path_unparsed", TokenProLocalImageMissReason("TOKENPRO_IMAGE_PATH not a path"))
 
 	again := followUpBody(t, "再画一张", "TOKENPRO_IMAGE_PATH "+path, "tokenpro_image_url=https://tokenpro.work/cat.png", true)
 	_, ok = ParseTokenProLocalImageFollowUp(again)
@@ -280,6 +287,10 @@ func TestBuildTokenProLocalImageCallUsesCodeModeExec(t *testing.T) {
 	require.Equal(t, "https://tokenpro.work/cat.png", follow.URL)
 	require.Contains(t, follow.Output, "TOKENPRO_IMAGE_PATH /Users/me/.codex/generated_images/tokenpro/thread/abc.png")
 	require.Equal(t, "![](/Users/me/.codex/generated_images/tokenpro/thread/abc.png)\n图片已保存，可在对话里直接查看。", TokenProLocalImageAssistantText(follow.Output, follow.URL))
+}
+
+func tokenProHTTPSImageMarkdown(url string) string {
+	return "![](" + url + ")\n[" + url + "](" + url + ")"
 }
 
 func localImageArgs(t *testing.T, item map[string]any) gjson.Result {

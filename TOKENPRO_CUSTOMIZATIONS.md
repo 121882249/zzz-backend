@@ -1,6 +1,6 @@
 # TokenPro 二次开发清单
 
-当前分支以 Sub2API `v0.2.21`（`10ba8f9`，tag 对象 `43f1529`）为底层版本。构建版本是 `0.2.21-tp.2`：`backend/cmd/server/VERSION` 为 `0.2.21-tp.2`，`backend/internal/service/update_service.go` 中的 `tokenProUpstreamVersion` 为 `0.2.21`。管理端按数字核心比较上游，`0.2.21-tp.N` 与上游 `v0.2.21` 相同，不会提示可更新。此文件用于后续升级时区分上游改动和本项目改动。已部署回滚点仍是 `619e567b`（`0.2.19-tp.1`），在分支 `upgrade/sub2api-v0.2.18-tokenpro`，没有被改写。生产当前运行的 `0.2.20-tp.2`（`11e1c431`，分支 `cursor/codex-inline-image-86e2`）也没有被改写。
+当前分支以 Sub2API `v0.2.21`（`10ba8f9`，tag 对象 `43f1529`）为底层版本。构建版本是 `0.2.21-tp.3`：`backend/cmd/server/VERSION` 为 `0.2.21-tp.3`，`backend/internal/service/update_service.go` 中的 `tokenProUpstreamVersion` 为 `0.2.21`。管理端按数字核心比较上游，`0.2.21-tp.N` 与上游 `v0.2.21` 相同，不会提示可更新。此文件用于后续升级时区分上游改动和本项目改动。已部署回滚点仍是 `619e567b`（`0.2.19-tp.1`），在分支 `upgrade/sub2api-v0.2.18-tokenpro`，没有被改写。上一版生产包 `0.2.21-tp.2`（`fb52b7f15`，分支 `cursor/recharge-large-hint-798d`）也没有被改写。
 
 下文路径中 `backend/internal/` 简写为 `be/`，`frontend/src/` 简写为 `fe/`。
 
@@ -68,9 +68,9 @@ Codex OAuth/SetupToken 账号的原生图片接口独立于文本模型映射。
 
 图片权限由分组 `allow_image_generation` 控制。上游改 wire 依赖时要重新生成 `cmd/server/wire_gen.go`，不要手工拼接。
 
-当聊天模型本身是生图模型（分组 `description` 去空白后等于 `生图`），并且请求**没有**携带 `image_gen.imagegen` 工具时，后端直接生图，在 Responses 的 assistant `output_text` 里返回 HTTPS 链接，例如 `图片已生成：https://tokenpro.work/...`。请求工具里真有 `image_gen.imagegen`，或历史里已有 `call_tp_pure_` / `call_tp_receipt_` 时，仍走原来的 native-v1 function call，不在这里生图。
+当聊天模型本身是生图模型（分组 `description` 去空白后等于 `生图`），并且请求**没有**携带 `image_gen.imagegen` 工具时，后端直接生图。官方 Codex 客户端（User-Agent 或 originator 命中官方家族，包括 `Codex Desktop`、`Codex CLI`、`codex_cli_rs`、`codex_vscode` 等）即使没有 `X-TokenPro-Image-Mode: native-v2`，Responses 流式和非流式也返回 `image_generation_call`：`result` 是标准 base64，终态 `status` 为 `completed`，字段与 native-v2 一致，不再下发 exec 本机下载。其他客户端在 Responses 的 assistant `output_text` 里返回 HTTPS 链接，例如 `图片已生成：https://tokenpro.work/...`；请求里有 shell/exec 时仍下发本机下载。本机下载的后续轮次如果没有解析到允许目录下的绝对路径，助手文本改为 markdown 图片加一行可点击链接（`![](https://…)` 与 `[url](url)`），并记录不含密钥、URL 和图片数据的原因码。请求工具里真有 `image_gen.imagegen`，或历史里已有 `call_tp_pure_` / `call_tp_receipt_` 时，仍走原来的 native-v1 function call，不在这里生图。生图组按单图计费一次，下载回执轮次不重复计费。
 
-文本模型经 Codex 图片桥生成的图，按客户端分开交付。请求头 `X-TokenPro-Image-Mode: native-v2` 时，Responses 流式和非流式都保留 `image_generation_call`，`result` 是标准 base64，终态 `status` 为 `completed`，对应 Codex 的 `response.output_item.done`。不带这个头的客户端仍走本机下载或签名链接。后续轮次输入里过长的 `image_generation_call.result` 会清空后再转发，避免把 PNG 当成文本 token 计费；本轮图片费仍只按上游实际生成的张数记一次。
+文本模型经 Codex 图片桥生成的图，按客户端分开交付。请求头 `X-TokenPro-Image-Mode: native-v2`，或客户端是上面的官方 Codex 家族时，Responses 流式和非流式都保留 `image_generation_call`，`result` 是标准 base64，终态 `status` 为 `completed`，对应 Codex 的 `response.output_item.done`。其他不带这个头的客户端仍走本机下载或签名链接。后续轮次输入里过长的 `image_generation_call.result` 会清空后再转发，避免把 PNG 当成文本 token 计费；本轮图片费仍只按上游实际生成的张数记一次，文本 token 另计一次，不会因为内联再加一笔。
 
 链接优先来自已启用的 `image_storage`（必须是 HTTPS，公开域名或 presigned 都可以）。没有可用对象存储时，使用签名下载：
 
@@ -118,7 +118,7 @@ v0.2.17 重写了退款（待定期间保留扣减，网关失败后原子回退
 
 ## 9. 品牌、文档与部署
 
-- 构建版本号是 semver `X.Y.Z-tp.N`（当前 `0.2.21-tp.2`）。管理端徽章对非 `TokenPro-` 前缀补一个 `v`，所以界面显示 `v0.2.21-tp.2`。上游是否可更新只比较 `tokenProUpstreamVersion` 解析出的 `X.Y.Z`。
+- 构建版本号是 semver `X.Y.Z-tp.N`（当前 `0.2.21-tp.3`）。管理端徽章对非 `TokenPro-` 前缀补一个 `v`，所以界面显示 `v0.2.21-tp.3`。上游是否可更新只比较 `tokenProUpstreamVersion` 解析出的 `X.Y.Z`。
 - 管理员登录后检查底层新版本；同一浏览器会话对同一版本只提醒一次。
 - Agent 使用文档页面、菜单、样式和中英文内容。
 - 低内存 Docker 构建文件 `deploy/Dockerfile.lowmem`（Go 1.27.4，需与 `go.mod` 一致）。
@@ -172,7 +172,7 @@ R83 升级删除了以下误提交的备份文件，后续不要再提交 `*.bef
 
 以后这样改版本：
 
-- 仍基于当前上游、只发 TokenPro 改动：把 `backend/cmd/server/VERSION` 的 `tp.N` 加一，例如 `0.2.21-tp.2`。不要改 `tokenProUpstreamVersion`。
+- 仍基于当前上游、只发 TokenPro 改动：把 `backend/cmd/server/VERSION` 的 `tp.N` 加一，例如 `0.2.21-tp.3`。不要改 `tokenProUpstreamVersion`。
 - 合并新的上游正式标签：把 `tokenProUpstreamVersion` 改成该标签的 `X.Y.Z`，并把 VERSION 文件写成 `X.Y.Z-tp.1`。
 - 手工或 CI 构建时，`VERSION` 构建参数必须是上述三种格式之一，并且和 VERSION 文件一致。不要再传入 PR 号或短 SHA。
 - 更新检查比较的是数字核心，不把 `-tp.N` 当成预发布。`0.2.21-tp.1` 等于上游 `0.2.21`。无法解析的当前版本按 `tokenProUpstreamVersion` 比较，不再当成 `0.0.0`。旧发行名 `TokenPro-R28`（没有 `-vX.Y.Z`）仍回落到这个常量。

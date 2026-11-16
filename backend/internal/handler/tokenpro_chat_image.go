@@ -95,7 +95,10 @@ func (h *OpenAIGatewayHandler) dispatchTokenProChatImage(c *gin.Context, apiKey 
 	}
 
 	mode := "url-v1"
-	if service.TokenProLocalImageDownloadAvailable(body) {
+	inlineImage := service.TokenProResponsesInlineImage(c)
+	if inlineImage {
+		mode = "inline-v1"
+	} else if service.TokenProLocalImageDownloadAvailable(body) {
 		mode = "local-v1"
 	}
 	var sse *tokenProChatImageSSE
@@ -121,6 +124,14 @@ func (h *OpenAIGatewayHandler) dispatchTokenProChatImage(c *gin.Context, apiKey 
 	}
 	if generated.Result != nil && generated.Result.ImageCount > 0 {
 		h.recordTokenProChatImageUsage(c, apiKey, generated.Account, generated.Result, body)
+	}
+	if inlineImage {
+		if item, ok := service.BuildTokenProInlineImageCall(generated.Bytes, generated.ContentType); ok {
+			h.logTokenProChatImageDispatch(c, body, "inline")
+			h.writeTokenProChatImageOutput(c, sse, model, item, generated.Result, stream, "inline-v1")
+			succeeded = true
+			return true
+		}
 	}
 	if item, ok := service.BuildTokenProLocalImageCall(body, imageURL, tokenProChatImageThreadID(c, body)); ok {
 		h.logTokenProChatImageDispatch(c, body, "local")
@@ -151,9 +162,13 @@ func (h *OpenAIGatewayHandler) finishTokenProLocalImageFollowUp(c *gin.Context, 
 	text := service.TokenProLocalImageAssistantText(follow.Output, imageURL)
 	mode := "url-v1"
 	choice := "url"
-	if strings.HasPrefix(text, "![") {
+	// A saved local file is "![](/path)". The HTTPS fallback is "![](https://…)"
+	// and must stay on the URL path so it is not counted as a local render.
+	if strings.HasPrefix(text, "![") && !strings.HasPrefix(text, "![](http") {
 		mode = "local-v1"
 		choice = "local"
+	} else {
+		h.logTokenProLocalImageMiss(c, follow.Output, imageURL)
 	}
 	h.logTokenProChatImageDispatch(c, body, choice)
 	var sse *tokenProChatImageSSE
@@ -681,6 +696,20 @@ func (h *OpenAIGatewayHandler) writeTokenProChatImageOutput(c *gin.Context, sse 
 	}
 	_ = sse.write(gin.H{"type": "response.output_item.done", "output_index": 0, "item": item})
 	_ = sse.write(gin.H{"type": "response.completed", "response": response})
+}
+
+func (h *OpenAIGatewayHandler) logTokenProLocalImageMiss(c *gin.Context, output, imageURL string) {
+	reason := service.TokenProLocalImageMissReason(output)
+	if reason == "" {
+		return
+	}
+	requestLogger(c, "handler.tokenpro_chat_image").Info("tokenpro.chat_image.local_followup",
+		zap.String("reason", reason),
+		zap.Int("output_bytes", len(output)),
+		zap.Bool("fail_marker", strings.Contains(output, "TOKENPRO_IMAGE_FAIL")),
+		zap.Bool("path_marker", strings.Contains(output, "TOKENPRO_IMAGE_PATH")),
+		zap.Bool("https_url", strings.HasPrefix(strings.TrimSpace(imageURL), "https://")),
+	)
 }
 
 func (h *OpenAIGatewayHandler) logTokenProChatImageDispatch(c *gin.Context, body []byte, mode string) {
