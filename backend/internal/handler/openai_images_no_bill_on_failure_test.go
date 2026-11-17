@@ -22,13 +22,18 @@ import (
 
 type openAIImagesFixedHTTPUpstream struct {
 	service.HTTPUpstream
+	status      int
 	contentType string
 	body        string
 }
 
 func (u *openAIImagesFixedHTTPUpstream) Do(_ *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	status := u.status
+	if status == 0 {
+		status = http.StatusOK
+	}
 	return &http.Response{
-		StatusCode: http.StatusOK,
+		StatusCode: status,
 		Header:     http.Header{"Content-Type": []string{u.contentType}},
 		Body:       io.NopCloser(bytes.NewBufferString(u.body)),
 	}, nil
@@ -86,6 +91,20 @@ func TestOpenAIImages_StreamErrorEventWithoutImagesIsNotBilled(t *testing.T) {
 		body:        "data: {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"rejected\"}}\n\n",
 	}, `{"model":"gpt-image-1","prompt":"cat","stream":true}`)
 	require.Empty(t, logs.FilterMessage("openai.images.request_completed").All())
+}
+
+func TestOpenAIImages_ClientAndServerErrorsAreNotBilled(t *testing.T) {
+	for _, status := range []int{http.StatusBadRequest, http.StatusInternalServerError, http.StatusBadGateway} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			logs := runImagesNoBillCase(t, &openAIImagesFixedHTTPUpstream{
+				status:      status,
+				contentType: "application/json",
+				body:        `{"error":{"message":"rejected","type":"invalid_request_error"}}`,
+			}, `{"model":"gpt-image-1","prompt":"cat","n":2}`)
+			require.Empty(t, logs.FilterMessage("openai.images.request_completed").All())
+			require.Empty(t, logs.FilterMessage("openai.images.success_without_images_not_billed").All())
+		})
+	}
 }
 
 func TestOpenAIImagesResultBillable(t *testing.T) {

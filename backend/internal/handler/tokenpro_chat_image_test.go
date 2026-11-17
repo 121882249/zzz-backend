@@ -118,6 +118,19 @@ func TestTokenProChatImageNonStreamAndNativeV1Unchanged(t *testing.T) {
 	require.Equal(t, int32(1), billed.Load())
 }
 
+func TestRecordTokenProChatImageUsageSkipsFollowUpWithoutImages(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	var billed atomic.Int32
+	h := &OpenAIGatewayHandler{}
+	h.chatImageRecordUsage = func(*service.OpenAIRecordUsageInput) { billed.Add(1) }
+	h.recordTokenProChatImageUsage(c, tokenProChatImageKey(), &service.Account{ID: 1}, &service.OpenAIForwardResult{ImageCount: 0, Model: "gpt-image-2"}, nil)
+	h.recordTokenProChatImageUsage(c, tokenProChatImageKey(), &service.Account{ID: 1}, nil, nil)
+	require.Equal(t, int32(0), billed.Load())
+}
+
 func TestTokenProChatImageErrorDoesNotBill(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
