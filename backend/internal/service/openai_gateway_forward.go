@@ -499,10 +499,11 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		if codexImageGenerationBridgeEnabled && ensureOpenAIResponsesImageGenerationTool(decoded) {
 			markDecodedModified()
 			logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Injected /responses image_generation tool for Codex client")
-			// The text-row forward already bills this image once. native-v2 and
-			// official Codex clients receive the image_generation_call so Codex
-			// can paint it. Other clients still get the local download or the
-			// signed URL. A second image-group generation would charge again.
+			// The text-row forward already bills this image once. native-v2
+			// clients receive the image_generation_call so Codex can paint it.
+			// Official Codex without that header, and every other client, still
+			// get the local download or the signed URL. A second image-group
+			// generation would charge again.
 			armTokenProHostedImageDelivery(c, body)
 		}
 		if codexImageGenerationBridgeEnabled && ensureOpenAIResponsesImageGenerationToolChoiceAuto(decoded) {

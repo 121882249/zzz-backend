@@ -250,7 +250,7 @@ func TestCodexNativeV2HostedImageJSON(t *testing.T) {
 	require.Equal(t, 1, countOpenAIResponseImageOutputsFromJSONBytes([]byte(body)))
 }
 
-func TestOfficialCodexWithoutHeaderKeepsInlineImage(t *testing.T) {
+func TestOfficialCodexWithoutHeaderUsesLocalDownload(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, client := range []struct {
 		name, ua, originator string
@@ -258,14 +258,15 @@ func TestOfficialCodexWithoutHeaderKeepsInlineImage(t *testing.T) {
 		{"desktop", "Codex Desktop/0.167.0-alpha.4.1 (Windows 10.0.19045; x86_64)", "Codex Desktop"},
 		{"cli rs", "codex_cli_rs/0.99.0", ""},
 		{"codex cli", "Codex CLI/1.2.3", ""},
+		{"originator only", "Mozilla/5.0", "codex_cli_rs"},
 	} {
 		t.Run(client.name, func(t *testing.T) {
 			var publishes atomic.Int32
-			c, rec, _ := armClientHostedImage(t, client.ua, client.originator, desktopCodeModeBody(t, nil), func(context.Context, string, []byte) (string, error) {
+			c, rec, mem := armClientHostedImage(t, client.ua, client.originator, desktopCodeModeBody(t, nil), func(context.Context, string, []byte) (string, error) {
 				publishes.Add(1)
 				return "https://tokenpro.work/cat.png?exp=1&sig=ff", nil
 			}, false)
-			require.True(t, TokenProResponsesInlineImage(c))
+			require.False(t, TokenProResponsesInlineImage(c))
 			require.False(t, TokenProInlineImageDelivery(c))
 			c.Writer.Header().Set("Content-Type", "application/json")
 			payload := []byte(`{"id":"resp_cat","object":"response","model":"gpt-6-sol","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"画好啦"}]},{"id":"ig_cat","type":"image_generation_call","status":"generating","output_format":"png","result":"` + hostedTestPNG + `"}],"usage":{"input_tokens":11,"output_tokens":22,"total_tokens":33}}`)
@@ -273,21 +274,25 @@ func TestOfficialCodexWithoutHeaderKeepsInlineImage(t *testing.T) {
 			counter.AddJSONResponse(payload)
 			_, err := c.Writer.Write(payload)
 			require.NoError(t, err)
-			require.Equal(t, 1, counter.Count())
-			require.Equal(t, int32(0), publishes.Load())
+			require.Equal(t, 1, counter.Count(), "upstream image billing still sees the hosted result once")
+			require.Equal(t, int32(1), publishes.Load())
 			body := rec.Body.String()
-			require.NotContains(t, body, "图片已生成")
-			require.NotContains(t, body, "custom_tool_call")
-			require.Equal(t, "image_generation_call", gjson.Get(body, "output.1.type").String())
-			require.Equal(t, "completed", gjson.Get(body, "output.1.status").String())
-			require.Equal(t, hostedTestPNG, gjson.Get(body, "output.1.result").String())
+			require.NotContains(t, body, "image_generation_call")
+			require.NotContains(t, body, hostedTestPNG)
+			require.NotContains(t, body, "inline-v1")
+			require.Equal(t, "画好啦", gjson.Get(body, "output.0.content.0.text").String())
+			require.Equal(t, "custom_tool_call", gjson.Get(body, "output.1.type").String())
+			input := gjson.Get(body, "output.1.input").String()
+			require.Contains(t, input, "tools.exec_command")
+			require.Contains(t, input, "TOKENPRO_IMAGE_PATH")
+			require.Contains(t, input, "tokenpro_image_url=https://tokenpro.work/cat.png?exp=1&sig=ff")
 			require.Equal(t, int64(11), gjson.Get(body, "usage.input_tokens").Int())
-			require.Equal(t, 1, countOpenAIResponseImageOutputsFromJSONBytes([]byte(body)))
+			require.Len(t, mem.snapshot(), 1)
 		})
 	}
 }
 
-func TestOfficialCodexWithoutHeaderStreamsInlineImage(t *testing.T) {
+func TestOfficialCodexWithoutHeaderStreamsLocalDownload(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	var publishes atomic.Int32
 	c, rec, _ := armClientHostedImage(t,
@@ -300,6 +305,7 @@ func TestOfficialCodexWithoutHeaderStreamsInlineImage(t *testing.T) {
 		},
 		false,
 	)
+	require.False(t, TokenProResponsesInlineImage(c))
 	require.False(t, TokenProInlineImageDelivery(c))
 	counter := newOpenAIImageOutputCounter()
 	writeHostedSSE(t, c, counter, `{"type":"response.output_item.done","output_index":0,"item":{"type":"message","content":[{"type":"output_text","text":"画好啦"}]}}`)
@@ -309,30 +315,30 @@ func TestOfficialCodexWithoutHeaderStreamsInlineImage(t *testing.T) {
 	writeHostedSSE(t, c, counter, `{"type":"response.completed","response":{"id":"resp_cat","output":[{"type":"message","content":[{"type":"output_text","text":"画好啦"}]},{"id":"ig_cat","type":"image_generation_call","status":"generating","result":"`+hostedTestPNG+`"}],"usage":{"input_tokens":11,"output_tokens":22,"total_tokens":33}}}`)
 	c.Writer.Flush()
 
-	require.Equal(t, 1, counter.Count())
-	require.Equal(t, int32(0), publishes.Load())
+	require.Equal(t, 1, counter.Count(), "upstream image billing still sees the hosted result once")
+	require.Equal(t, int32(1), publishes.Load())
 	body := rec.Body.String()
 	require.NotContains(t, body, "partial_image")
-	require.NotContains(t, body, "图片已生成")
-	require.NotContains(t, body, "custom_tool_call")
-	var done gjson.Result
+	require.NotContains(t, body, "image_generation_call")
+	require.NotContains(t, body, hostedTestPNG)
+	require.NotContains(t, body, "inline-v1")
+	var inputDone gjson.Result
 	var completed gjson.Result
 	for _, event := range gjsonEvents(body) {
 		switch event.Get("type").String() {
-		case "response.output_item.done":
-			if event.Get("item.type").String() == "image_generation_call" {
-				done = event
-			}
+		case "response.custom_tool_call_input.done":
+			inputDone = event
 		case "response.completed":
 			completed = event
 		}
 	}
-	require.Equal(t, "ig_cat", done.Get("item.id").String())
-	require.Equal(t, "completed", done.Get("item.status").String())
-	require.Equal(t, hostedTestPNG, done.Get("item.result").String())
-	require.Equal(t, "image_generation_call", completed.Get("response.output.1.type").String())
-	require.Equal(t, "completed", completed.Get("response.output.1.status").String())
-	require.Equal(t, hostedTestPNG, completed.Get("response.output.1.result").String())
+	require.Equal(t, "exec", inputDone.Get("name").String())
+	input := inputDone.Get("input").String()
+	require.Contains(t, input, "await tools.exec_command(")
+	require.Contains(t, input, "TOKENPRO_IMAGE_PATH")
+	require.Contains(t, input, "tokenpro_image_url=https://tokenpro.work/cat.png?exp=1&sig=ff")
+	require.Equal(t, "custom_tool_call", completed.Get("response.output.1.type").String())
+	require.Equal(t, "画好啦", completed.Get("response.output.0.content.0.text").String())
 	require.Equal(t, int64(11), completed.Get("response.usage.input_tokens").Int())
 	require.Equal(t, int64(22), completed.Get("response.usage.output_tokens").Int())
 }
