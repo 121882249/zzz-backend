@@ -358,7 +358,7 @@ func TestTokenProChatImageCodeModeExecStreamsAndLogsTools(t *testing.T) {
 	require.NotContains(t, string(encoded), "sig=")
 }
 
-func TestTokenProChatImageCodexDesktopInlineWithoutHeader(t *testing.T) {
+func TestTokenProChatImageCodexDesktopUsesLocalDownload(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	png := []byte{0x89, 'P', 'N', 'G'}
 	encoded := base64.StdEncoding.EncodeToString(png)
@@ -380,15 +380,71 @@ func TestTokenProChatImageCodexDesktopInlineWithoutHeader(t *testing.T) {
 	}
 	for _, client := range clients {
 		t.Run(client.name+"/stream", func(t *testing.T) {
-			assertTokenProCodexInline(t, body, client.ua, client.originator, png, encoded, true)
+			assertTokenProCodexLocal(t, body, client.ua, client.originator, png, encoded, true)
 		})
 		t.Run(client.name+"/json", func(t *testing.T) {
-			assertTokenProCodexInline(t, body, client.ua, client.originator, png, encoded, false)
+			assertTokenProCodexLocal(t, body, client.ua, client.originator, png, encoded, false)
 		})
 	}
 }
 
-func assertTokenProCodexInline(t *testing.T, body []byte, ua, originator string, png []byte, encoded string, stream bool) {
+func TestTokenProChatImageNativeV2StillInlines(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	png := []byte{0x89, 'P', 'N', 'G'}
+	encoded := base64.StdEncoding.EncodeToString(png)
+	body, err := json.Marshal(map[string]any{
+		"input": "画一只猫",
+		"tools": []any{
+			map[string]any{"type": "custom", "name": "exec", "description": "### `exec_command`\n"},
+		},
+	})
+	require.NoError(t, err)
+	core, logs := observer.New(zap.InfoLevel)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	req.Header.Set("User-Agent", "Codex Desktop/0.167.0-alpha.4.1 (Windows 10.0.19045; x86_64)")
+	req.Header.Set("originator", "Codex Desktop")
+	c.Request = req.WithContext(logger.IntoContext(req.Context(), zap.New(core)))
+	c.Set(service.TokenProNativeImagesContextKey, true)
+	c.Set(service.TokenProInlineImageContextKey, true)
+	var billed atomic.Int32
+	h := &OpenAIGatewayHandler{}
+	h.chatImageGenerate = func(context.Context, *gin.Context, *service.APIKey, string, *service.TokenProChatImageRequest) (*tokenProChatImageGenerated, error) {
+		return &tokenProChatImageGenerated{
+			Bytes: append([]byte(nil), png...), ContentType: "image/png",
+			Result:  &service.OpenAIForwardResult{ImageCount: 1, Model: "gpt-image-2.6-sunburst", Usage: service.OpenAIUsage{InputTokens: 11, OutputTokens: 22}},
+			Account: &service.Account{ID: 8},
+		}, nil
+	}
+	h.chatImagePublish = func(context.Context, string, []byte) (string, error) {
+		return "https://tokenpro.work/cat.png?exp=1&sig=ff", nil
+	}
+	h.chatImageRecordUsage = func(input *service.OpenAIRecordUsageInput) {
+		require.Equal(t, 1, input.Result.ImageCount)
+		billed.Add(1)
+	}
+	started := false
+	handled := h.dispatchTokenProNativeImage(c, tokenProLocalChatImageKey(), "gpt-image-2.6-sunburst", service.PlatformOpenAI, body, false, &started)
+	require.True(t, handled)
+	require.Equal(t, int32(1), billed.Load())
+	require.True(t, service.TokenProResponsesInlineImage(c))
+	require.Equal(t, "inline-v1", rec.Header().Get("X-TokenPro-Chat-Image"))
+	require.Equal(t, "image_generation_call", gjson.Get(rec.Body.String(), "output.0.type").String())
+	require.Equal(t, "completed", gjson.Get(rec.Body.String(), "output.0.status").String())
+	require.Equal(t, encoded, gjson.Get(rec.Body.String(), "output.0.result").String())
+	require.NotContains(t, rec.Body.String(), "custom_tool_call")
+	require.NotContains(t, rec.Body.String(), "TOKENPRO_IMAGE_PATH")
+	dispatch := logs.FilterMessage("tokenpro.chat_image.dispatch").All()
+	require.Len(t, dispatch, 1)
+	logged := zapcore.NewMapObjectEncoder()
+	for _, field := range dispatch[0].Context {
+		field.AddTo(logged)
+	}
+	require.Equal(t, "inline", logged.Fields["mode"])
+}
+
+func assertTokenProCodexLocal(t *testing.T, body []byte, ua, originator string, png []byte, encoded string, stream bool) {
 	t.Helper()
 	core, logs := observer.New(zap.InfoLevel)
 	rec := httptest.NewRecorder()
@@ -400,6 +456,7 @@ func assertTokenProCodexInline(t *testing.T, body []byte, ua, originator string,
 	}
 	c.Request = req.WithContext(logger.IntoContext(req.Context(), zap.New(core)))
 	c.Set(service.TokenProNativeImagesContextKey, true)
+	require.False(t, service.TokenProResponsesInlineImage(c))
 	var billed atomic.Int32
 	var generated atomic.Int32
 	h := &OpenAIGatewayHandler{chatImageKeepalive: time.Hour}
@@ -423,56 +480,58 @@ func assertTokenProCodexInline(t *testing.T, body []byte, ua, originator string,
 	require.True(t, handled)
 	require.Equal(t, int32(1), generated.Load())
 	require.Equal(t, int32(1), billed.Load())
-	require.Equal(t, "inline-v1", rec.Header().Get("X-TokenPro-Chat-Image"))
+	require.Equal(t, "local-v1", rec.Header().Get("X-TokenPro-Chat-Image"))
+	require.NotEqual(t, "inline-v1", rec.Header().Get("X-TokenPro-Chat-Image"))
 	dispatch := logs.FilterMessage("tokenpro.chat_image.dispatch").All()
 	require.Len(t, dispatch, 1)
 	logged := zapcore.NewMapObjectEncoder()
 	for _, field := range dispatch[0].Context {
 		field.AddTo(logged)
 	}
-	require.Equal(t, "inline", logged.Fields["mode"])
+	require.Equal(t, "local", logged.Fields["mode"])
 	loggedJSON, err := json.Marshal(logged.Fields)
 	require.NoError(t, err)
 	require.NotContains(t, string(loggedJSON), "tokenpro.work")
 	require.NotContains(t, string(loggedJSON), encoded)
-	require.NotContains(t, rec.Body.String(), "图片已生成")
-	require.NotContains(t, rec.Body.String(), "custom_tool_call")
-	require.NotContains(t, rec.Body.String(), "function_call")
-	require.NotContains(t, rec.Body.String(), "call_tp_local_")
-	require.NotContains(t, rec.Body.String(), "tokenpro.work")
-	require.NotContains(t, rec.Body.String(), "sig=")
+	require.NotContains(t, string(loggedJSON), "inline")
+	response := rec.Body.String()
+	require.NotContains(t, response, "图片已生成")
+	require.NotContains(t, response, "image_generation_call")
+	require.NotContains(t, response, encoded)
+	require.Contains(t, response, "function_call")
+	require.Contains(t, response, "call_tp_local_")
+	require.Contains(t, response, "TOKENPRO_IMAGE_PATH")
+	require.Contains(t, response, "tokenpro_image_url=")
 	if !stream {
 		require.Equal(t, http.StatusOK, rec.Code)
-		require.Equal(t, "image_generation_call", gjson.Get(rec.Body.String(), "output.0.type").String())
-		require.Equal(t, "completed", gjson.Get(rec.Body.String(), "output.0.status").String())
-		require.Equal(t, "png", gjson.Get(rec.Body.String(), "output.0.output_format").String())
-		require.Equal(t, encoded, gjson.Get(rec.Body.String(), "output.0.result").String())
-		require.True(t, strings.HasPrefix(gjson.Get(rec.Body.String(), "output.0.id").String(), "ig_"))
-		require.Equal(t, int64(11), gjson.Get(rec.Body.String(), "usage.input_tokens").Int())
-		require.Equal(t, int64(22), gjson.Get(rec.Body.String(), "usage.output_tokens").Int())
+		require.Equal(t, "function_call", gjson.Get(response, "output.0.type").String())
+		require.Equal(t, "exec_command", gjson.Get(response, "output.0.name").String())
+		cmd := gjson.Parse(gjson.Get(response, "output.0.arguments").String()).Get("cmd").String()
+		require.Contains(t, cmd, "TOKENPRO_IMAGE_PATH")
+		require.Contains(t, cmd, "tokenpro_image_url=https://tokenpro.work/cat.png?exp=1&sig=ff")
+		require.Equal(t, int64(11), gjson.Get(response, "usage.input_tokens").Int())
+		require.Equal(t, int64(22), gjson.Get(response, "usage.output_tokens").Int())
 		return
 	}
 	require.True(t, started)
-	events := parseTokenProSSE(t, rec.Body.String())
-	require.GreaterOrEqual(t, len(events), 5)
-	require.Equal(t, "response.created", events[0].Get("type").String())
-	require.Equal(t, "response.in_progress", events[1].Get("type").String())
-	require.Equal(t, "response.output_item.added", events[2].Get("type").String())
-	require.Equal(t, "response.output_item.done", events[3].Get("type").String())
-	require.Equal(t, "response.completed", events[4].Get("type").String())
-	for _, event := range events[2:4] {
-		require.Equal(t, "image_generation_call", event.Get("item.type").String())
-		require.Equal(t, "completed", event.Get("item.status").String())
-		require.Equal(t, "png", event.Get("item.output_format").String())
-		require.Equal(t, encoded, event.Get("item.result").String())
-		require.True(t, strings.HasPrefix(event.Get("item.id").String(), "ig_"))
+	events := parseTokenProSSE(t, response)
+	var inputDone gjson.Result
+	var completed gjson.Result
+	for _, event := range events {
+		switch event.Get("type").String() {
+		case "response.function_call_arguments.done":
+			inputDone = event
+		case "response.completed":
+			completed = event
+		}
 	}
-	require.Equal(t, events[3].Get("item.id").String(), events[4].Get("response.output.0.id").String())
-	require.Equal(t, "image_generation_call", events[4].Get("response.output.0.type").String())
-	require.Equal(t, "completed", events[4].Get("response.output.0.status").String())
-	require.Equal(t, encoded, events[4].Get("response.output.0.result").String())
-	require.Equal(t, int64(11), events[4].Get("response.usage.input_tokens").Int())
-	require.Equal(t, int64(22), events[4].Get("response.usage.output_tokens").Int())
+	require.Equal(t, "exec_command", inputDone.Get("name").String())
+	cmd := gjson.Parse(inputDone.Get("arguments").String()).Get("cmd").String()
+	require.Contains(t, cmd, "TOKENPRO_IMAGE_PATH")
+	require.Contains(t, cmd, "tokenpro_image_url=https://tokenpro.work/cat.png?exp=1&sig=ff")
+	require.Equal(t, "function_call", completed.Get("response.output.0.type").String())
+	require.Equal(t, int64(11), completed.Get("response.usage.input_tokens").Int())
+	require.Equal(t, int64(22), completed.Get("response.usage.output_tokens").Int())
 }
 
 func TestTokenProLocalImageFollowUpLogsSanitizedMiss(t *testing.T) {

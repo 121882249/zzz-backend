@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
@@ -25,8 +24,8 @@ const tokenProHostedImagePublisherKey = "tokenpro_hosted_image_publisher"
 // TokenProInlineImageContextKey is set when the client sends
 // X-TokenPro-Image-Mode: native-v2. Those clients render a Responses
 // image_generation_call whose result is standard base64. Official Codex
-// clients get the same item without the header. Other clients keep the local
-// download or the signed URL.
+// does not opt in by User-Agent or originator; it uses the same local
+// download as every other client.
 const TokenProInlineImageContextKey = "tokenpro_inline_image_v1"
 
 // tokenProReplayImageResultLimit is the largest image_generation_call result
@@ -40,17 +39,12 @@ func TokenProInlineImageDelivery(c *gin.Context) bool {
 }
 
 // TokenProResponsesInlineImage is the native-v2 image_generation_call delivery.
-// The header opts any client in. Official Codex (Desktop, CLI, codex_cli_rs,
-// and the rest of the first-party family) paints that item without the header,
-// so those requests must not be sent down the exec download path.
+// Only X-TokenPro-Image-Mode: native-v2 opts a client in. Official Codex
+// (Desktop, CLI, codex_cli_rs, detected by User-Agent or originator) does not:
+// those requests take the local download, and a missed path falls back to a
+// markdown image plus a clickable link.
 func TokenProResponsesInlineImage(c *gin.Context) bool {
-	if TokenProInlineImageDelivery(c) {
-		return true
-	}
-	if c == nil || c.Request == nil {
-		return false
-	}
-	return openai.IsCodexOfficialClientByHeaders(c.Request.UserAgent(), c.GetHeader("originator"))
+	return TokenProInlineImageDelivery(c)
 }
 
 // BuildTokenProInlineImageCall is the Responses item Codex paints. id, status,
