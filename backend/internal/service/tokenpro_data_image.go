@@ -10,7 +10,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/image/draw"
-	_ "golang.org/x/image/webp"
 
 	_ "image/gif"
 	_ "image/png"
@@ -118,7 +117,7 @@ func scaleTokenProLongEdge(src image.Image, maxEdge int) image.Image {
 	if long <= maxEdge || maxEdge <= 0 {
 		return src
 	}
-	newW, newH := maxEdge, maxEdge
+	newW, newH := maxEdge, 1
 	if width >= height {
 		newH = height * maxEdge / width
 		if newH < 1 {
