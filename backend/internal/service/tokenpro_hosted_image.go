@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
@@ -39,12 +40,20 @@ func TokenProInlineImageDelivery(c *gin.Context) bool {
 }
 
 // TokenProResponsesInlineImage is the native-v2 image_generation_call delivery.
-// Only X-TokenPro-Image-Mode: native-v2 opts a client in. Official Codex
-// (Desktop, CLI, codex_cli_rs, detected by User-Agent or originator) does not:
-// those requests take the local download, and a missed path falls back to a
-// markdown image plus a clickable link.
+// Only X-TokenPro-Image-Mode: native-v2 opts a non-official client in.
+// Official Codex never takes this path: it gets a markdown image message.
 func TokenProResponsesInlineImage(c *gin.Context) bool {
 	return TokenProInlineImageDelivery(c)
+}
+
+// TokenProOfficialCodexImageLink reports an official Codex client. Desktop,
+// CLI, and codex_cli_rs do not render image_generation_call or a first-turn
+// download tool, with or without X-TokenPro-Image-Mode: native-v2.
+func TokenProOfficialCodexImageLink(c *gin.Context) bool {
+	if c == nil || c.Request == nil {
+		return false
+	}
+	return openai.IsCodexOfficialClientByHeaders(c.Request.UserAgent(), c.GetHeader("originator"))
 }
 
 // BuildTokenProInlineImageCall is the Responses item Codex paints. id, status,
@@ -115,12 +124,16 @@ func armTokenProHostedImageDelivery(c *gin.Context, clientBody []byte) {
 	if _, ok := c.Writer.(*tokenProHostedImageWriter); ok {
 		return
 	}
+	official := TokenProOfficialCodexImageLink(c)
+	if official {
+		c.Header("X-TokenPro-Chat-Image", "url-v1")
+	}
 	c.Writer = &tokenProHostedImageWriter{
 		ResponseWriter: c.Writer,
 		ginCtx:         c,
 		clientBody:     append([]byte(nil), clientBody...),
 		publish:        hostedImagePublisherFromContext(c),
-		inline:         TokenProResponsesInlineImage(c),
+		inline:         TokenProResponsesInlineImage(c) && !official,
 	}
 }
 
@@ -400,6 +413,10 @@ func (w *tokenProHostedImageWriter) deliveryItem() map[string]any {
 	} else {
 		imageURL = strings.TrimSpace(w.directURL)
 	}
+	if TokenProOfficialCodexImageLink(w.ginCtx) {
+		w.item = hostedImageTextMessage(TokenProOfficialCodexImageText(imageURL, ""))
+		return w.item
+	}
 	if item, ok := BuildTokenProLocalImageCall(w.clientBody, imageURL, hostedImageThreadID(w.ginCtx, w.clientBody)); ok {
 		rememberTokenProHostedLocalImage(w.ginCtx, item, imageURL)
 		w.item = item
@@ -454,6 +471,10 @@ func (w *tokenProHostedImageWriter) writeToolEvents(item map[string]any) error {
 			return err
 		}
 	default:
+		if kind == "message" && TokenProOfficialCodexImageLink(w.ginCtx) {
+			id, _ := item["id"].(string)
+			return WriteTokenProOfficialImageMessageEvents(w.writeData, index, id, hostedImageMessageText(item), item)
+		}
 		if err := w.writeData(map[string]any{"type": "response.output_item.added", "output_index": index, "item": item}); err != nil {
 			return err
 		}

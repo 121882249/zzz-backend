@@ -94,11 +94,12 @@ func (h *OpenAIGatewayHandler) dispatchTokenProChatImage(c *gin.Context, apiKey 
 		defer func() { _ = finishReceipt(succeeded) }()
 	}
 
+	officialLink := service.TokenProOfficialCodexImageLink(c)
 	mode := "url-v1"
-	inlineImage := service.TokenProResponsesInlineImage(c)
+	inlineImage := !officialLink && service.TokenProResponsesInlineImage(c)
 	if inlineImage {
 		mode = "inline-v1"
-	} else if service.TokenProLocalImageDownloadAvailable(body) {
+	} else if !officialLink && service.TokenProLocalImageDownloadAvailable(body) {
 		mode = "local-v1"
 	}
 	var sse *tokenProChatImageSSE
@@ -133,15 +134,20 @@ func (h *OpenAIGatewayHandler) dispatchTokenProChatImage(c *gin.Context, apiKey 
 			return true
 		}
 	}
-	if item, ok := service.BuildTokenProLocalImageCall(body, imageURL, tokenProChatImageThreadID(c, body)); ok {
-		h.logTokenProChatImageDispatch(c, body, "local")
-		h.rememberTokenProLocalImage(c, apiKey, item, imageURL)
-		h.writeTokenProChatImageOutput(c, sse, model, item, generated.Result, stream, "local-v1")
-		succeeded = true
-		return true
+	if !officialLink {
+		if item, ok := service.BuildTokenProLocalImageCall(body, imageURL, tokenProChatImageThreadID(c, body)); ok {
+			h.logTokenProChatImageDispatch(c, body, "local")
+			h.rememberTokenProLocalImage(c, apiKey, item, imageURL)
+			h.writeTokenProChatImageOutput(c, sse, model, item, generated.Result, stream, "local-v1")
+			succeeded = true
+			return true
+		}
 	}
 	h.logTokenProChatImageDispatch(c, body, "url")
 	text := service.TokenProChatImageSuccessText(imageURL, generated.Revised)
+	if officialLink {
+		text = service.TokenProOfficialCodexImageText(imageURL, generated.Revised)
+	}
 	h.finishTokenProChatImage(c, sse, model, text, generated.Result, stream, "url-v1")
 	succeeded = true
 	return true
@@ -656,7 +662,18 @@ func (h *OpenAIGatewayHandler) writeTokenProChatImageOutput(c *gin.Context, sse 
 		c.JSON(http.StatusOK, response)
 		return
 	}
+	wroteItemDone := false
 	switch itemType, _ := item["type"].(string); itemType {
+	case "message":
+		if service.TokenProOfficialCodexImageLink(c) {
+			itemID, _ := item["id"].(string)
+			_ = service.WriteTokenProOfficialImageMessageEvents(func(event map[string]any) error {
+				return sse.write(event)
+			}, 0, itemID, tokenProChatImageItemText(item), item)
+			wroteItemDone = true
+			break
+		}
+		_ = sse.write(gin.H{"type": "response.output_item.added", "output_index": 0, "item": item})
 	case "function_call":
 		added := make(map[string]any, len(item))
 		for key, value := range item {
@@ -694,8 +711,27 @@ func (h *OpenAIGatewayHandler) writeTokenProChatImageOutput(c *gin.Context, sse 
 	default:
 		_ = sse.write(gin.H{"type": "response.output_item.added", "output_index": 0, "item": item})
 	}
-	_ = sse.write(gin.H{"type": "response.output_item.done", "output_index": 0, "item": item})
+	if !wroteItemDone {
+		_ = sse.write(gin.H{"type": "response.output_item.done", "output_index": 0, "item": item})
+	}
 	_ = sse.write(gin.H{"type": "response.completed", "response": response})
+}
+
+func tokenProChatImageItemText(item map[string]any) string {
+	content, _ := item["content"].([]any)
+	if len(content) == 0 {
+		return ""
+	}
+	first, _ := content[0].(gin.H)
+	if first == nil {
+		if raw, ok := content[0].(map[string]any); ok {
+			text, _ := raw["text"].(string)
+			return text
+		}
+		return ""
+	}
+	text, _ := first["text"].(string)
+	return text
 }
 
 func (h *OpenAIGatewayHandler) logTokenProLocalImageMiss(c *gin.Context, output, imageURL string) {

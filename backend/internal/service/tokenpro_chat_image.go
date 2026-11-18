@@ -438,7 +438,7 @@ func tokenProChatImagePromptBlob(body []byte) string {
 	return b.String()
 }
 
-// TokenProChatImageSuccessText is the assistant text Codex can display.
+// TokenProChatImageSuccessText is the assistant text other clients can display.
 // The URL is plain HTTPS text, never a data URI.
 func TokenProChatImageSuccessText(imageURL, revised string) string {
 	text := tokenProChatImageSuccessPrefix + strings.TrimSpace(imageURL)
@@ -448,6 +448,60 @@ func TokenProChatImageSuccessText(imageURL, revised string) string {
 	}
 	revised = truncateRunes(revised, tokenProChatImageRevisedLimit)
 	return text + "\n调整后的描述：" + revised
+}
+
+// TokenProOfficialCodexImageText is the first-turn message official Codex
+// paints. Desktop does not render image_generation_call or a download tool
+// call, so the picture is a markdown image plus a clickable link.
+func TokenProOfficialCodexImageText(imageURL, revised string) string {
+	url := strings.TrimSpace(imageURL)
+	text := tokenProChatImageSuccessPrefix + "\n\n![](" + url + ")\n\n[" + url + "](" + url + ")"
+	revised = strings.TrimSpace(revised)
+	if revised == "" {
+		return text
+	}
+	revised = truncateRunes(revised, tokenProChatImageRevisedLimit)
+	return text + "\n调整后的描述：" + revised
+}
+
+// WriteTokenProOfficialImageMessageEvents is the Responses text sequence
+// Codex Desktop needs before it shows an assistant message. The done item is
+// the completed message, which response.completed.output also carries.
+func WriteTokenProOfficialImageMessageEvents(write func(map[string]any) error, index int, itemID, text string, doneItem map[string]any) error {
+	if write == nil {
+		return nil
+	}
+	if err := write(map[string]any{
+		"type": "response.output_item.added", "output_index": index,
+		"item": map[string]any{
+			"type": "message", "id": itemID, "role": "assistant", "status": "in_progress", "content": []any{},
+		},
+	}); err != nil {
+		return err
+	}
+	if err := write(map[string]any{
+		"type": "response.content_part.added", "output_index": index, "content_index": 0, "item_id": itemID,
+		"part": map[string]any{"type": "output_text", "text": "", "annotations": []any{}},
+	}); err != nil {
+		return err
+	}
+	if err := write(map[string]any{
+		"type": "response.output_text.delta", "output_index": index, "content_index": 0, "item_id": itemID, "delta": text,
+	}); err != nil {
+		return err
+	}
+	if err := write(map[string]any{
+		"type": "response.output_text.done", "output_index": index, "content_index": 0, "item_id": itemID, "text": text,
+	}); err != nil {
+		return err
+	}
+	if err := write(map[string]any{
+		"type": "response.content_part.done", "output_index": index, "content_index": 0, "item_id": itemID,
+		"part": map[string]any{"type": "output_text", "text": text, "annotations": []any{}},
+	}); err != nil {
+		return err
+	}
+	return write(map[string]any{"type": "response.output_item.done", "output_index": index, "item": doneItem})
 }
 
 func truncateRunes(text string, limit int) string {

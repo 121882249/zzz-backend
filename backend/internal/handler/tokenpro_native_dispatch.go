@@ -17,10 +17,12 @@ import (
 // image permission, concurrency, billing eligibility and session-block checks.
 // Requests that actually carry image_gen.imagegen, or that continue a native
 // call id, keep the function_call protocol. Every other pure-image chat turn
-// is generated here. A client that advertises a shell tool receives a
-// download call, including official Codex. Without that tool the reply stays
-// HTTPS link text. X-TokenPro-Image-Mode: native-v2 still returns an
-// image_generation_call whose result is standard base64.
+// is generated here. Official Codex always receives an assistant message
+// with a markdown image and a clickable link, even when the request carries
+// X-TokenPro-Image-Mode: native-v2 or a shell tool. Another client that
+// advertises a shell tool receives a download call. Without that tool the
+// reply stays HTTPS link text. A non-official native-v2 client still
+// receives an image_generation_call whose result is standard base64.
 func (h *OpenAIGatewayHandler) dispatchTokenProNativeImage(c *gin.Context, apiKey *service.APIKey, model, platform string, body []byte, stream bool, streamStarted *bool) bool {
 	if !service.TokenProNativeImages(c) || !service.IsGPTImageGenerationModel(model) ||
 		!isBareOpenAIResponsesPath(c) || service.IsOpenAIResponsesCompactPath(c) ||
