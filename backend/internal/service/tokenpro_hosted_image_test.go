@@ -253,7 +253,6 @@ func TestCodexNativeV2HostedImageJSON(t *testing.T) {
 func TestOfficialCodexHostedImageUsesMarkdownLink(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	const imageURL = "https://tokenpro.work/cat.png?exp=1&sig=ff"
-	want := TokenProOfficialCodexImageText(imageURL, "")
 	noExec := []any{
 		map[string]any{"type": "web_search"},
 		map[string]any{"type": "function", "name": "wait"},
@@ -281,7 +280,7 @@ func TestOfficialCodexHostedImageUsesMarkdownLink(t *testing.T) {
 				tc.inline,
 			)
 			require.True(t, TokenProOfficialCodexImageLink(c))
-			require.Equal(t, "url-v1", rec.Header().Get("X-TokenPro-Chat-Image"))
+			require.Equal(t, "data-v1", rec.Header().Get("X-TokenPro-Chat-Image"))
 			c.Writer.Header().Set("Content-Type", "application/json")
 			payload := []byte(`{"id":"resp_cat","object":"response","model":"gpt-6-sol","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"画好啦"}]},{"id":"ig_cat","type":"image_generation_call","status":"generating","output_format":"png","result":"` + hostedTestPNG + `"}],"usage":{"input_tokens":11,"output_tokens":22,"total_tokens":33}}`)
 			counter := newOpenAIImageOutputCounter()
@@ -298,8 +297,10 @@ func TestOfficialCodexHostedImageUsesMarkdownLink(t *testing.T) {
 			require.NotContains(t, body, "TOKENPRO_IMAGE_PATH")
 			require.Equal(t, "画好啦", gjson.Get(body, "output.0.content.0.text").String())
 			require.Equal(t, "message", gjson.Get(body, "output.1.type").String())
-			require.Equal(t, want, gjson.Get(body, "output.1.content.0.text").String())
-			require.Contains(t, gjson.Get(body, "output.1.content.0.text").String(), "![]("+imageURL+")")
+			preview := gjson.Get(body, "output.1.content.0.text").String()
+			require.Contains(t, preview, "![](data:image/jpeg;base64,")
+			require.Contains(t, preview, "[原图链接]("+imageURL+")")
+			require.NotContains(t, preview, "![](https://")
 			require.Equal(t, int64(11), gjson.Get(body, "usage.input_tokens").Int())
 			require.Empty(t, mem.snapshot())
 		})
@@ -309,7 +310,6 @@ func TestOfficialCodexHostedImageUsesMarkdownLink(t *testing.T) {
 func TestOfficialCodexHostedImageStreamsMarkdownLink(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	const imageURL = "https://tokenpro.work/cat.png?exp=1&sig=ff"
-	want := TokenProOfficialCodexImageText(imageURL, "")
 	var publishes atomic.Int32
 	c, rec, _ := armClientHostedImage(t,
 		"Codex Desktop/0.169.0-alpha.11.1 (Mac OS 26.6.2; arm64)",
@@ -322,7 +322,7 @@ func TestOfficialCodexHostedImageStreamsMarkdownLink(t *testing.T) {
 		true,
 	)
 	require.True(t, TokenProInlineImageDelivery(c))
-	require.Equal(t, "url-v1", rec.Header().Get("X-TokenPro-Chat-Image"))
+	require.Equal(t, "data-v1", rec.Header().Get("X-TokenPro-Chat-Image"))
 	counter := newOpenAIImageOutputCounter()
 	writeHostedSSE(t, c, counter, `{"type":"response.output_item.done","output_index":0,"item":{"type":"message","content":[{"type":"output_text","text":"画好啦"}]}}`)
 	writeHostedSSE(t, c, counter, `{"type":"response.image_generation_call.partial_image","output_index":1,"item_id":"ig_cat","partial_image_b64":"`+hostedTestPNG+`"}`)
@@ -345,7 +345,7 @@ func TestOfficialCodexHostedImageStreamsMarkdownLink(t *testing.T) {
 	for _, event := range gjsonEvents(body) {
 		kind := event.Get("type").String()
 		seen[kind] = true
-		if kind == "response.output_text.delta" && event.Get("delta").String() == want {
+		if kind == "response.output_text.delta" && strings.Contains(event.Get("delta").String(), "data:image/jpeg;base64,") {
 			delta = event
 		}
 		if kind == "response.completed" {
@@ -363,11 +363,11 @@ func TestOfficialCodexHostedImageStreamsMarkdownLink(t *testing.T) {
 	} {
 		require.Truef(t, seen[kind], "missing %s", kind)
 	}
-	require.Equal(t, want, delta.Get("delta").String())
-	require.Contains(t, delta.Get("delta").String(), "![]("+imageURL+")")
+	require.Contains(t, delta.Get("delta").String(), "![](data:image/jpeg;base64,")
+	require.Contains(t, delta.Get("delta").String(), "[原图链接]("+imageURL+")")
 	require.Equal(t, "画好啦", completed.Get("response.output.0.content.0.text").String())
 	require.Equal(t, "message", completed.Get("response.output.1.type").String())
-	require.Equal(t, want, completed.Get("response.output.1.content.0.text").String())
+	require.Equal(t, delta.Get("delta").String(), completed.Get("response.output.1.content.0.text").String())
 	require.Equal(t, int64(11), completed.Get("response.usage.input_tokens").Int())
 	require.Equal(t, int64(22), completed.Get("response.usage.output_tokens").Int())
 }

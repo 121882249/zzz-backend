@@ -126,7 +126,11 @@ func armTokenProHostedImageDelivery(c *gin.Context, clientBody []byte) {
 	}
 	official := TokenProOfficialCodexImageLink(c)
 	if official {
-		c.Header("X-TokenPro-Chat-Image", "url-v1")
+		mode := TokenProCodexImageModeURL
+		if TokenProCodexDataImageEnabled(c) {
+			mode = TokenProCodexImageModeData
+		}
+		c.Header("X-TokenPro-Chat-Image", mode)
 	}
 	c.Writer = &tokenProHostedImageWriter{
 		ResponseWriter: c.Writer,
@@ -371,7 +375,9 @@ func (w *tokenProHostedImageWriter) logDelivery() {
 	mode := "undelivered"
 	if kind, _ := w.item["type"].(string); kind == "custom_tool_call" || kind == "function_call" || kind == "local_shell_call" {
 		mode = "local-v1"
-	} else if text := hostedImageMessageText(w.item); strings.HasPrefix(text, tokenProChatImageSuccessPrefix) {
+	} else if text := hostedImageMessageText(w.item); strings.Contains(text, "data:image/jpeg;base64,") {
+		mode = TokenProCodexImageModeData
+	} else if strings.HasPrefix(text, tokenProChatImageSuccessPrefix) {
 		mode = "url-v1"
 	}
 	logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Rewrote hosted image_generation_call as %s", mode)
@@ -386,6 +392,7 @@ func (w *tokenProHostedImageWriter) deliveryItem() map[string]any {
 	}
 	w.itemReady = true
 	imageURL := ""
+	var preview []byte
 	if w.result != "" {
 		data, err := decodeHostedImage(w.result)
 		if err != nil || len(data) == 0 || w.publish == nil {
@@ -410,11 +417,19 @@ func (w *tokenProHostedImageWriter) deliveryItem() map[string]any {
 			return w.item
 		}
 		imageURL = published
+		preview = data
 	} else {
 		imageURL = strings.TrimSpace(w.directURL)
 	}
 	if TokenProOfficialCodexImageLink(w.ginCtx) {
-		w.item = hostedImageTextMessage(TokenProOfficialCodexImageText(imageURL, ""))
+		text := TokenProOfficialCodexImageText(imageURL, "")
+		if len(preview) > 0 && TokenProCodexDataImageEnabled(w.ginCtx) {
+			if uri, ok := BuildTokenProCodexDataImageURI(preview); ok {
+				text = TokenProOfficialCodexDataImageText(uri, imageURL, "")
+			}
+		}
+		w.item = hostedImageTextMessage(text)
+		w.noteOfficialHeader()
 		return w.item
 	}
 	if item, ok := BuildTokenProLocalImageCall(w.clientBody, imageURL, hostedImageThreadID(w.ginCtx, w.clientBody)); ok {
@@ -801,6 +816,20 @@ func appendHostedImageOutput(obj map[string]any, item map[string]any) {
 		raw = []any{}
 	}
 	target["output"] = append(raw, item)
+}
+
+func (w *tokenProHostedImageWriter) noteOfficialHeader() {
+	if w == nil || w.ginCtx == nil || w.ginCtx.Writer == nil || w.ginCtx.Writer.Written() {
+		return
+	}
+	if !TokenProOfficialCodexImageLink(w.ginCtx) {
+		return
+	}
+	mode := TokenProCodexImageModeURL
+	if strings.Contains(hostedImageMessageText(w.item), "data:image/jpeg;base64,") {
+		mode = TokenProCodexImageModeData
+	}
+	w.ginCtx.Header("X-TokenPro-Chat-Image", mode)
 }
 
 func hostedImageTextMessage(text string) map[string]any {

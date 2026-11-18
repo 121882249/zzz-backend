@@ -36,6 +36,7 @@ func RegisterGatewayRoutes(
 	// them before the /v1 API-key group so Codex can open the HTTPS link.
 	if h != nil && h.OpenAIGateway != nil {
 		r.GET("/v1/tokenpro/images/:id", h.OpenAIGateway.TokenProChatImageDownload)
+		r.HEAD("/v1/tokenpro/images/:id", h.OpenAIGateway.TokenProChatImageDownload)
 	}
 
 	bodyMemoryBudget := pkghttputil.NewBodyMemoryBudget(cfg.Gateway.RequestBodyMemoryBudgetBytes)

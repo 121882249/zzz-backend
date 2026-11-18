@@ -575,6 +575,9 @@ gateway:
   # 生图期间 SSE 保活间隔（秒）。0 表示默认 10。
   # 发送 Codex 会忽略但不报错的 response.in_progress。SSE 注释不能保活。
   tokenpro_chat_image_keepalive_seconds: 0
+  # 官方 Codex 首轮预览。data-v1（默认）把长边约 1024px、质量约 80 的 JPEG
+  # 嵌进 markdown，并保留原图签名链接。url-v1 只发 HTTPS 链接。
+  tokenpro_codex_image_mode: data-v1
   # SSE max line size in bytes (default: 500 MiB, including large inline 4K images)
   # SSE 单行最大字节数（默认 500 MiB，兼容含大尺寸 4K 图片的响应）
   max_line_size: 524288000
