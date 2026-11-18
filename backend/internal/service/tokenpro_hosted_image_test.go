@@ -181,7 +181,7 @@ func TestCodexNativeV2HostedImageStreamsInlineCall(t *testing.T) {
 		map[string]any{"type": "function", "name": "wait"},
 	}
 	var publishes atomic.Int32
-	c, rec, _ := armDesktopHostedImageMode(t, desktopCodeModeBody(t, tools), func(context.Context, string, []byte) (string, error) {
+	c, rec, _ := armClientHostedImage(t, "claude-code/1.0.0", "claude-code", desktopCodeModeBody(t, tools), func(context.Context, string, []byte) (string, error) {
 		publishes.Add(1)
 		return "https://tokenpro.work/cat.png?exp=1&sig=ff", nil
 	}, true)
@@ -228,7 +228,7 @@ func TestCodexNativeV2HostedImageStreamsInlineCall(t *testing.T) {
 func TestCodexNativeV2HostedImageJSON(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	var publishes atomic.Int32
-	c, rec, _ := armDesktopHostedImageMode(t, desktopCodeModeBody(t, nil), func(context.Context, string, []byte) (string, error) {
+	c, rec, _ := armClientHostedImage(t, "claude-code/1.0.0", "claude-code", desktopCodeModeBody(t, nil), func(context.Context, string, []byte) (string, error) {
 		publishes.Add(1)
 		return "https://tokenpro.work/cat.png?exp=1&sig=ff", nil
 	}, true)
@@ -250,24 +250,38 @@ func TestCodexNativeV2HostedImageJSON(t *testing.T) {
 	require.Equal(t, 1, countOpenAIResponseImageOutputsFromJSONBytes([]byte(body)))
 }
 
-func TestOfficialCodexWithoutHeaderUsesLocalDownload(t *testing.T) {
+func TestOfficialCodexHostedImageUsesMarkdownLink(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	for _, client := range []struct {
-		name, ua, originator string
+	const imageURL = "https://tokenpro.work/cat.png?exp=1&sig=ff"
+	want := TokenProOfficialCodexImageText(imageURL, "")
+	noExec := []any{
+		map[string]any{"type": "web_search"},
+		map[string]any{"type": "function", "name": "wait"},
+	}
+	for _, tc := range []struct {
+		name   string
+		inline bool
+		tools  []any
 	}{
-		{"desktop", "Codex Desktop/0.167.0-alpha.4.1 (Windows 10.0.19045; x86_64)", "Codex Desktop"},
-		{"cli rs", "codex_cli_rs/0.99.0", ""},
-		{"codex cli", "Codex CLI/1.2.3", ""},
-		{"originator only", "Mozilla/5.0", "codex_cli_rs"},
+		{"exec", false, nil},
+		{"exec native-v2", true, nil},
+		{"no exec", false, noExec},
+		{"no exec native-v2", true, noExec},
 	} {
-		t.Run(client.name, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			var publishes atomic.Int32
-			c, rec, mem := armClientHostedImage(t, client.ua, client.originator, desktopCodeModeBody(t, nil), func(context.Context, string, []byte) (string, error) {
-				publishes.Add(1)
-				return "https://tokenpro.work/cat.png?exp=1&sig=ff", nil
-			}, false)
-			require.False(t, TokenProResponsesInlineImage(c))
-			require.False(t, TokenProInlineImageDelivery(c))
+			c, rec, mem := armClientHostedImage(t,
+				"Codex Desktop/0.169.0-alpha.11.1 (Mac OS 26.6.2; arm64)",
+				"Codex Desktop",
+				desktopCodeModeBody(t, tc.tools),
+				func(context.Context, string, []byte) (string, error) {
+					publishes.Add(1)
+					return imageURL, nil
+				},
+				tc.inline,
+			)
+			require.True(t, TokenProOfficialCodexImageLink(c))
+			require.Equal(t, "url-v1", rec.Header().Get("X-TokenPro-Chat-Image"))
 			c.Writer.Header().Set("Content-Type", "application/json")
 			payload := []byte(`{"id":"resp_cat","object":"response","model":"gpt-6-sol","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"画好啦"}]},{"id":"ig_cat","type":"image_generation_call","status":"generating","output_format":"png","result":"` + hostedTestPNG + `"}],"usage":{"input_tokens":11,"output_tokens":22,"total_tokens":33}}`)
 			counter := newOpenAIImageOutputCounter()
@@ -279,34 +293,36 @@ func TestOfficialCodexWithoutHeaderUsesLocalDownload(t *testing.T) {
 			body := rec.Body.String()
 			require.NotContains(t, body, "image_generation_call")
 			require.NotContains(t, body, hostedTestPNG)
-			require.NotContains(t, body, "inline-v1")
+			require.NotContains(t, body, "custom_tool_call")
+			require.NotContains(t, body, "function_call")
+			require.NotContains(t, body, "TOKENPRO_IMAGE_PATH")
 			require.Equal(t, "画好啦", gjson.Get(body, "output.0.content.0.text").String())
-			require.Equal(t, "custom_tool_call", gjson.Get(body, "output.1.type").String())
-			input := gjson.Get(body, "output.1.input").String()
-			require.Contains(t, input, "tools.exec_command")
-			require.Contains(t, input, "TOKENPRO_IMAGE_PATH")
-			require.Contains(t, input, "tokenpro_image_url=https://tokenpro.work/cat.png?exp=1&sig=ff")
+			require.Equal(t, "message", gjson.Get(body, "output.1.type").String())
+			require.Equal(t, want, gjson.Get(body, "output.1.content.0.text").String())
+			require.Contains(t, gjson.Get(body, "output.1.content.0.text").String(), "![]("+imageURL+")")
 			require.Equal(t, int64(11), gjson.Get(body, "usage.input_tokens").Int())
-			require.Len(t, mem.snapshot(), 1)
+			require.Empty(t, mem.snapshot())
 		})
 	}
 }
 
-func TestOfficialCodexWithoutHeaderStreamsLocalDownload(t *testing.T) {
+func TestOfficialCodexHostedImageStreamsMarkdownLink(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	const imageURL = "https://tokenpro.work/cat.png?exp=1&sig=ff"
+	want := TokenProOfficialCodexImageText(imageURL, "")
 	var publishes atomic.Int32
 	c, rec, _ := armClientHostedImage(t,
-		"Codex Desktop/0.167.0-alpha.4.1 (Windows 10.0.19045; x86_64)",
+		"Codex Desktop/0.169.0-alpha.11.1 (Mac OS 26.6.2; arm64)",
 		"Codex Desktop",
 		desktopCodeModeBody(t, nil),
 		func(context.Context, string, []byte) (string, error) {
 			publishes.Add(1)
-			return "https://tokenpro.work/cat.png?exp=1&sig=ff", nil
+			return imageURL, nil
 		},
-		false,
+		true,
 	)
-	require.False(t, TokenProResponsesInlineImage(c))
-	require.False(t, TokenProInlineImageDelivery(c))
+	require.True(t, TokenProInlineImageDelivery(c))
+	require.Equal(t, "url-v1", rec.Header().Get("X-TokenPro-Chat-Image"))
 	counter := newOpenAIImageOutputCounter()
 	writeHostedSSE(t, c, counter, `{"type":"response.output_item.done","output_index":0,"item":{"type":"message","content":[{"type":"output_text","text":"画好啦"}]}}`)
 	writeHostedSSE(t, c, counter, `{"type":"response.image_generation_call.partial_image","output_index":1,"item_id":"ig_cat","partial_image_b64":"`+hostedTestPNG+`"}`)
@@ -321,24 +337,37 @@ func TestOfficialCodexWithoutHeaderStreamsLocalDownload(t *testing.T) {
 	require.NotContains(t, body, "partial_image")
 	require.NotContains(t, body, "image_generation_call")
 	require.NotContains(t, body, hostedTestPNG)
-	require.NotContains(t, body, "inline-v1")
-	var inputDone gjson.Result
+	require.NotContains(t, body, "custom_tool_call")
+	require.NotContains(t, body, "TOKENPRO_IMAGE_PATH")
+	seen := map[string]bool{}
+	var delta gjson.Result
 	var completed gjson.Result
 	for _, event := range gjsonEvents(body) {
-		switch event.Get("type").String() {
-		case "response.custom_tool_call_input.done":
-			inputDone = event
-		case "response.completed":
+		kind := event.Get("type").String()
+		seen[kind] = true
+		if kind == "response.output_text.delta" && event.Get("delta").String() == want {
+			delta = event
+		}
+		if kind == "response.completed" {
 			completed = event
 		}
 	}
-	require.Equal(t, "exec", inputDone.Get("name").String())
-	input := inputDone.Get("input").String()
-	require.Contains(t, input, "await tools.exec_command(")
-	require.Contains(t, input, "TOKENPRO_IMAGE_PATH")
-	require.Contains(t, input, "tokenpro_image_url=https://tokenpro.work/cat.png?exp=1&sig=ff")
-	require.Equal(t, "custom_tool_call", completed.Get("response.output.1.type").String())
+	for _, kind := range []string{
+		"response.output_item.added",
+		"response.content_part.added",
+		"response.output_text.delta",
+		"response.output_text.done",
+		"response.content_part.done",
+		"response.output_item.done",
+		"response.completed",
+	} {
+		require.Truef(t, seen[kind], "missing %s", kind)
+	}
+	require.Equal(t, want, delta.Get("delta").String())
+	require.Contains(t, delta.Get("delta").String(), "![]("+imageURL+")")
 	require.Equal(t, "画好啦", completed.Get("response.output.0.content.0.text").String())
+	require.Equal(t, "message", completed.Get("response.output.1.type").String())
+	require.Equal(t, want, completed.Get("response.output.1.content.0.text").String())
 	require.Equal(t, int64(11), completed.Get("response.usage.input_tokens").Int())
 	require.Equal(t, int64(22), completed.Get("response.usage.output_tokens").Int())
 }
