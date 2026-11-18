@@ -117,18 +117,19 @@ func scaleTokenProLongEdge(src image.Image, maxEdge int) image.Image {
 	if long <= maxEdge || maxEdge <= 0 {
 		return src
 	}
-	newW, newH := maxEdge, 1
+	var newW, newH int
 	if width >= height {
+		newW = maxEdge
 		newH = height * maxEdge / width
 		if newH < 1 {
 			newH = 1
 		}
 	} else {
+		newH = maxEdge
 		newW = width * maxEdge / height
 		if newW < 1 {
 			newW = 1
 		}
-		newH = maxEdge
 	}
 	dst := image.NewRGBA(image.Rect(0, 0, newW, newH))
 	draw.CatmullRom.Scale(dst, dst.Bounds(), src, bounds, draw.Over, nil)
