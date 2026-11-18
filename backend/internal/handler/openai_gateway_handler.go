@@ -503,6 +503,10 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		body = stripped
 		sessionHashBody = body
 	}
+	if stripped, changed := service.StripTokenProDataImageMarkdown(body); changed {
+		body = stripped
+		sessionHashBody = body
+	}
 
 	// 使用 gjson 只读提取字段做校验，避免完整 Unmarshal
 	modelResult := gjson.GetBytes(body, "model")
@@ -2680,6 +2684,9 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		return
 	}
 	if stripped, changed := service.StripTokenProReplayImageResults(firstMessage); changed {
+		firstMessage = stripped
+	}
+	if stripped, changed := service.StripTokenProDataImageMarkdown(firstMessage); changed {
 		firstMessage = stripped
 	}
 	reqModel := strings.TrimSpace(gjson.GetBytes(firstMessage, "model").String())

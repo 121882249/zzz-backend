@@ -1181,6 +1181,9 @@ type GatewayConfig struct {
 	// TokenProChatImageKeepaliveSeconds 是聊天生图 SSE 的 response.in_progress 间隔（秒）。
 	// 0 表示默认 10。Codex 只在解析出 SSE 事件时重置空闲计时，注释行不能保活。
 	TokenProChatImageKeepaliveSeconds int `mapstructure:"tokenpro_chat_image_keepalive_seconds"`
+	// TokenProCodexImageMode 是官方 Codex 首轮生图交付。空值或 data-v1 把压缩后的
+	// JPEG data URI 嵌进 markdown，并保留原图签名链接。url-v1 回到只发 HTTPS 链接。
+	TokenProCodexImageMode string `mapstructure:"tokenpro_codex_image_mode"`
 	// MaxLineSize: 上游 SSE 单行最大字节数（0使用默认值）
 	MaxLineSize      int   `mapstructure:"max_line_size"`
 	SSEQueueMaxBytes int64 `mapstructure:"sse_queue_max_bytes"`
@@ -2416,6 +2419,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.tokenpro_image_url_ttl_hours", 0)
 	viper.SetDefault("gateway.tokenpro_image_store_dir", "")
 	viper.SetDefault("gateway.tokenpro_chat_image_keepalive_seconds", 0)
+	viper.SetDefault("gateway.tokenpro_codex_image_mode", "data-v1")
 
 	// Ops (vNext)
 	viper.SetDefault("ops.enabled", true)
@@ -3615,6 +3619,11 @@ func (c *Config) Validate() error {
 	if c.Gateway.TokenProChatImageKeepaliveSeconds < 0 ||
 		(c.Gateway.TokenProChatImageKeepaliveSeconds != 0 && (c.Gateway.TokenProChatImageKeepaliveSeconds < 1 || c.Gateway.TokenProChatImageKeepaliveSeconds > 60)) {
 		return fmt.Errorf("gateway.tokenpro_chat_image_keepalive_seconds must be 0 (default 10) or between 1 and 60")
+	}
+	switch strings.ToLower(strings.TrimSpace(c.Gateway.TokenProCodexImageMode)) {
+	case "", "data-v1", "url-v1":
+	default:
+		return fmt.Errorf("gateway.tokenpro_codex_image_mode must be data-v1 (default) or url-v1")
 	}
 	// 兼容旧键 sticky_previous_response_ttl_seconds
 	if c.Gateway.OpenAIWS.StickyResponseIDTTLSeconds <= 0 && c.Gateway.OpenAIWS.StickyPreviousResponseTTLSeconds > 0 {

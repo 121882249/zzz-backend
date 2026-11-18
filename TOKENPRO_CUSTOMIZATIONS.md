@@ -1,6 +1,6 @@
 # TokenPro 二次开发清单
 
-当前分支以 Sub2API `v0.2.22`（`b0fa9f3`，tag 对象 `b11573c`）为底层版本。构建版本是 `0.2.22-tp.3`：`backend/cmd/server/VERSION` 为 `0.2.22-tp.3`，`backend/internal/service/update_service.go` 中的 `tokenProUpstreamVersion` 仍为 `0.2.22`。管理端按数字核心比较上游，`0.2.22-tp.N` 与上游 `v0.2.22` 相同，不会提示可更新。此文件用于后续升级时区分上游改动和本项目改动。已部署回滚点仍是 `619e567b`（`0.2.19-tp.1`），在分支 `upgrade/sub2api-v0.2.18-tokenpro`，没有被改写。`0.2.22-tp.2`（官方 Codex 内联回退）和更早的生产包没有被改写。
+当前分支以 Sub2API `v0.2.22`（`b0fa9f3`，tag 对象 `b11573c`）为底层版本。构建版本是 `0.2.22-tp.4`：`backend/cmd/server/VERSION` 为 `0.2.22-tp.4`，`backend/internal/service/update_service.go` 中的 `tokenProUpstreamVersion` 仍为 `0.2.22`。管理端按数字核心比较上游，`0.2.22-tp.N` 与上游 `v0.2.22` 相同，不会提示可更新。此文件用于后续升级时区分上游改动和本项目改动。已部署回滚点仍是 `619e567b`（`0.2.19-tp.1`），在分支 `upgrade/sub2api-v0.2.18-tokenpro`，没有被改写。`0.2.22-tp.2`（官方 Codex 内联回退）和更早的生产包没有被改写。
 
 下文路径中 `backend/internal/` 简写为 `be/`，`frontend/src/` 简写为 `fe/`。
 
@@ -68,9 +68,9 @@ Codex OAuth/SetupToken 账号的原生图片接口独立于文本模型映射。
 
 图片权限由分组 `allow_image_generation` 控制。上游改 wire 依赖时要重新生成 `cmd/server/wire_gen.go`，不要手工拼接。
 
-当聊天模型本身是生图模型（分组 `description` 去空白后等于 `生图`），并且请求**没有**携带 `image_gen.imagegen` 工具时，后端直接生图。官方 Codex（User-Agent 或 originator 命中 `Codex Desktop`、`Codex CLI`、`codex_cli_rs`、`codex_vscode` 等）生图成功的首轮一律返回 url 模式的 assistant `message`，正文是 `图片已生成：`、空行、`![](https://…)`、空行、`[https://…](https://…)`，有调整描述时再加一行。响应头是 `X-TokenPro-Chat-Image: url-v1`。是否带 `X-TokenPro-Image-Mode: native-v2`、是否带 exec/shell，都不改这条。流式补齐 `output_item.added`、`content_part.added`、`output_text.delta`、`output_text.done`、`content_part.done`、`output_item.done`、`response.completed`，并且 `completed.output` 含这条 message。不回 `image_generation_call`，也不在首轮下发本机下载工具。其他客户端不变：有 shell/exec 时下发本机下载（`local-v1` 的 `function_call` 或 `custom_tool_call`，打印 `TOKENPRO_IMAGE_PATH`）；没有这些工具时 assistant 文本是 `图片已生成：https://tokenpro.work/...`；显式 `X-TokenPro-Image-Mode: native-v2` 才返回内联 `image_generation_call`（标准 base64，`status=completed`，响应头 `inline-v1`）。本机下载的后续轮次如果解析到允许目录下的绝对路径，助手文本是 `![](localpath)`；解析不到时改为 markdown 图片加一行可点击链接，并记录不含密钥、URL 和图片数据的原因码。请求工具里真有 `image_gen.imagegen`，或历史里已有 `call_tp_pure_` / `call_tp_receipt_` 时，仍走原来的 native-v1 function call，不在这里生图。生图组按单图计费一次，下载回执轮次不重复计费。错误请求不扣费。
+当聊天模型本身是生图模型（分组 `description` 去空白后等于 `生图`），并且请求**没有**携带 `image_gen.imagegen` 工具时，后端直接生图。官方 Codex（User-Agent 或 originator 命中 `Codex Desktop`、`Codex CLI`、`codex_cli_rs`、`codex_vscode` 等）生图成功的首轮默认走 `data-v1`：assistant `message` 是 `图片已生成：`、空行、`![](data:image/jpeg;base64,…)`、空行、`[原图链接](https://…签名 URL…)`，有调整描述时再加一行。预览图长边约 1024px、JPEG 质量约 80，压到几百 KB 以内。解码或压缩失败，或 `gateway.tokenpro_codex_image_mode` 设为 `url-v1` 时，退回 `图片已生成：`、空行、`![](https://…)`、空行、`[https://…](https://…)`，响应头 `url-v1`。成功的 data-v1 响应头是 `X-TokenPro-Chat-Image: data-v1`。是否带 `X-TokenPro-Image-Mode: native-v2`、是否带 exec/shell，都不改这条。流式补齐 `output_item.added`、`content_part.added`、`output_text.delta`、`output_text.done`、`content_part.done`、`output_item.done`、`response.completed`，并且 `completed.output` 含这条 message。不回 `image_generation_call`，也不在首轮下发本机下载工具。转发 `/v1/responses` 和 `/v1/chat/completions` 之前，把历史里我们嵌进去的 `![…](data:image/…;base64,…)` 换成 `[已生成图片]`，旁边的签名链接留下；用户自己的 `input_image` 不动。其他客户端不变：有 shell/exec 时下发本机下载（`local-v1` 的 `function_call` 或 `custom_tool_call`，打印 `TOKENPRO_IMAGE_PATH`）；没有这些工具时 assistant 文本是 `图片已生成：https://tokenpro.work/...`；显式 `X-TokenPro-Image-Mode: native-v2` 才返回内联 `image_generation_call`（标准 base64，`status=completed`，响应头 `inline-v1`）。本机下载的后续轮次如果解析到允许目录下的绝对路径，助手文本是 `![](localpath)`；解析不到时改为 markdown 图片加一行可点击链接，并记录不含密钥、URL 和图片数据的原因码。请求工具里真有 `image_gen.imagegen`，或历史里已有 `call_tp_pure_` / `call_tp_receipt_` 时，仍走原来的 native-v1 function call，不在这里生图。生图组按单图计费一次，下载回执轮次不重复计费。错误请求不扣费。签名下载 `GET` 和 `HEAD /v1/tokenpro/images/:id` 都返回同一张原图。
 
-文本模型经 Codex 图片桥生成的图，按客户端分开交付。官方 Codex 同样拿到上面的 markdown 图片消息，响应头 `url-v1`，不再因为 native-v2 只留 `image_generation_call`，也不再首轮下发本机下载。其他客户端带 `X-TokenPro-Image-Mode: native-v2` 时，Responses 流式和非流式都保留 `image_generation_call`，`result` 是标准 base64，终态 `status` 为 `completed`，日志是 `Rewrote hosted image_generation_call as inline-v1`。不带这个头的其他客户端仍走本机下载或签名链接。后续轮次输入里过长的 `image_generation_call.result` 会清空后再转发，避免把 PNG 当成文本 token 计费；本轮图片费仍只按上游实际生成的张数记一次，文本 token 另计一次，不会因为交付方式再加一笔。
+文本模型经 Codex 图片桥生成的图，按客户端分开交付。官方 Codex 同样拿到上面的 data-v1 或 url-v1 消息，不再因为 native-v2 只留 `image_generation_call`，也不再首轮下发本机下载。其他客户端带 `X-TokenPro-Image-Mode: native-v2` 时，Responses 流式和非流式都保留 `image_generation_call`，`result` 是标准 base64，终态 `status` 为 `completed`，日志是 `Rewrote hosted image_generation_call as inline-v1`。不带这个头的其他客户端仍走本机下载或签名链接。后续轮次输入里过长的 `image_generation_call.result` 会清空后再转发，历史 markdown data URI 也会换成短占位，避免把图片字节当成文本 token 计费；本轮图片费仍只按上游实际生成的张数记一次，文本 token 另计一次，不会因为交付方式再加一笔。
 
 链接优先来自已启用的 `image_storage`（必须是 HTTPS，公开域名或 presigned 都可以）。没有可用对象存储时，使用签名下载：
 
@@ -79,6 +79,7 @@ Codex OAuth/SetupToken 账号的原生图片接口独立于文本模型映射。
 - `gateway.tokenpro_image_url_ttl_hours`：有效期，`0` 表示 7 天。
 - `gateway.tokenpro_image_store_dir`：本地文件目录，空值是 `data/tokenpro-chat-images`。
 - `gateway.tokenpro_chat_image_keepalive_seconds`：生图 SSE 的 `response.in_progress` 间隔，`0` 表示 10 秒。
+- `gateway.tokenpro_codex_image_mode`：官方 Codex 首轮预览，默认 `data-v1`。设成 `url-v1` 就只发 HTTPS markdown 链接。
 
 下载路由是 `GET /v1/tokenpro/images/:id?exp=&sig=`，注册在 API Key 鉴权之外，签名错误返回 404，过期返回 410 并删除文件。两项存储都没配好时返回中文配置错误，不回传 data URI。示例见 `deploy/config.example.yaml`。
 
@@ -118,7 +119,7 @@ v0.2.17 重写了退款（待定期间保留扣减，网关失败后原子回退
 
 ## 9. 品牌、文档与部署
 
-- 构建版本号是 semver `X.Y.Z-tp.N`（当前 `0.2.22-tp.3`）。管理端徽章对非 `TokenPro-` 前缀补一个 `v`，所以界面显示 `v0.2.22-tp.3`。上游是否可更新只比较 `tokenProUpstreamVersion` 解析出的 `X.Y.Z`。
+- 构建版本号是 semver `X.Y.Z-tp.N`（当前 `0.2.22-tp.4`）。管理端徽章对非 `TokenPro-` 前缀补一个 `v`，所以界面显示 `v0.2.22-tp.4`。上游是否可更新只比较 `tokenProUpstreamVersion` 解析出的 `X.Y.Z`。
 - 管理员登录后检查底层新版本；同一浏览器会话对同一版本只提醒一次。
 - Agent 使用文档页面、菜单、样式和中英文内容。
 - 低内存 Docker 构建文件 `deploy/Dockerfile.lowmem`（Go 1.27.4，需与 `go.mod` 一致）。
@@ -356,3 +357,15 @@ Gemini `/v1beta` 仍按第 3 节四步处理全局 Key，`allow_image_generation
 - 生图分组（`tokenpro_chat_image`）和文本模型托管桥接（改写 hosted `image_generation_call`）都走这条。
 - 非官方客户端不变：native-v2 仍内联，有 shell 仍本机下载，否则仍是纯链接文本。
 - 计费不变：生图分组每张图一次；文本模型是文本 token 一次加恰好一次 gpt-image-2 图像费；跟进不重复计费；错误不扣费。
+
+### 0.2.22-tp.4 官方 Codex 预览改为 data URI
+
+`0.2.22-tp.4` 在 `0.2.22-tp.3` 上改官方 Codex 的首轮预览。没有新迁移。`tokenProUpstreamVersion` 仍是 `0.2.22`。
+
+Codex Mac 0.169 能显示 tp.3 的文字和链接，但 webview 不去请求远程 `https://tokenpro.work/v1/tokenpro/images/…`，图片位置只剩占位图标。
+
+- 默认 `data-v1`：`图片已生成：`、空行、`![](data:image/jpeg;base64,…)`、空行、`[原图链接](签名 URL)`。预览长边约 1024px，JPEG 质量约 80，不超过约 384KB。响应头 `X-TokenPro-Chat-Image: data-v1`。原图签名链接保留。
+- 原图解码或压缩失败时退回 tp.3 的 `url-v1`。`gateway.tokenpro_codex_image_mode: url-v1` 也可以整段关掉 data URI。
+- `/v1/responses` 和 `/v1/chat/completions` 转发上游前，把历史里的 `![…](data:image/…;base64,…)` 换成 `[已生成图片]`。`input_image` 不动。
+- `HEAD /v1/tokenpro/images/:id` 与 GET 走同一签名下载，不再 404。
+- 计费不变。非官方客户端不变。

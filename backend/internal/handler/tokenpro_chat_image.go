@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -57,6 +58,12 @@ func (h *OpenAIGatewayHandler) TokenProChatImageDownload(c *gin.Context) {
 	c.Header("Cache-Control", "private, max-age=3600")
 	c.Header("X-Content-Type-Options", "nosniff")
 	c.Header("Content-Disposition", "inline")
+	c.Header("Content-Type", contentType)
+	c.Header("Content-Length", strconv.Itoa(len(data)))
+	if c.Request != nil && c.Request.Method == http.MethodHead {
+		c.Status(http.StatusOK)
+		return
+	}
 	c.Data(http.StatusOK, contentType, data)
 }
 
@@ -96,6 +103,9 @@ func (h *OpenAIGatewayHandler) dispatchTokenProChatImage(c *gin.Context, apiKey 
 
 	officialLink := service.TokenProOfficialCodexImageLink(c)
 	mode := "url-v1"
+	if officialLink && h.tokenProCodexDataImageEnabled() {
+		mode = service.TokenProCodexImageModeData
+	}
 	inlineImage := !officialLink && service.TokenProResponsesInlineImage(c)
 	if inlineImage {
 		mode = "inline-v1"
@@ -143,12 +153,21 @@ func (h *OpenAIGatewayHandler) dispatchTokenProChatImage(c *gin.Context, apiKey 
 			return true
 		}
 	}
-	h.logTokenProChatImageDispatch(c, body, "url")
 	text := service.TokenProChatImageSuccessText(imageURL, generated.Revised)
+	logMode := "url"
 	if officialLink {
 		text = service.TokenProOfficialCodexImageText(imageURL, generated.Revised)
+		mode = service.TokenProCodexImageModeURL
+		if h.tokenProCodexDataImageEnabled() {
+			if uri, ok := service.BuildTokenProCodexDataImageURI(generated.Bytes); ok {
+				text = service.TokenProOfficialCodexDataImageText(uri, imageURL, generated.Revised)
+				mode = service.TokenProCodexImageModeData
+				logMode = "data"
+			}
+		}
 	}
-	h.finishTokenProChatImage(c, sse, model, text, generated.Result, stream, "url-v1")
+	h.logTokenProChatImageDispatch(c, body, logMode)
+	h.finishTokenProChatImage(c, sse, model, text, generated.Result, stream, mode)
 	succeeded = true
 	return true
 }
@@ -211,6 +230,20 @@ func (h *OpenAIGatewayHandler) tokenProChatImageReady() bool {
 		return true
 	}
 	return h.tokenProChatImageFiles() != nil
+}
+
+func (h *OpenAIGatewayHandler) tokenProCodexDataImageEnabled() bool {
+	if h == nil || h.cfg == nil {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(h.cfg.Gateway.TokenProCodexImageMode)) {
+	case "", service.TokenProCodexImageModeData:
+		return true
+	case service.TokenProCodexImageModeURL:
+		return false
+	default:
+		return true
+	}
 }
 
 func (h *OpenAIGatewayHandler) tokenProChatImageKeepaliveInterval() time.Duration {

@@ -34,6 +34,17 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		body = strippedReplay
 		logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Stripped replayed image_generation_call result before upstream")
 	}
+	if strippedData, dataChanged := StripTokenProDataImageMarkdown(body); dataChanged {
+		body = strippedData
+		logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Replaced embedded data-image markdown before upstream")
+	}
+	if c != nil {
+		enabled := true
+		if s.cfg != nil {
+			enabled = tokenProCodexDataImageFromConfig(s.cfg.Gateway.TokenProCodexImageMode)
+		}
+		c.Set(TokenProCodexDataImageContextKey, enabled)
+	}
 	clearGrokResponsesClientToolMapping(c)
 	clearOpenAIResponsesClientToolMapping(c)
 	clearOpenAIResponsesNamespaceNames(c)
