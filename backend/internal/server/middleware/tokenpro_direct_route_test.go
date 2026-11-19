@@ -138,17 +138,17 @@ func TestTokenProNativeModeRequiresRoutedGlobalRequest(t *testing.T) {
 
 func TestTokenProNativeTextImageRouteIsExplicitAndScoped(t *testing.T) {
 	for _, tc := range []struct {
-		mode, model string
-		status      int
-		driver      string
+		mode, model, wantModel string
+		status                 int
+		driver                 string
 	}{
-		{"native-v1", "gpt-image-2", 204, "gpt-5.6-sol"},
-		{"native-v1", "", 204, "gpt-5.6-sol"},
-		{"", "gpt-image-2", 400, ""},
-		{"", "", 400, ""},
-		{"native-v1", "gpt-image-2.5-flare", 400, ""},
+		{"native-v1", "gpt-image-2", "gpt-image-2", 204, "gpt-5.6-sol"},
+		{"native-v1", "", "gpt-image-2", 204, "gpt-5.6-sol"},
+		{"native-v1", "gpt-image-2.5-flare", "gpt-image-2.5-flare", 204, "gpt-5.6-sol"},
+		{"", "gpt-image-2", "", 400, ""},
+		{"", "", "", 400, ""},
 	} {
-		t.Run(tc.mode+tc.model, func(t *testing.T) {
+		t.Run(tc.mode+"/"+tc.model, func(t *testing.T) {
 			r := gin.New()
 			r.Use(func(c *gin.Context) {
 				c.Set(string(ContextKeyAPIKey), &service.APIKey{KeyType: service.APIKeyTypeGlobal})
@@ -158,7 +158,7 @@ func TestTokenProNativeTextImageRouteIsExplicitAndScoped(t *testing.T) {
 			r.POST("/v1/images/generations", func(c *gin.Context) {
 				body, err := io.ReadAll(c.Request.Body)
 				require.NoError(t, err)
-				require.Equal(t, "gpt-image-2", gjson.GetBytes(body, "model").String())
+				require.Equal(t, tc.wantModel, gjson.GetBytes(body, "model").String())
 				require.Equal(t, tc.driver, service.TokenProNativeImageDriver(c))
 				require.Equal(t, "16", c.GetHeader(tokenProGroupIDHeader))
 				c.Status(204)

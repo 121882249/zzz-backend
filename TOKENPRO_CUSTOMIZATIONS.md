@@ -386,4 +386,4 @@ Codex Mac 0.169 能显示 tp.3 的文字和链接，但 webview 不去请求远�
 
 `0.2.22-tp.6` 在 `0.2.22-tp.5` 上修正全局 key 的文本组生图准入。没有新迁移。`tokenProUpstreamVersion` 仍是 `0.2.22`。
 
-`X-TokenPro-Image-Route: tp-g16-…` 仍然把请求留在文本组，不改去生图组。分组白名单和渠道 `restrict_models` 检查的是实际转发、计费的图片模型（例如 `gpt-image-2`），不再用对话模型顶替。白名单没有该图片模型时拒绝，且不扣费。请求体没有 `model` 时，文本组的 native 图片路由默认写成 `gpt-image-2`。生图组路由、data-v1 和 `/responses` 文本生图没有改。
+`X-TokenPro-Image-Route: tp-g16-…` 的 `/v1/images/generations` 仍然留在文本组，不改去生图组。实际图片模型是请求体里的 `model`；没有 `model` 时默认 `gpt-image-2`。这个模型已在该文本组的渠道白名单或分组可用模型里就原样放行。不在白名单里时，不直接拒绝，而是改写成该组白名单中的一个生图模型再转发：优先 `gpt-image-2`，否则按渠道定价列表的顺序，再按排序后的 `model_mapping` 键，最后按分组白名单顺序。计费、usage 和后续白名单检查都用改写后的模型，价格仍是这个文本组的价格。只有白名单里一个可用生图模型都没有时才拒绝，响应是「当前分组没有可用的生图模型」，不转发、不扣费。普通 key、生图组路由、data-v1 和 `/responses` 文本生图没有改。
