@@ -1,6 +1,6 @@
 # TokenPro 二次开发清单
 
-当前分支以 Sub2API `v0.2.22`（`b0fa9f3`，tag 对象 `b11573c`）为底层版本。构建版本是 `0.2.22-tp.6`：`backend/cmd/server/VERSION` 为 `0.2.22-tp.6`，`backend/internal/service/update_service.go` 中的 `tokenProUpstreamVersion` 仍为 `0.2.22`。管理端按数字核心比较上游，`0.2.22-tp.N` 与上游 `v0.2.22` 相同，不会提示可更新。此文件用于后续升级时区分上游改动和本项目改动。已部署回滚点仍是 `619e567b`（`0.2.19-tp.1`），在分支 `upgrade/sub2api-v0.2.18-tokenpro`，没有被改写。`0.2.22-tp.2`（官方 Codex 内联回退）和更早的生产包没有被改写。
+当前分支以 Sub2API `v0.2.23`（`5af9afb`，tag 对象 `ce19a64`）为底层版本。构建版本是 `0.2.23-tp.1`：`backend/cmd/server/VERSION` 为 `0.2.23-tp.1`，`backend/internal/service/update_service.go` 中的 `tokenProUpstreamVersion` 为 `0.2.23`。管理端按数字核心比较上游，`0.2.23-tp.N` 与上游 `v0.2.23` 相同，不会提示可更新。此文件用于后续升级时区分上游改动和本项目改动。已部署回滚点仍是 `619e567b`（`0.2.19-tp.1`），在分支 `upgrade/sub2api-v0.2.18-tokenpro`，没有被改写。`0.2.22-tp.6`（`6b3f191`）和更早的生产包没有被改写。
 
 下文路径中 `backend/internal/` 简写为 `be/`，`frontend/src/` 简写为 `fe/`。
 
@@ -121,7 +121,7 @@ v0.2.17 重写了退款（待定期间保留扣减，网关失败后原子回退
 
 ## 9. 品牌、文档与部署
 
-- 构建版本号是 semver `X.Y.Z-tp.N`（当前 `0.2.22-tp.6`）。管理端徽章对非 `TokenPro-` 前缀补一个 `v`，所以界面显示 `v0.2.22-tp.6`。上游是否可更新只比较 `tokenProUpstreamVersion` 解析出的 `X.Y.Z`。
+- 构建版本号是 semver `X.Y.Z-tp.N`（当前 `0.2.23-tp.1`）。管理端徽章对非 `TokenPro-` 前缀补一个 `v`，所以界面显示 `v0.2.23-tp.1`。上游是否可更新只比较 `tokenProUpstreamVersion` 解析出的 `X.Y.Z`。
 - 管理员登录后检查底层新版本；同一浏览器会话对同一版本只提醒一次。
 - Agent 使用文档页面、菜单、样式和中英文内容。
 - 低内存 Docker 构建文件 `deploy/Dockerfile.lowmem`（Go 1.27.4，需与 `go.mod` 一致）。
@@ -147,7 +147,7 @@ Fork 自有迁移（按完整文件名执行，与上游同编号文件不冲突
 - `237_global_api_key_repair.sql`：幂等补齐曾被旧版本删除或遗漏的全局 Key，历史软删除记录保留用于审计。
 - `238_global_api_key_group_invariant.sql`：强制全局 Key 的 `group_id` 为空。
 
-上游同编号文件包括 `196_channel_monitor_v2_...`、`234_channel_max_...`、`234_group_codex_...`、`237_add_minimax_platform`、`238_opencode_go_platform`、`238_purge_unlimited_...`。今后新增 fork 迁移建议使用 `9xx_tokenpro_*.sql`，并先确认执行器排序规则。v0.2.16 到 v0.2.17 上游没有新增迁移。v0.2.18 新增 `246_enable_gemini_image_generation_groups.sql`：把已有 `gemini` / `antigravity` 分组的 `allow_image_generation` 置为 true。`composite` 不在该 UPDATE 里。v0.2.19 在它之后按文件名执行 `247_scoped_admin_api_keys.sql`（管理员 API Key 表）和 `248_group_image_count_billing.sql`（`groups.image_count_billing`，默认 false）。248 不改 246 的开关，也不改 `api_keys`、`users` 或支付表。v0.2.20 新增 `249_mcp_oauth.sql`，只建 `mcp_oauth_grants` / `mcp_oauth_codes` / `mcp_oauth_credentials`，`CREATE TABLE IF NOT EXISTS`，不改 `api_keys`、`users` 列或支付表。回滚二进制到 `0.2.19-tp.1` 时这些表可以留下；只有确认从未启用 MCP 时才按外键逆序删除这三张表。v0.2.21 再新增两个上游文件，按文件名排在 `249_mcp_oauth.sql` 前后：`249_add_usage_logs_api_key_cost_index_notx.sql`（`usage_logs` 上 `CREATE INDEX CONCURRENTLY`，覆盖 `(api_key_id, created_at) INCLUDE (actual_cost)`，不改列、不锁表）和 `250_openai_cache_write_ttl.sql`（`usage_logs` 增加 `cache_creation_30m_tokens` / `cache_creation_12h_tokens`，渠道与账号统计价卡增加可空的 `cache_write_12h_price`）。二者都不改 `api_keys`、`users` 或支付订单表。执行器按文件名跳过已应用记录，所以已跑过 `249_mcp_oauth.sql` 的库仍会补跑索引和 250。v0.2.22 再新增两个上游文件，都编号 251，按文件名排在 250 之后，与 fork 已有迁移不重名：`251_group_force_openai_ultrafast.sql`（`groups` 增加 `force_openai_ultrafast`，默认 false）和 `251_group_usage_rollup_nonblocking_build.sql`（`usage_group_rollup_state` 增加重建水位列，并替换失效函数）。二者都不改 `api_keys`、`users` 或支付订单表，也不改 234/237/238 的全局 Key 约束。执行顺序是 `251_group_force_openai_ultrafast.sql`，然后 `251_group_usage_rollup_nonblocking_build.sql`。
+上游同编号文件包括 `196_channel_monitor_v2_...`、`234_channel_max_...`、`234_group_codex_...`、`237_add_minimax_platform`、`238_opencode_go_platform`、`238_purge_unlimited_...`。今后新增 fork 迁移建议使用 `9xx_tokenpro_*.sql`，并先确认执行器排序规则。v0.2.16 到 v0.2.17 上游没有新增迁移。v0.2.18 新增 `246_enable_gemini_image_generation_groups.sql`：把已有 `gemini` / `antigravity` 分组的 `allow_image_generation` 置为 true。`composite` 不在该 UPDATE 里。v0.2.19 在它之后按文件名执行 `247_scoped_admin_api_keys.sql`（管理员 API Key 表）和 `248_group_image_count_billing.sql`（`groups.image_count_billing`，默认 false）。248 不改 246 的开关，也不改 `api_keys`、`users` 或支付表。v0.2.20 新增 `249_mcp_oauth.sql`，只建 `mcp_oauth_grants` / `mcp_oauth_codes` / `mcp_oauth_credentials`，`CREATE TABLE IF NOT EXISTS`，不改 `api_keys`、`users` 列或支付表。回滚二进制到 `0.2.19-tp.1` 时这些表可以留下；只有确认从未启用 MCP 时才按外键逆序删除这三张表。v0.2.21 再新增两个上游文件，按文件名排在 `249_mcp_oauth.sql` 前后：`249_add_usage_logs_api_key_cost_index_notx.sql`（`usage_logs` 上 `CREATE INDEX CONCURRENTLY`，覆盖 `(api_key_id, created_at) INCLUDE (actual_cost)`，不改列、不锁表）和 `250_openai_cache_write_ttl.sql`（`usage_logs` 增加 `cache_creation_30m_tokens` / `cache_creation_12h_tokens`，渠道与账号统计价卡增加可空的 `cache_write_12h_price`）。二者都不改 `api_keys`、`users` 或支付订单表。执行器按文件名跳过已应用记录，所以已跑过 `249_mcp_oauth.sql` 的库仍会补跑索引和 250。v0.2.22 再新增两个上游文件，都编号 251，按文件名排在 250 之后，与 fork 已有迁移不重名：`251_group_force_openai_ultrafast.sql`（`groups` 增加 `force_openai_ultrafast`，默认 false）和 `251_group_usage_rollup_nonblocking_build.sql`（`usage_group_rollup_state` 增加重建水位列，并替换失效函数）。二者都不改 `api_keys`、`users` 或支付订单表，也不改 234/237/238 的全局 Key 约束。执行顺序是 `251_group_force_openai_ultrafast.sql`，然后 `251_group_usage_rollup_nonblocking_build.sql`。v0.2.23 新增 `252_channel_pricing_ultrafast_multiplier.sql`：`channel_model_pricing` 增加可空的 `ultrafast_multiplier`，并加正数 CHECK。不改 `api_keys`、`users`、`groups` 或支付订单表，也不改 234/237/238。合并前共 308 个 SQL 文件，没有同名或同编号 `252_` 文件。按文件名排在两个 `251_` 之后。
 
 ## 12. 已删除的遗留备份
 
@@ -387,3 +387,20 @@ Codex Mac 0.169 能显示 tp.3 的文字和链接，但 webview 不去请求远�
 `0.2.22-tp.6` 在 `0.2.22-tp.5` 上修正全局 key 的文本组生图准入。没有新迁移。`tokenProUpstreamVersion` 仍是 `0.2.22`。
 
 `X-TokenPro-Image-Route: tp-g16-…` 的 `/v1/images/generations` 仍然留在文本组，不改去生图组。实际图片模型是请求体里的 `model`；没有 `model` 时默认 `gpt-image-2`。这个模型已在该文本组的渠道白名单或分组可用模型里就原样放行。不在白名单里时，不直接拒绝，而是改写成该组白名单中的一个生图模型再转发：优先 `gpt-image-2`，否则按渠道定价列表的顺序，再按排序后的 `model_mapping` 键，最后按分组白名单顺序。计费、usage 和后续白名单检查都用改写后的模型，价格仍是这个文本组的价格。只有白名单里一个可用生图模型都没有时才拒绝，响应是「当前分组没有可用的生图模型」，不转发、不扣费。普通 key、生图组路由、data-v1 和 `/responses` 文本生图没有改。
+
+### v0.2.23 升级记录
+
+新分支 `upgrade/sub2api-v0.2.23-tokenpro` 从 `6b3f191`（`0.2.22-tp.6`，分支 `cursor/text-route-image-model-7f6b`，PR #20）拉出，用 merge 合入官方标签 `v0.2.23`（提交 `5af9afb`，tag 对象 `ce19a64`，tagger `shaw <dev@sub2api.org>`）。不 rebase，不改写 `6b3f191` 和已部署回滚点 `619e567b`。
+
+冲突只有 `backend/cmd/server/VERSION`：写成 `0.2.23-tp.1`。上游该文件仍是 `0.2.22`。`tokenProUpstreamVersion` 改为 `0.2.23`。无法解析的构建号回落比较也跟着变成 `0.2.23`。
+
+其余双方都改过的文件由 git 自动合并。交叉点这样处理：
+
+- **流式首字超时换号**：`handleStreamingResponseWithReasoning` 保留上游的间隔计时器。每收到上游数据就更新最后读取时间；超时点若仍在间隔内就按剩余时间重新计时。OpenAI 在客户端还没看到模型输出时切换账号，`SafeToFailoverAfterWrite` 让这次切换计入首字切换预算，最多 1 次。TokenPro 的响应模型回写仍在同一函数里改 SSE 行，发生在判断“客户端是否已看到输出”之前，回写本身不算首字。生图组的 data-v1 / url-v1、native-v2、本机下载和签名下载路由没有改。
+- **缓存写入计费**：`OpenAIUsage.billingUsageTokens` 带上 5 分钟 / 1 小时明细；总量缺失时用明细之和，避免缓存写入少计或按普通输入重复计。文本加图片仍是文本 token 一次，加上恰好一次 gpt-image-2 按张费用。缓存修复只作用在文本行，不把图片费再乘一次，也不把差额补进按张价格。
+- **GPT-6.2 Sol / Astra**：加进 Codex 模型表、模型白名单和 OpenCode 预设。`tp-g` 前缀仍由入口中间件先还原成公开模型名，再进这张表。全局 Key 仍按还原后的模型选分组。
+- **Ultra Fast 倍率**：支持列表加上 `gpt-6.2-sol` 和 `gpt-6.2-astra`。OAuth 账号先看套餐权益，再看账号目录里的 ultrafast 档。渠道 `ultrafast_multiplier` 只进入 token 档的 service tier 倍率。`calculateOpenAIImageCost` 不传 service tier，gpt-image-2 按张费用不乘这个倍率。6.2 在太平洋时间 2027-03-01 00:00 前默认 3 倍，之后 6 倍；GPT-6 Astra 和 GPT-6.1 Sol 仍是 6 倍。
+
+没有重新生成 Ent 或 wire：上游没有改 schema。Go 工具链两边都是 1.27.4，`deploy/Dockerfile.lowmem` 不用改。
+
+全局 Key、`tp-g` / `X-TokenPro-Group-Id`、生图组 data-v1 / url-v1、文本组图片白名单改写、签名下载，以及充值页「大额充值私聊站长 优惠」都保持原样。
