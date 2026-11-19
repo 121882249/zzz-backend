@@ -537,7 +537,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		forwardResult.ImageSize = imageSizeTier
 		forwardResult.ImageInputSize = imageInputSize
 		forwardResult.ImageOutputSizes = imageOutputSizes
-		forwardResult.BillingModel = imageBillingModel
+		forwardResult.BillingModel = tokenProTextGroupImageBillingModel(c, body, imageCount, imageBillingModel)
 	}
 	return forwardResult, nil
 }

@@ -65,22 +65,10 @@ func TestTokenProTextImageSkillUsesHostedBridgeNotClientSkill(t *testing.T) {
 	body := tokenProTextToolsFixture(t, "developer", tokenProLegacySkillCatalogFixture)
 	adapted, err := prepareTokenProImageTools(c, body)
 	require.NoError(t, err)
-	require.False(t, TokenProNativeImageDelivery(c), "hosted image_generation bridge must stay enabled")
-	require.True(t, tokenProHostedImageBridgeRequested(c))
-	require.Equal(t, gjson.GetBytes(body, "tools").Raw, gjson.GetBytes(adapted, "tools").Raw)
-	require.Equal(t, "gpt-6-channel-mapped", gjson.GetBytes(adapted, "model").String())
-	require.Equal(t, "Original instructions.", gjson.GetBytes(adapted, "instructions").String())
-	catalog := gjson.GetBytes(adapted, "input.0.content.0.text").String()
-	require.NotContains(t, catalog, "SKILL.md")
-	require.NotContains(t, catalog, "tokenpro-imagegen/SKILL")
-	require.Contains(t, catalog, tokenProImageSkillNeutralLine)
-	require.NotContains(t, string(adapted), tokenProTextImageSkillGuidanceMarker)
-	require.NotContains(t, string(adapted), tokenProTextImageFastDeliveryInstructions)
-	require.NotContains(t, string(adapted), "--model")
-	require.NotContains(t, string(adapted), "gpt-image-2.5-sunburst")
-	twice, err := prepareTokenProImageTools(c, adapted)
-	require.NoError(t, err)
-	require.Equal(t, adapted, twice)
+	require.False(t, TokenProNativeImageDelivery(c))
+	require.False(t, tokenProHostedImageBridgeRequested(c))
+	require.Equal(t, body, adapted, "a global GPT text group keeps the client skill catalog")
+	require.Contains(t, string(adapted), "SKILL.md")
 }
 
 func TestTokenProTextImageFastDeliveryChangesCatalogOnly(t *testing.T) {
@@ -96,13 +84,10 @@ func TestTokenProTextImageFastDeliveryChangesCatalogOnly(t *testing.T) {
 	adapted, err := prepareTokenProImageTools(c, body)
 	require.NoError(t, err)
 	require.False(t, TokenProNativeImageDelivery(c))
+	require.Equal(t, body, adapted)
 	require.Equal(t, "xhigh", gjson.GetBytes(adapted, "reasoning.effort").String())
-	require.Equal(t, "auto", gjson.GetBytes(adapted, "tool_choice").String())
-	require.Equal(t, gjson.GetBytes(body, "tools").Raw, gjson.GetBytes(adapted, "tools").Raw)
-	require.Equal(t, "Original instructions.", gjson.GetBytes(adapted, "instructions").String())
-	require.NotContains(t, string(adapted), "yield_time_ms: 30000")
-	require.NotContains(t, string(adapted), "SKILL.md")
-	require.Contains(t, gjson.GetBytes(adapted, "input.0.content.0.text").String(), "hosted image_generation tool")
+	require.Contains(t, string(adapted), "SKILL.md")
+	require.Contains(t, string(adapted), tokenProTextImageFastDeliveryInstructions)
 }
 
 func TestTokenProTextImageTitleStaysTextOnly(t *testing.T) {
@@ -115,15 +100,11 @@ func TestTokenProTextImageTitleStaysTextOnly(t *testing.T) {
 	require.NoError(t, err)
 	adapted, err := prepareTokenProImageTools(c, body)
 	require.NoError(t, err)
-	require.True(t, TokenProNativeImageDelivery(c), "title turns must not arm the hosted image bridge")
+	require.False(t, TokenProNativeImageDelivery(c))
 	require.False(t, tokenProHostedImageBridgeRequested(c))
+	require.Equal(t, body, adapted)
 	require.Equal(t, "[]", gjson.GetBytes(adapted, "tools").Raw)
-	require.Equal(t, "json_schema", gjson.GetBytes(adapted, "text.format.type").String())
-	catalog := gjson.GetBytes(adapted, "input.0.content.0.text").String()
-	require.Contains(t, catalog, tokenProImageSkillNeutralTitleLine)
-	require.NotContains(t, catalog, "hosted image_generation tool")
-	require.NotContains(t, string(adapted), "SKILL.md")
-	require.NotContains(t, string(adapted), tokenProTextImageFastDeliveryInstructions)
+	require.Contains(t, string(adapted), "SKILL.md")
 }
 
 func TestTokenProImageSkillDiscoveryTrustsOnlyInstalledDeveloperCatalog(t *testing.T) {
@@ -206,24 +187,25 @@ func TestTokenProTextImageForwardRespectsActualClientCapabilities(t *testing.T) 
 					require.NotContains(t, instructions, tokenProTextImageFastDeliveryInstructions)
 					require.NotContains(t, instructions, "--model")
 					if global && hasSkill {
-						require.NotContains(t, string(upstream.lastBody), "SKILL.md")
-						require.Contains(t, string(upstream.lastBody), "Do not read or run imagegen or tokenpro-imagegen")
+						require.Contains(t, string(upstream.lastBody), "SKILL.md")
 						imageTool := gjson.GetBytes(upstream.lastBody, `tools.#(type=="image_generation")`)
-						require.True(t, imageTool.Exists(), "skill catalog must not block the hosted image tool")
-						require.Equal(t, "png", imageTool.Get("output_format").String())
-						require.False(t, imageTool.Get("model").Exists(), "text-model bridge leaves the image model unset")
+						if passthrough {
+							require.False(t, imageTool.Exists(), "passthrough accounts do not gain an injected image tool")
+						} else {
+							require.True(t, imageTool.Exists(), "the upstream bridge still injects image_generation")
+							require.Equal(t, "png", imageTool.Get("output_format").String())
+							require.False(t, imageTool.Get("model").Exists(), "text-model bridge leaves the image model unset")
+						}
 						require.Zero(t, result.ImageCount)
 						require.Len(t, upstream.bodies, 1)
 					}
 				}
 				if !hasSkill && !passthrough {
-					require.JSONEq(t, forwarded[0], forwarded[1], "without native/Skill support, global and group Keys must use the same Responses pipeline")
+					require.JSONEq(t, forwarded[0], forwarded[1], "without a skill catalog, global and group Keys use the same Responses pipeline")
 				}
 				if !hasSkill && passthrough {
 					require.False(t, gjson.Get(forwarded[0], `tools.#(type=="image_generation")`).Exists(), "group passthrough stays on its ordinary body")
-					imageTool := gjson.Get(forwarded[1], `tools.#(type=="image_generation")`)
-					require.True(t, imageTool.Exists(), "a global text turn uses the hosted tool even when passthrough is on")
-					require.False(t, imageTool.Get("model").Exists())
+					require.False(t, gjson.Get(forwarded[1], `tools.#(type=="image_generation")`).Exists(), "global passthrough does not inject image_generation")
 				}
 			})
 		}
@@ -244,29 +226,34 @@ func TestTokenProTextImageHostedForwardBillsOneTextRow(t *testing.T) {
 			svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream}
 			account := &Account{ID: 7, Name: "fixture", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "fixture", "base_url": "https://example.com"}, Extra: map[string]any{"use_responses_api": true, "openai_passthrough": passthrough}}
 			c, rec := tokenProTextToolsContext(t)
-			// The handler classifies the original text body before Forward injects the tool.
 			SetOpenAIImageIntentHint(c, false)
 			SetTokenProHostedImagePublisher(c, func(context.Context, string, []byte) (string, error) {
-				return "https://tokenpro.work/cat.png?exp=1&sig=ff", nil
+				t.Fatal("global text group must not store the upstream image")
+				return "", nil
 			})
 			body := tokenProTextToolsFixture(t, "developer", tokenProLegacySkillCatalogFixture)
 			result, err := svc.Forward(context.Background(), c, account, body)
 			require.NoError(t, err)
-			require.Len(t, upstream.bodies, 1, "the skill CLI must not open a second billed generation")
+			require.Len(t, upstream.bodies, 1, "the text forward is the only billed request")
 			require.Equal(t, 1, result.ImageCount)
 			require.Equal(t, "gpt-6-channel-mapped", result.Model)
-			require.Equal(t, "gpt-image-2", result.BillingModel, "an omitted hosted image_generation model bills as gpt-image-2 on this same row")
+			require.Equal(t, 11, result.Usage.InputTokens)
+			require.Equal(t, 22, result.Usage.OutputTokens)
+			require.Equal(t, "gpt-image-2", result.BillingModel, "an upstream image on a text turn bills gpt-image-2 once")
 			imageTool := gjson.GetBytes(upstream.lastBody, `tools.#(type=="image_generation")`)
-			require.True(t, imageTool.Exists())
-			require.False(t, imageTool.Get("model").Exists())
-			require.NotContains(t, string(upstream.lastBody), "SKILL.md")
-			require.NotContains(t, string(upstream.lastBody), tokenProTextImageFastDeliveryInstructions)
+			if passthrough {
+				require.False(t, imageTool.Exists(), "passthrough does not inject image_generation")
+			} else {
+				require.True(t, imageTool.Exists())
+				require.False(t, imageTool.Get("model").Exists())
+			}
+			require.Contains(t, string(upstream.lastBody), "SKILL.md")
 			client := rec.Body.String()
-			require.NotContains(t, client, hostedTestPNG)
-			require.NotContains(t, client, "image_generation_call")
-			require.Equal(t, "custom_tool_call", gjson.Get(client, "output.0.type").String())
-			require.Contains(t, gjson.Get(client, "output.0.input").String(), "https://tokenpro.work/cat.png?exp=1&sig=ff")
-			require.Contains(t, gjson.Get(client, "output.0.input").String(), ".codex/generated_images/tokenpro/")
+			require.Contains(t, client, "image_generation_call")
+			require.Contains(t, client, hostedTestPNG)
+			require.NotContains(t, client, "custom_tool_call")
+			require.NotContains(t, client, "data:image/jpeg;base64,")
+			require.Empty(t, rec.Header().Get("X-TokenPro-Chat-Image"))
 		})
 	}
 }
@@ -292,8 +279,7 @@ func TestTokenProTitleWithoutTextImageDeliveryGetsNoImageTool(t *testing.T) {
 			svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream}
 			account := &Account{ID: 7, Name: "fixture", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "fixture", "base_url": "https://example.com"}, Extra: map[string]any{"use_responses_api": true}}
 			c, _ := tokenProTextToolsContext(t)
-			// No pending text-image delivery: this is the shape that reaches the
-			// generic Codex bridge instead of prepareTokenProImageTools.
+			getAPIKeyFromContext(c).KeyType = APIKeyTypeGroup
 			c.Set(TokenProTextImageDeliveryContextKey, false)
 			if tc.header != "" {
 				c.Request.Header.Set("X-Codex-Turn-Metadata", tc.header)
@@ -349,18 +335,136 @@ func TestTokenProTextImageTitleForwardStaysUnbilledAndTextOnly(t *testing.T) {
 			require.Len(t, upstream.bodies, 1)
 			require.Zero(t, result.ImageCount)
 			require.NotEqual(t, "gpt-image-2", result.BillingModel)
+			require.Contains(t, string(upstream.lastBody), "SKILL.md")
+			require.False(t, tokenProHostedImageBridgeRequested(c))
+			imageTool := gjson.GetBytes(upstream.lastBody, `tools.#(type=="image_generation")`)
 			if tc.passthrough {
 				require.Empty(t, result.BillingModel)
 				require.Equal(t, "gpt-6-channel-mapped", result.Model)
+				require.False(t, imageTool.Exists(), "passthrough does not inject on a title turn")
 			} else {
 				require.Equal(t, "gpt-6-channel-mapped", result.BillingModel)
+				require.True(t, imageTool.Exists(), "a global text group uses the upstream bridge, including title turns")
 			}
-			require.False(t, gjson.GetBytes(upstream.lastBody, `tools.#(type=="image_generation")`).Exists())
-			require.NotContains(t, string(upstream.lastBody), "SKILL.md")
-			require.NotContains(t, string(upstream.lastBody), tokenProTextImageFastDeliveryInstructions)
-			require.NotContains(t, rec.Body.String(), "image_generation")
-			require.True(t, TokenProNativeImageDelivery(c))
-			require.False(t, tokenProHostedImageBridgeRequested(c))
+			require.NotContains(t, rec.Body.String(), "custom_tool_call")
 		})
 	}
+}
+
+func TestGlobalGPTTextGroupStreamsImageCallUnchanged(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Gateway.ForceCodexCLI = true
+	cfg.Gateway.CodexImageGenerationBridgeEnabled = true
+	sse := "data: {\"type\":\"response.image_generation_call.partial_image\",\"partial_image_b64\":\"" + hostedTestPNG + "\"}\n\n" +
+		"data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"ig_cat\",\"type\":\"image_generation_call\",\"status\":\"completed\",\"result\":\"" + hostedTestPNG + "\"}}\n\n" +
+		"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_cat\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"画好啦\"}]},{\"id\":\"ig_cat\",\"type\":\"image_generation_call\",\"status\":\"completed\",\"result\":\"" + hostedTestPNG + "\"}],\"usage\":{\"input_tokens\":11,\"output_tokens\":22,\"total_tokens\":33}}}\n\n"
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: 200,
+		Header:     http.Header{"Content-Type": {"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(sse)),
+	}}
+	svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream}
+	account := &Account{ID: 7, Name: "fixture", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "fixture", "base_url": "https://example.com"}, Extra: map[string]any{"use_responses_api": true}}
+	c, rec := tokenProTextToolsContext(t)
+	body := tokenProTextToolsFixture(t, "user", "draw a cat")
+	body, err := sjson.SetBytes(body, "stream", true)
+	require.NoError(t, err)
+	result, err := svc.Forward(context.Background(), c, account, body)
+	require.NoError(t, err)
+	require.Equal(t, 1, result.ImageCount)
+	require.Equal(t, "gpt-image-2", result.BillingModel)
+	require.Equal(t, 11, result.Usage.InputTokens)
+	client := rec.Body.String()
+	require.Contains(t, client, "response.image_generation_call.partial_image")
+	require.Contains(t, client, "image_generation_call")
+	require.Contains(t, client, hostedTestPNG)
+	require.Contains(t, client, "画好啦")
+	require.NotContains(t, client, "custom_tool_call")
+	require.NotContains(t, client, "data:image/jpeg;base64,")
+}
+
+func TestGlobalGPTTextGroupFollowUpAndErrorDoNotBillImage(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Gateway.ForceCodexCLI = true
+	cfg.Gateway.CodexImageGenerationBridgeEnabled = true
+	account := &Account{ID: 7, Name: "fixture", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "fixture", "base_url": "https://example.com"}, Extra: map[string]any{"use_responses_api": true}}
+	body := tokenProTextToolsFixture(t, "user", "thanks")
+
+	followUpstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: 200,
+		Header:     http.Header{"Content-Type": {"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"id":"resp_next","object":"response","output":[{"type":"message","content":[{"type":"output_text","text":"好的"}]}],"usage":{"input_tokens":5,"output_tokens":6,"total_tokens":11}}`)),
+	}}
+	c, _ := tokenProTextToolsContext(t)
+	follow, err := (&OpenAIGatewayService{cfg: cfg, httpUpstream: followUpstream}).Forward(context.Background(), c, account, body)
+	require.NoError(t, err)
+	require.Zero(t, follow.ImageCount)
+	require.NotEqual(t, "gpt-image-2", follow.BillingModel)
+	require.Equal(t, 5, follow.Usage.InputTokens)
+
+	errorUpstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: 500,
+		Header:     http.Header{"Content-Type": {"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"type":"api_error","message":"upstream failed"}}`)),
+	}}
+	c, _ = tokenProTextToolsContext(t)
+	failed, err := (&OpenAIGatewayService{cfg: cfg, httpUpstream: errorUpstream}).Forward(context.Background(), c, account, body)
+	require.Error(t, err)
+	require.Nil(t, failed)
+}
+
+func TestGroupKeyTextImageStillRewritesHostedCall(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Gateway.ForceCodexCLI = true
+	cfg.Gateway.CodexImageGenerationBridgeEnabled = true
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: 200,
+		Header:     http.Header{"Content-Type": {"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"id":"resp_cat","object":"response","output":[{"id":"ig_cat","type":"image_generation_call","status":"completed","result":"` + hostedTestPNG + `"}],"usage":{"input_tokens":1,"output_tokens":2,"total_tokens":3}}`)),
+	}}
+	c, rec := tokenProTextToolsContext(t)
+	getAPIKeyFromContext(c).KeyType = APIKeyTypeGroup
+	c.Set(TokenProTextImageDeliveryContextKey, false)
+	SetTokenProHostedImagePublisher(c, func(context.Context, string, []byte) (string, error) {
+		return "https://tokenpro.work/cat.png?exp=1&sig=ff", nil
+	})
+	body := tokenProTextToolsFixture(t, "user", "draw a cat")
+	result, err := (&OpenAIGatewayService{cfg: cfg, httpUpstream: upstream}).Forward(context.Background(), c, &Account{
+		ID: 7, Name: "fixture", Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
+		Credentials: map[string]any{"api_key": "fixture", "base_url": "https://example.com"},
+		Extra:       map[string]any{"use_responses_api": true},
+	}, body)
+	require.NoError(t, err)
+	require.Equal(t, 1, result.ImageCount)
+	require.Equal(t, "gpt-image-2", result.BillingModel)
+	require.NotContains(t, rec.Body.String(), "image_generation_call")
+	require.Contains(t, rec.Body.String(), "custom_tool_call")
+}
+
+func TestGlobalGPTTextGroupKeepsReplayedImageResult(t *testing.T) {
+	c, _ := tokenProTextToolsContext(t)
+	big := strings.Repeat("A", tokenProReplayImageResultLimit+8)
+	body := []byte(`{"model":"gpt-6-sol","input":[{"type":"image_generation_call","id":"ig_1","result":"` + big + `"}]}`)
+	require.True(t, tokenProGlobalGPTTextGroup(c, body))
+	out, changed := StripTokenProReplayImageResults(body)
+	require.True(t, changed)
+	kept, skip := body, false
+	if !tokenProGlobalGPTTextGroup(c, body) {
+		kept, skip = StripTokenProReplayImageResults(body)
+	}
+	require.False(t, skip)
+	require.Equal(t, body, kept)
+	require.NotEqual(t, body, out)
+
+	imageGroup := getAPIKeyFromContext(c)
+	imageGroup.Group.Description = "生图"
+	require.False(t, tokenProGlobalGPTTextGroup(c, body))
+
+	dataBody := []byte(`{"model":"gpt-6-sol","input":[{"role":"assistant","content":"图片已生成：\n\n![](data:image/jpeg;base64,QUFB)\n\n[原图链接](https://tokenpro.work/cat.png)"}]}`)
+	imageGroup.Group.Description = ""
+	stripped, changed := StripTokenProDataImageMarkdown(dataBody)
+	require.True(t, changed)
+	require.Contains(t, string(stripped), "[已生成图片]")
+	require.NotContains(t, string(stripped), "data:image/jpeg;base64,")
+	require.Contains(t, string(stripped), "https://tokenpro.work/cat.png")
 }
