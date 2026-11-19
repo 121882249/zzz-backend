@@ -236,8 +236,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		if !gjson.ValidBytes(trimmed) {
 			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", errors.New("invalid json"))
 		}
-		if stripped, changed := StripTokenProReplayImageResults(trimmed); changed {
-			trimmed = stripped
+		if !tokenProGlobalGPTTextGroup(c, trimmed) {
+			if stripped, changed := StripTokenProReplayImageResults(trimmed); changed {
+				trimmed = stripped
+			}
 		}
 		if stripped, changed := StripTokenProDataImageMarkdown(trimmed); changed {
 			trimmed = stripped

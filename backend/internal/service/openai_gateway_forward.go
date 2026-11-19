@@ -30,9 +30,11 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		return nil, filterErr
 	}
 	body = filteredBody
-	if strippedReplay, replayChanged := StripTokenProReplayImageResults(body); replayChanged {
-		body = strippedReplay
-		logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Stripped replayed image_generation_call result before upstream")
+	if !tokenProGlobalGPTTextGroup(c, body) {
+		if strippedReplay, replayChanged := StripTokenProReplayImageResults(body); replayChanged {
+			body = strippedReplay
+			logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Stripped replayed image_generation_call result before upstream")
+		}
 	}
 	if strippedData, dataChanged := StripTokenProDataImageMarkdown(body); dataChanged {
 		body = strippedData
@@ -303,18 +305,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Stripped /responses image_generation tool for Codex client by account policy")
 			}
 		}
-		hostedBody, hosted, hostedErr := s.applyTokenProPassthroughHostedImage(ctx, c, account, originalBody, isCodexCLI, codexImageGenerationExplicitToolPolicy)
-		if hostedErr != nil {
-			return nil, hostedErr
-		}
-		if hosted {
-			body = hostedBody
-			originalBody = hostedBody
-			// The handler already classified the pre-injection body. Recompute
-			// this attempt so the injected tool bills on the same text row.
-			attemptImageIntentInvalidated = true
-		}
 		// 透传分支只需要轻量提取字段，避免热路径全量 Unmarshal。
+		// 全局 key 的 GPT 文本组与上游一致：透传账号不注入 image_generation。
 		mappedModel := account.GetMappedModel(reqModel)
 		reasoningEffort := extractOpenAIReasoningEffortFromBody(body, mappedModel)
 		// 国产模型默认 effort 补充：也要用 mappedModel 判定是否是 passback-required 上游。
@@ -419,12 +411,12 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	if apiKey != nil {
 		imageGenerationAllowed = GroupAllowsImageGeneration(apiKey.Group)
 	}
-	// Title turns (no tools + json_schema, or thread_source=thread_title) are
-	// metadata. They must not gain image_generation even when this request never
-	// entered the TokenPro text-image preparer, because the generic Codex bridge
-	// would otherwise attach the tool and bill an image.
+	// Title turns stay off the bridge for group keys. A global GPT text group
+	// uses the upstream gate only: official Codex, image permission, the bridge
+	// switch, and the explicit-tool policy.
+	titleBlocksBridge := tokenProTitleGenerationRequest(c, body) && !tokenProGlobalGPTTextGroup(c, body)
 	codexImageGenerationBridgeEnabled := !TokenProNativeImageDelivery(c) &&
-		!tokenProTitleGenerationRequest(c, body) && isCodexCLI &&
+		!titleBlocksBridge && isCodexCLI &&
 		!isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader)) &&
 		imageGenerationAllowed &&
 		codexImageGenerationExplicitToolPolicy != codexImageGenerationExplicitToolPolicyStrip &&
@@ -510,12 +502,12 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		if codexImageGenerationBridgeEnabled && ensureOpenAIResponsesImageGenerationTool(decoded) {
 			markDecodedModified()
 			logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Injected /responses image_generation tool for Codex client")
-			// The text-row forward already bills this image once. Official Codex
-			// receives a markdown image message. Other native-v2 clients keep
-			// the image_generation_call. Everyone else still gets the local
-			// download or the signed URL. A second image-group generation
-			// would charge again.
-			armTokenProHostedImageDelivery(c, body)
+			// Group keys still rewrite the hosted call for local or data-v1
+			// delivery. A global GPT text group forwards the upstream
+			// image_generation_call unchanged, including partial events.
+			if !tokenProGlobalGPTTextGroup(c, body) {
+				armTokenProHostedImageDelivery(c, body)
+			}
 		}
 		if codexImageGenerationBridgeEnabled && ensureOpenAIResponsesImageGenerationToolChoiceAuto(decoded) {
 			markDecodedModified()
@@ -1090,7 +1082,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			if wsResult.ImageCount > 0 {
 				wsResult.ImageSize = imageSizeTier
 				wsResult.ImageInputSize = imageInputSize
-				wsResult.BillingModel = imageBillingModel
+				wsResult.BillingModel = tokenProTextGroupImageBillingModel(c, body, wsResult.ImageCount, imageBillingModel)
 			}
 			return wsResult, nil
 		}
@@ -1413,7 +1405,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			forwardResult.ImageSize = imageSizeTier
 			forwardResult.ImageInputSize = imageInputSize
 			forwardResult.ImageOutputSizes = imageOutputSizes
-			forwardResult.BillingModel = imageBillingModel
+			forwardResult.BillingModel = tokenProTextGroupImageBillingModel(c, body, imageCount, imageBillingModel)
 		}
 		// Grok-native web_search / x_search / tool_search tool invocations (per-1k pricing).
 		// Token cost still applies separately when usage is present; search is additive only

@@ -499,9 +499,11 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 		return
 	}
-	if stripped, changed := service.StripTokenProReplayImageResults(body); changed {
-		body = stripped
-		sessionHashBody = body
+	if !service.TokenProGlobalGPTTextGroupRequest(c, body) {
+		if stripped, changed := service.StripTokenProReplayImageResults(body); changed {
+			body = stripped
+			sessionHashBody = body
+		}
 	}
 	if stripped, changed := service.StripTokenProDataImageMarkdown(body); changed {
 		body = stripped
@@ -2683,8 +2685,10 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "invalid JSON payload")
 		return
 	}
-	if stripped, changed := service.StripTokenProReplayImageResults(firstMessage); changed {
-		firstMessage = stripped
+	if !service.TokenProGlobalGPTTextGroupRequest(c, firstMessage) {
+		if stripped, changed := service.StripTokenProReplayImageResults(firstMessage); changed {
+			firstMessage = stripped
+		}
 	}
 	if stripped, changed := service.StripTokenProDataImageMarkdown(firstMessage); changed {
 		firstMessage = stripped

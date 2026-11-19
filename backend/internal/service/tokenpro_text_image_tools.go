@@ -1,12 +1,10 @@
 package service
 
 import (
-	"context"
 	"regexp"
 	"strconv"
 	"strings"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -92,6 +90,49 @@ func tokenProAdvertisedImageSkill(body []byte) string {
 		}
 	}
 	return selected
+}
+
+// tokenProGlobalGPTTextGroup is a global key whose selected group is a GPT
+// text group, not a 生图 group. Those turns use the upstream Codex image
+// bridge: the image_generation_call is forwarded unchanged. Group keys keep
+// the TokenPro rewrite.
+func tokenProGlobalGPTTextGroup(c *gin.Context, body []byte) bool {
+	key := getAPIKeyFromContext(c)
+	if key == nil || !key.IsGlobal() || key.Group == nil || key.Group.Platform != PlatformOpenAI || TokenProPureImageGroup(key.Group) {
+		return false
+	}
+	model := ""
+	if len(body) > 0 && gjson.ValidBytes(body) {
+		model = strings.TrimSpace(gjson.GetBytes(body, "model").String())
+	}
+	if model == "" && c != nil {
+		if value, ok := c.Get(TokenProImageTurnContextKey); ok {
+			if pending, _ := value.(*TokenProPendingImageTurn); pending != nil {
+				model = strings.TrimSpace(pending.Model)
+			}
+		}
+	}
+	model = strings.TrimSpace(model)
+	return strings.HasPrefix(strings.ToLower(model), "gpt-") && !IsGPTImageGenerationModel(model)
+}
+
+// TokenProGlobalGPTTextGroupRequest reports a global-key GPT text group.
+// Image-group chats and ordinary group keys are not included.
+func TokenProGlobalGPTTextGroupRequest(c *gin.Context, body []byte) bool {
+	return tokenProGlobalGPTTextGroup(c, body)
+}
+
+// tokenProTextGroupImageBillingModel keeps the per-image fee when a global
+// GPT text turn actually returns an image, even if the request never went
+// through the hosted writer. A declared image model is left alone.
+func tokenProTextGroupImageBillingModel(c *gin.Context, body []byte, imageCount int, imageBillingModel string) string {
+	if imageCount <= 0 || isOpenAIImageGenerationModel(strings.TrimSpace(imageBillingModel)) {
+		return imageBillingModel
+	}
+	if tokenProGlobalGPTTextGroup(c, body) {
+		return "gpt-image-2"
+	}
+	return imageBillingModel
 }
 
 func tokenProHostedImageEligible(c *gin.Context) bool {
@@ -246,6 +287,12 @@ func neutralizeTokenProImageSkillHints(body []byte, title bool) ([]byte, error) 
 // forward. Title turns keep delivery set so the bridge stays off.
 func prepareTokenProImageTools(c *gin.Context, body []byte) ([]byte, error) {
 	setTokenProHostedImageBridge(c, false)
+	if tokenProGlobalGPTTextGroup(c, body) {
+		// Upstream owns tool injection and the image_generation_call bytes.
+		// Do not rewrite the imagegen skill or arm a local/data-v1 delivery.
+		c.Set(TokenProTextImageDeliveryContextKey, false)
+		return body, nil
+	}
 	if tokenProHasNativeImageTool(body) || TokenProNativeImages(c) {
 		return PrepareTokenProNativeImages(body)
 	}
@@ -266,51 +313,4 @@ func prepareTokenProImageTools(c *gin.Context, body []byte) ([]byte, error) {
 	c.Set(TokenProTextImageDeliveryContextKey, false)
 	setTokenProHostedImageBridge(c, true)
 	return neutralized, nil
-}
-
-// applyTokenProPassthroughHostedImage injects the Codex hosted image tool on
-// the passthrough path. That path returns before the ordinary bridge, so a
-// global text turn would otherwise lose the client skill and still have no
-// image tool. The same bridge gate applies: Codex CLI, group permission,
-// explicit-tool policy, and the account/channel/config switch. Title turns
-// never set the request flag. The pre-injection body is what the local
-// download call uses, so the client still sees its own shell tool.
-func (s *OpenAIGatewayService) applyTokenProPassthroughHostedImage(
-	ctx context.Context,
-	c *gin.Context,
-	account *Account,
-	body []byte,
-	isCodexCLI bool,
-	explicitToolPolicy string,
-) ([]byte, bool, error) {
-	if !tokenProHostedImageBridgeRequested(c) || c == nil || account == nil || !isCodexCLI {
-		return body, false, nil
-	}
-	if isOpenAIResponsesCompactPath(c) || isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader)) {
-		return body, false, nil
-	}
-	if explicitToolPolicy == codexImageGenerationExplicitToolPolicyStrip {
-		return body, false, nil
-	}
-	apiKey := getAPIKeyFromContext(c)
-	if !GroupAllowsImageGeneration(apiKeyGroup(apiKey)) || !s.isCodexImageGenerationBridgeEnabled(ctx, account, apiKey) {
-		return body, false, nil
-	}
-	var decoded map[string]any
-	if err := decodeOpenAIJSONUseNumber(body, &decoded); err != nil {
-		return nil, false, err
-	}
-	if !ensureOpenAIResponsesImageGenerationTool(decoded) {
-		return body, false, nil
-	}
-	ensureOpenAIResponsesImageGenerationToolChoiceAuto(decoded)
-	normalizeOpenAIResponsesImageGenerationTools(decoded)
-	applyCodexImageGenerationBridgeInstructions(decoded)
-	injected, err := marshalOpenAIUpstreamJSON(decoded)
-	if err != nil {
-		return nil, false, err
-	}
-	armTokenProHostedImageDelivery(c, body)
-	logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Injected /responses image_generation tool for Codex passthrough text model")
-	return injected, true, nil
 }
