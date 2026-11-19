@@ -143,7 +143,9 @@ func TestTokenProNativeTextImageRouteIsExplicitAndScoped(t *testing.T) {
 		driver      string
 	}{
 		{"native-v1", "gpt-image-2", 204, "gpt-5.6-sol"},
+		{"native-v1", "", 204, "gpt-5.6-sol"},
 		{"", "gpt-image-2", 400, ""},
+		{"", "", 400, ""},
 		{"native-v1", "gpt-image-2.5-flare", 400, ""},
 	} {
 		t.Run(tc.mode+tc.model, func(t *testing.T) {
@@ -154,6 +156,9 @@ func TestTokenProNativeTextImageRouteIsExplicitAndScoped(t *testing.T) {
 			})
 			r.Use(TokenProDirectRoute())
 			r.POST("/v1/images/generations", func(c *gin.Context) {
+				body, err := io.ReadAll(c.Request.Body)
+				require.NoError(t, err)
+				require.Equal(t, "gpt-image-2", gjson.GetBytes(body, "model").String())
 				require.Equal(t, tc.driver, service.TokenProNativeImageDriver(c))
 				require.Equal(t, "16", c.GetHeader(tokenProGroupIDHeader))
 				c.Status(204)
@@ -301,6 +306,7 @@ func TestTokenProDirectNativeImageRoute(t *testing.T) {
 		status                                 int
 	}{
 		{"native image", "/v1/images/generations", `{"model":"gpt-image-2","prompt":"blue"}`, image, "65", "gpt-image-2.5-flare", 200},
+		{"image route keeps empty model rejected", "/v1/images/generations", `{"prompt":"blue"}`, image, "", "", 400},
 		{"image edit JSON", "/v1/images/edits", `{"model":"gpt-image-2","images":[{"image_url":"data:image/png;base64,fixture"}]}`, image, "65", "gpt-image-2.5-flare", 200},
 		{"text ignores image route", "/v1/responses", `{"model":"` + chat + `","input":"hello"}`, image, "16", "gpt-6-astra", 200},
 		{"explicit slug wins", "/v1/images/generations", `{"model":"` + slug(41, "gpt-image-2") + `"}`, image, "41", "gpt-image-2", 200},

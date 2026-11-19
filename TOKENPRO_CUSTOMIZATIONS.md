@@ -1,6 +1,6 @@
 # TokenPro 二次开发清单
 
-当前分支以 Sub2API `v0.2.22`（`b0fa9f3`，tag 对象 `b11573c`）为底层版本。构建版本是 `0.2.22-tp.5`：`backend/cmd/server/VERSION` 为 `0.2.22-tp.5`，`backend/internal/service/update_service.go` 中的 `tokenProUpstreamVersion` 仍为 `0.2.22`。管理端按数字核心比较上游，`0.2.22-tp.N` 与上游 `v0.2.22` 相同，不会提示可更新。此文件用于后续升级时区分上游改动和本项目改动。已部署回滚点仍是 `619e567b`（`0.2.19-tp.1`），在分支 `upgrade/sub2api-v0.2.18-tokenpro`，没有被改写。`0.2.22-tp.2`（官方 Codex 内联回退）和更早的生产包没有被改写。
+当前分支以 Sub2API `v0.2.22`（`b0fa9f3`，tag 对象 `b11573c`）为底层版本。构建版本是 `0.2.22-tp.6`：`backend/cmd/server/VERSION` 为 `0.2.22-tp.6`，`backend/internal/service/update_service.go` 中的 `tokenProUpstreamVersion` 仍为 `0.2.22`。管理端按数字核心比较上游，`0.2.22-tp.N` 与上游 `v0.2.22` 相同，不会提示可更新。此文件用于后续升级时区分上游改动和本项目改动。已部署回滚点仍是 `619e567b`（`0.2.19-tp.1`），在分支 `upgrade/sub2api-v0.2.18-tokenpro`，没有被改写。`0.2.22-tp.2`（官方 Codex 内联回退）和更早的生产包没有被改写。
 
 下文路径中 `backend/internal/` 简写为 `be/`，`frontend/src/` 简写为 `fe/`。
 
@@ -121,7 +121,7 @@ v0.2.17 重写了退款（待定期间保留扣减，网关失败后原子回退
 
 ## 9. 品牌、文档与部署
 
-- 构建版本号是 semver `X.Y.Z-tp.N`（当前 `0.2.22-tp.5`）。管理端徽章对非 `TokenPro-` 前缀补一个 `v`，所以界面显示 `v0.2.22-tp.5`。上游是否可更新只比较 `tokenProUpstreamVersion` 解析出的 `X.Y.Z`。
+- 构建版本号是 semver `X.Y.Z-tp.N`（当前 `0.2.22-tp.6`）。管理端徽章对非 `TokenPro-` 前缀补一个 `v`，所以界面显示 `v0.2.22-tp.6`。上游是否可更新只比较 `tokenProUpstreamVersion` 解析出的 `X.Y.Z`。
 - 管理员登录后检查底层新版本；同一浏览器会话对同一版本只提醒一次。
 - Agent 使用文档页面、菜单、样式和中英文内容。
 - 低内存 Docker 构建文件 `deploy/Dockerfile.lowmem`（Go 1.27.4，需与 `go.mod` 一致）。
@@ -381,3 +381,9 @@ Codex Mac 0.169 能显示 tp.3 的文字和链接，但 webview 不去请求远�
 - 文本组不再清空过长的 `image_generation_call.result`。生图组嵌的 data URI markdown 仍换成 `[已生成图片]`。
 - 计费仍按上游实际出图：文本 token 一次，加上恰好一次 gpt-image-2 按张费用。没有新图或请求失败就不收图片费。
 - 普通分组 key 仍改写 hosted 图片。缺 `call_id` 的 400 校验没有改。
+
+### 0.2.22-tp.6 文本组生图按实际图片模型准入
+
+`0.2.22-tp.6` 在 `0.2.22-tp.5` 上修正全局 key 的文本组生图准入。没有新迁移。`tokenProUpstreamVersion` 仍是 `0.2.22`。
+
+`X-TokenPro-Image-Route: tp-g16-…` 仍然把请求留在文本组，不改去生图组。分组白名单和渠道 `restrict_models` 检查的是实际转发、计费的图片模型（例如 `gpt-image-2`），不再用对话模型顶替。白名单没有该图片模型时拒绝，且不扣费。请求体没有 `model` 时，文本组的 native 图片路由默认写成 `gpt-image-2`。生图组路由、data-v1 和 `/responses` 文本生图没有改。
