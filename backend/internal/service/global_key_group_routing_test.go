@@ -118,6 +118,21 @@ func TestResolveGlobalGroupForModelHonorsAllowlistAndPreferredGroup(t *testing.T
 		context.Background(), nil, 18, "", "gpt-image-2.5-sunburst", &wrong, nil,
 	)
 	require.ErrorIs(t, err, ErrNoAvailableAccounts)
+
+	_, err = svc.ResolveGlobalGroupForModelWithUserAndGroup(
+		context.Background(), nil, 18, "", "gpt-image-2", &wrong, nil,
+	)
+	require.ErrorIs(t, err, ErrNoAvailableAccounts, "a text-group allowlist that omits gpt-image-2 must not fall through to the image group")
+
+	groups[0].ModelAllowlist.Models = append(groups[0].ModelAllowlist.Models, "gpt-image-2")
+	textAccount := accounts.byGroup[16][0]
+	textAccount.Credentials["model_mapping"].(map[string]any)["gpt-image-2"] = "gpt-image-2"
+	accounts.byGroup[16][0] = textAccount
+	resolved, err = svc.ResolveGlobalGroupForModelWithUserAndGroup(
+		context.Background(), nil, 18, "", "gpt-image-2", &wrong, nil,
+	)
+	require.NoError(t, err)
+	require.Equal(t, int64(16), resolved.Group.ID)
 }
 
 func TestResolveGlobalSubscriptionGroupUsesSubscriptionAsVisibilityGrant(t *testing.T) {

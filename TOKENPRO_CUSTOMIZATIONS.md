@@ -1,6 +1,6 @@
 # TokenPro 二次开发清单
 
-当前分支以 Sub2API `v0.2.22`（`b0fa9f3`，tag 对象 `b11573c`）为底层版本。构建版本是 `0.2.22-tp.5`：`backend/cmd/server/VERSION` 为 `0.2.22-tp.5`，`backend/internal/service/update_service.go` 中的 `tokenProUpstreamVersion` 仍为 `0.2.22`。管理端按数字核心比较上游，`0.2.22-tp.N` 与上游 `v0.2.22` 相同，不会提示可更新。此文件用于后续升级时区分上游改动和本项目改动。已部署回滚点仍是 `619e567b`（`0.2.19-tp.1`），在分支 `upgrade/sub2api-v0.2.18-tokenpro`，没有被改写。`0.2.22-tp.2`（官方 Codex 内联回退）和更早的生产包没有被改写。
+当前分支以 Sub2API `v0.2.22`（`b0fa9f3`，tag 对象 `b11573c`）为底层版本。构建版本是 `0.2.22-tp.6`：`backend/cmd/server/VERSION` 为 `0.2.22-tp.6`，`backend/internal/service/update_service.go` 中的 `tokenProUpstreamVersion` 仍为 `0.2.22`。管理端按数字核心比较上游，`0.2.22-tp.N` 与上游 `v0.2.22` 相同，不会提示可更新。此文件用于后续升级时区分上游改动和本项目改动。已部署回滚点仍是 `619e567b`（`0.2.19-tp.1`），在分支 `upgrade/sub2api-v0.2.18-tokenpro`，没有被改写。`0.2.22-tp.2`（官方 Codex 内联回退）和更早的生产包没有被改写。
 
 下文路径中 `backend/internal/` 简写为 `be/`，`frontend/src/` 简写为 `fe/`。
 
@@ -121,7 +121,7 @@ v0.2.17 重写了退款（待定期间保留扣减，网关失败后原子回退
 
 ## 9. 品牌、文档与部署
 
-- 构建版本号是 semver `X.Y.Z-tp.N`（当前 `0.2.22-tp.5`）。管理端徽章对非 `TokenPro-` 前缀补一个 `v`，所以界面显示 `v0.2.22-tp.5`。上游是否可更新只比较 `tokenProUpstreamVersion` 解析出的 `X.Y.Z`。
+- 构建版本号是 semver `X.Y.Z-tp.N`（当前 `0.2.22-tp.6`）。管理端徽章对非 `TokenPro-` 前缀补一个 `v`，所以界面显示 `v0.2.22-tp.6`。上游是否可更新只比较 `tokenProUpstreamVersion` 解析出的 `X.Y.Z`。
 - 管理员登录后检查底层新版本；同一浏览器会话对同一版本只提醒一次。
 - Agent 使用文档页面、菜单、样式和中英文内容。
 - 低内存 Docker 构建文件 `deploy/Dockerfile.lowmem`（Go 1.27.4，需与 `go.mod` 一致）。
@@ -381,3 +381,9 @@ Codex Mac 0.169 能显示 tp.3 的文字和链接，但 webview 不去请求远�
 - 文本组不再清空过长的 `image_generation_call.result`。生图组嵌的 data URI markdown 仍换成 `[已生成图片]`。
 - 计费仍按上游实际出图：文本 token 一次，加上恰好一次 gpt-image-2 按张费用。没有新图或请求失败就不收图片费。
 - 普通分组 key 仍改写 hosted 图片。缺 `call_id` 的 400 校验没有改。
+
+### 0.2.22-tp.6 文本组生图按实际图片模型准入
+
+`0.2.22-tp.6` 在 `0.2.22-tp.5` 上修正全局 key 的文本组生图准入。没有新迁移。`tokenProUpstreamVersion` 仍是 `0.2.22`。
+
+`X-TokenPro-Image-Route: tp-g16-…` 的 `/v1/images/generations` 仍然留在文本组，不改去生图组。实际图片模型是请求体里的 `model`；没有 `model` 时默认 `gpt-image-2`。这个模型已在该文本组的渠道白名单或分组可用模型里就原样放行。不在白名单里时，不直接拒绝，而是改写成该组白名单中的一个生图模型再转发：优先 `gpt-image-2`，否则按渠道定价列表的顺序，再按排序后的 `model_mapping` 键，最后按分组白名单顺序。计费、usage 和后续白名单检查都用改写后的模型，价格仍是这个文本组的价格。只有白名单里一个可用生图模型都没有时才拒绝，响应是「当前分组没有可用的生图模型」，不转发、不扣费。普通 key、生图组路由、data-v1 和 `/responses` 文本生图没有改。

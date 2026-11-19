@@ -61,7 +61,7 @@ func TestTokenProImagesAuthorizationScope(t *testing.T) {
 	}
 	c, key, ctx := textImagesAuthorizationFixture("/v1/images/edits")
 	ctx = WithTokenProImagesAuthorization(ctx, c, key, "gpt-image-2")
-	require.Equal(t, "gpt-6.1-sol", tokenProImagesChannelAuthorizationModel(ctx, key.GroupID, "gpt-image-2"))
+	require.Equal(t, "gpt-image-2", tokenProImagesChannelAuthorizationModel(ctx, key.GroupID, "gpt-image-2"))
 	otherGroup := int64(57)
 	require.Equal(t, "gpt-image-2", tokenProImagesChannelAuthorizationModel(ctx, &otherGroup, "gpt-image-2"))
 	require.Equal(t, "gpt-6-astra", tokenProImagesChannelAuthorizationModel(ctx, key.GroupID, "gpt-6-astra"))
@@ -72,7 +72,7 @@ func TestTokenProImagesAuthorizationSurvivesSizeRouting(t *testing.T) {
 	ctx = WithOpenAIImageSizeRouting(ctx, "1536x1024")
 	ctx = WithTokenProImagesAuthorization(ctx, c, key, "gpt-image-2")
 
-	require.Equal(t, "gpt-6.1-sol", tokenProImagesChannelAuthorizationModel(ctx, key.GroupID, "gpt-image-2"))
+	require.Equal(t, "gpt-image-2", tokenProImagesChannelAuthorizationModel(ctx, key.GroupID, "gpt-image-2"))
 	size, ok := openAIImageSizeRoutingFromContext(ctx)
 	require.True(t, ok)
 	require.Equal(t, "1536x1024", size)
@@ -88,25 +88,69 @@ func TestTokenProImagesAuthorizationChannelRestriction(t *testing.T) {
 			svc := &OpenAIGatewayService{channelService: newTestChannelService(makeStandardRepo(ch, map[int64]string{69: PlatformOpenAI, 57: PlatformOpenAI}))}
 			ctx = WithTokenProImagesAuthorization(ctx, c, key, "gpt-image-2")
 			if source != BillingModelSourceUpstream {
-				require.True(t, svc.checkChannelPricingRestriction(context.Background(), key.GroupID, "gpt-image-2"), "reproduce R80 restriction")
-				require.False(t, svc.checkChannelPricingRestriction(ctx, key.GroupID, "gpt-image-2"), "check the authorized text selection")
-				require.True(t, svc.checkChannelPricingRestriction(ctx, key.GroupID, "gpt-image-2.5-flare"), "no arbitrary model escape")
+				require.True(t, svc.checkChannelPricingRestriction(context.Background(), key.GroupID, "gpt-image-2"), "gpt-image-2 is not on the text whitelist")
+				require.True(t, svc.checkChannelPricingRestriction(ctx, key.GroupID, "gpt-image-2"), "a text-group image route checks gpt-image-2")
+				require.True(t, svc.checkChannelPricingRestriction(ctx, key.GroupID, "gpt-image-2.5-flare"), "an unlisted image model stays denied")
 			}
 			account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth,
 				Credentials: map[string]any{"model_mapping": map[string]any{"gpt-6.1-sol": "gpt-6.1-sol-mapped"}}}
-			require.False(t, svc.isUpstreamModelRestrictedByChannel(ctx, 69, account, "gpt-image-2", false))
+			require.True(t, svc.isUpstreamModelRestrictedByChannel(ctx, 69, account, "gpt-image-2", false))
 			require.True(t, svc.isUpstreamModelRestrictedByChannel(context.Background(), 69, account, "gpt-image-2", false))
 			require.True(t, svc.isUpstreamModelRestrictedByChannel(ctx, 57, account, "gpt-image-2", false), "context is group scoped")
 			mapping, _ := svc.ResolveChannelMappingAndRestrict(ctx, key.GroupID, "gpt-image-2")
 			require.Equal(t, "gpt-image-2", mapping.MappedModel, "actual image mapping stays untouched")
-			c.Set(TokenProNativeImageDriverContextKey, "gpt-6-astra")
-			denied := WithTokenProImagesAuthorization(WithOpenAIImagesEndpoint(WithOpenAIImageGenerationIntent(context.Background())), c, key, "gpt-image-2")
+			allowed := ch
+			allowed.ModelPricing = []ChannelModelPricing{{Platform: PlatformOpenAI, Models: []string{"gpt-6.1-sol", "gpt-image-2"}}}
+			allowedSvc := &OpenAIGatewayService{channelService: newTestChannelService(makeStandardRepo(allowed, map[int64]string{69: PlatformOpenAI, 57: PlatformOpenAI}))}
 			if source != BillingModelSourceUpstream {
-				require.True(t, svc.checkChannelPricingRestriction(denied, key.GroupID, "gpt-image-2"), "unlisted driver remains denied")
+				require.False(t, allowedSvc.checkChannelPricingRestriction(ctx, key.GroupID, "gpt-image-2"), "a whitelisted image model is admitted")
 			}
-			require.True(t, svc.isUpstreamModelRestrictedByChannel(denied, 69, account, "gpt-image-2", false))
+			require.False(t, allowedSvc.isUpstreamModelRestrictedByChannel(ctx, 69, account, "gpt-image-2", false))
 		})
 	}
+}
+
+func TestResolveTokenProTextRouteImageModel(t *testing.T) {
+	groupID := int64(16)
+	newSvc := func(models []string, mapping map[string]string, source string) *OpenAIGatewayService {
+		ch := Channel{ID: 14, Status: StatusActive, GroupIDs: []int64{groupID}, RestrictModels: true, BillingModelSource: source,
+			ModelPricing: []ChannelModelPricing{{Platform: PlatformOpenAI, Models: models}}}
+		if len(mapping) > 0 {
+			ch.ModelMapping = map[string]map[string]string{PlatformOpenAI: mapping}
+		}
+		return &OpenAIGatewayService{channelService: newTestChannelService(makeStandardRepo(ch, map[int64]string{groupID: PlatformOpenAI}))}
+	}
+	group := &Group{ID: groupID, Platform: PlatformOpenAI, AllowImageGeneration: true}
+
+	chosen, err := newSvc([]string{"gpt-6-sol", "gpt-image-2"}, nil, BillingModelSourceRequested).ResolveTokenProTextRouteImageModel(context.Background(), group, "gpt-image-2")
+	require.NoError(t, err)
+	require.Equal(t, "gpt-image-2", chosen)
+
+	chosen, err = newSvc([]string{"gpt-6-sol", "gpt-image-1.5", "gpt-image-2"}, nil, BillingModelSourceRequested).ResolveTokenProTextRouteImageModel(context.Background(), group, "gpt-image-2.5-flare")
+	require.NoError(t, err)
+	require.Equal(t, "gpt-image-2", chosen, "gpt-image-2 wins even when an earlier image model is listed")
+
+	chosen, err = newSvc([]string{"gpt-image-1.5", "gpt-image-2.5-flare"}, nil, BillingModelSourceChannelMapped).ResolveTokenProTextRouteImageModel(context.Background(), group, "")
+	require.NoError(t, err)
+	require.Equal(t, "gpt-image-1.5", chosen, "an empty model defaults to gpt-image-2, then the first listed image model")
+
+	_, err = newSvc([]string{"gpt-6-sol", "gpt-6.1-sol"}, nil, BillingModelSourceRequested).ResolveTokenProTextRouteImageModel(context.Background(), group, "gpt-image-2")
+	require.ErrorIs(t, err, ErrTokenProTextGroupNoImageModel)
+
+	chosen, err = newSvc([]string{"gpt-image-2-mapped"}, map[string]string{"gpt-image-2": "gpt-image-2-mapped"}, BillingModelSourceChannelMapped).ResolveTokenProTextRouteImageModel(context.Background(), group, "gpt-image-2.5-flare")
+	require.NoError(t, err)
+	require.Equal(t, "gpt-image-2", chosen, "a mapping key is usable when its target is priced")
+
+	allowlisted := *group
+	allowlisted.ModelAllowlist = GroupModelAllowlist{Enabled: true, Models: []string{"gpt-6-sol", "gpt-image-1.5"}}
+	chosen, err = newSvc([]string{"gpt-image-2", "gpt-image-1.5"}, nil, BillingModelSourceRequested).ResolveTokenProTextRouteImageModel(context.Background(), &allowlisted, "gpt-image-2")
+	require.NoError(t, err)
+	require.Equal(t, "gpt-image-1.5", chosen, "the group allowlist still has to accept the image model")
+
+	open := &OpenAIGatewayService{}
+	chosen, err = open.ResolveTokenProTextRouteImageModel(context.Background(), group, "gpt-image-2.5-flare")
+	require.NoError(t, err)
+	require.Equal(t, "gpt-image-2.5-flare", chosen, "no whitelist leaves the requested model unchanged")
 }
 
 func TestTokenProImagesAuthorizationSchedulerKeepsImageModel(t *testing.T) {
@@ -122,9 +166,17 @@ func TestTokenProImagesAuthorizationSchedulerKeepsImageModel(t *testing.T) {
 			_, _, err := svc.SelectAccountWithSchedulerForImages(ctx, key.GroupID, "", "gpt-image-2", nil, OpenAIImagesCapabilityNative)
 			require.ErrorContains(t, err, "channel pricing restriction")
 			ctx = WithTokenProImagesAuthorization(ctx, c, key, "gpt-image-2")
-			selected, _, err := svc.SelectAccountWithSchedulerForImages(ctx, key.GroupID, "", "gpt-image-2", nil, OpenAIImagesCapabilityNative)
+			_, _, err = svc.SelectAccountWithSchedulerForImages(ctx, key.GroupID, "", "gpt-image-2", nil, OpenAIImagesCapabilityNative)
+			require.ErrorContains(t, err, "channel pricing restriction", "the text driver must not admit gpt-image-2")
+
+			allowed := ch
+			allowed.ModelPricing = []ChannelModelPricing{{Platform: PlatformOpenAI, Models: []string{"gpt-6.1-sol", "gpt-image-2"}}}
+			allowedSvc := &OpenAIGatewayService{channelService: newTestChannelService(makeStandardRepo(allowed, map[int64]string{69: PlatformOpenAI})),
+				accountRepo: svc.accountRepo}
+			selected, _, err := allowedSvc.SelectAccountWithSchedulerForImages(ctx, key.GroupID, "", "gpt-image-2", nil, OpenAIImagesCapabilityNative)
 			require.NoError(t, err)
-			require.Equal(t, int64(47), selected.Account.ID, "schedule gpt-image-2, never the text driver")
+			require.Equal(t, int64(47), selected.Account.ID, "schedule gpt-image-2 inside the text group")
+			require.Equal(t, int64(69), *key.GroupID)
 			if selected.ReleaseFunc != nil {
 				selected.ReleaseFunc()
 			}

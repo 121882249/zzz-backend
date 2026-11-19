@@ -10,8 +10,8 @@ import (
 
 func TestTokenProNativeImageAuthorizationUsesOnlySelectedDriver(t *testing.T) {
 	for _, tc := range []struct{ path, model, want string }{
-		{"/v1/images/generations", "gpt-image-2", "gpt-5.6-sol"},
-		{"/v1/images/edits", "gpt-image-2", "gpt-5.6-sol"},
+		{"/v1/images/generations", "gpt-image-2", "gpt-image-2"},
+		{"/v1/images/edits", "gpt-image-2", "gpt-image-2"},
 		{"/v1/images/generations", "gpt-image-2.5-flare", "gpt-image-2.5-flare"},
 		{"/v1/responses", "gpt-image-2", "gpt-image-2"},
 	} {

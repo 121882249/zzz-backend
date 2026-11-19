@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -77,6 +79,32 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		return
 	}
 	requestModel := parsed.Model
+	if h.gatewayService != nil && tokenProGlobalTextRouteImageGeneration(c, apiKey) {
+		group := tokenProTextRouteGroup(c, apiKey, h.globalGroupResolver)
+		chosen, chooseErr := h.gatewayService.ResolveTokenProTextRouteImageModel(c.Request.Context(), group, requestModel)
+		if chooseErr != nil {
+			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", chooseErr.Error())
+			return
+		}
+		if chosen != "" && chosen != requestModel {
+			rewritten, rewrittenType, rewriteErr := service.RewriteOpenAIImagesModel(body, c.GetHeader("Content-Type"), chosen)
+			if rewriteErr != nil {
+				h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "当前分组没有可用的生图模型")
+				return
+			}
+			body = rewritten
+			parsed.Model = chosen
+			requestModel = chosen
+			if c.Request != nil {
+				c.Request.Body = io.NopCloser(bytes.NewReader(body))
+				c.Request.ContentLength = int64(len(body))
+				c.Request.Header.Set("Content-Length", strconv.Itoa(len(body)))
+				if strings.TrimSpace(rewrittenType) != "" {
+					c.Request.Header.Set("Content-Type", rewrittenType)
+				}
+			}
+		}
+	}
 	if apiKey.IsGlobal() {
 		resolvedKey, resolveErr := resolveGlobalAPIKeyForModel(c, h.globalGroupResolver, apiKey, subject.UserID, requestModel)
 		if resolveErr != nil {

@@ -119,11 +119,38 @@ func resolveGlobalAPIKeyForModel(
 	return requestKey, nil
 }
 
-func nativeImageAuthorizationModel(c *gin.Context, model string) string {
-	if model == "gpt-image-2" {
-		if driver := service.TokenProNativeImageDriver(c); driver != "" {
-			return driver
-		}
-	}
+// nativeImageAuthorizationModel is the model the resolved text group must
+// admit. Image routes stay in that group, and the allowlist checks the image
+// model that will be forwarded, not the conversation model stored as a driver.
+func nativeImageAuthorizationModel(_ *gin.Context, model string) string {
 	return model
+}
+
+func tokenProGlobalTextRouteImageGeneration(c *gin.Context, key *service.APIKey) bool {
+	if c == nil || c.Request == nil || c.Request.URL == nil || key == nil || !key.IsGlobal() {
+		return false
+	}
+	if !strings.HasSuffix(c.Request.URL.Path, "/images/generations") {
+		return false
+	}
+	driver := service.TokenProNativeImageDriver(c)
+	return strings.HasPrefix(strings.ToLower(driver), "gpt-") && !service.IsGPTImageGenerationModel(driver)
+}
+
+func tokenProTextRouteGroup(c *gin.Context, key *service.APIKey, resolver *service.GatewayService) *service.Group {
+	if key != nil && key.Group != nil && key.Group.ID > 0 {
+		return key.Group
+	}
+	if c == nil || c.Request == nil {
+		return nil
+	}
+	groupID, err := strconv.ParseInt(strings.TrimSpace(c.GetHeader(tokenProGroupIDHeader)), 10, 64)
+	if err != nil || groupID <= 0 || resolver == nil {
+		return nil
+	}
+	group, err := resolver.ResolveGroupByID(c.Request.Context(), groupID)
+	if err != nil {
+		return nil
+	}
+	return group
 }

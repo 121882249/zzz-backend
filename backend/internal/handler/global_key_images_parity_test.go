@@ -26,6 +26,16 @@ type globalImageTextChannelRepo struct {
 func (globalImageTextChannelRepo) ListAll(context.Context) ([]service.Channel, error) {
 	return []service.Channel{{ID: 14, Status: service.StatusActive, GroupIDs: []int64{69}, RestrictModels: true,
 		BillingModelSource: service.BillingModelSourceChannelMapped,
+		ModelPricing:       []service.ChannelModelPricing{{Platform: service.PlatformOpenAI, Models: []string{"gpt-6.1-sol", "gpt-image-2"}}}}}, nil
+}
+
+type globalImageTextOnlyChannelRepo struct {
+	globalImageTextChannelRepo
+}
+
+func (globalImageTextOnlyChannelRepo) ListAll(context.Context) ([]service.Channel, error) {
+	return []service.Channel{{ID: 14, Status: service.StatusActive, GroupIDs: []int64{69}, RestrictModels: true,
+		BillingModelSource: service.BillingModelSourceChannelMapped,
 		ModelPricing:       []service.ChannelModelPricing{{Platform: service.PlatformOpenAI, Models: []string{"gpt-6.1-sol"}}}}}, nil
 }
 
@@ -128,7 +138,7 @@ func TestGlobalTextImagesRestrictedChannelKeepsOrdinaryForwarding(t *testing.T) 
 				account := service.Account{ID: 47, Platform: service.PlatformOpenAI, Type: accountType, Status: service.StatusActive, Schedulable: true, Credentials: credentials}
 				upstream := &globalImageParityUpstream{}
 				cfg := &config.Config{RunMode: config.RunModeSimple}
-				channel := service.NewChannelService(globalImageTextChannelRepo{}, nil, nil, nil, nil)
+				channel := service.NewChannelService(globalImageTextOnlyChannelRepo{}, nil, nil, nil, nil)
 				gateway := service.NewOpenAIGatewayService(openAIImagesFailoverAccountRepo{accounts: []service.Account{account}},
 					nil, nil, nil, nil, nil, nil, cfg, nil, nil, nil, nil, nil, upstream, nil, nil, nil, nil, channel, nil, nil, nil)
 				billing := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
@@ -151,18 +161,131 @@ func TestGlobalTextImagesRestrictedChannelKeepsOrdinaryForwarding(t *testing.T) 
 					c.Set(service.TokenProNativeImageDriverContextKey, driver)
 					c.Set(service.TokenProTextImageDeliveryContextKey, driver != "")
 					h.Images(c)
-					if driver == "gpt-6.1-sol" {
-						require.Equal(t, 200, rec.Code, rec.Body.String())
-					} else {
-						require.GreaterOrEqual(t, rec.Code, 400, "unlisted and absent driver must stay denied")
-					}
+					require.GreaterOrEqual(t, rec.Code, 400, "gpt-image-2 is not on the text-model whitelist")
+					require.NotContains(t, rec.Body.String(), "b64_json")
 				}
-				require.Len(t, upstream.requests, 1)
-				require.True(t, strings.HasSuffix(upstream.requests[0].URL.Path, strings.TrimPrefix(endpoint, "/v1")))
-				require.Equal(t, "gpt-image-2", gjson.Get(upstream.bodies[0], "model").String())
-				require.NotContains(t, upstream.bodies[0], "gpt-6.1-sol")
-				require.NotContains(t, upstream.requests[0].URL.Path, "/responses")
+				require.Empty(t, upstream.requests, "a rejected image model is not forwarded or billed")
 			})
 		}
 	}
+}
+
+func TestGlobalTextImagesWhitelistedModelForwardsInsideTextGroup(t *testing.T) {
+	groupID := int64(69)
+	account := service.Account{ID: 47, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true,
+		Credentials: map[string]any{"api_key": "fixture", "base_url": "https://configured-text.example/v1"}}
+	upstream := &globalImageParityUpstream{}
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	channel := service.NewChannelService(globalImageTextChannelRepo{}, nil, nil, nil, nil)
+	gateway := service.NewOpenAIGatewayService(openAIImagesFailoverAccountRepo{accounts: []service.Account{account}},
+		nil, nil, nil, nil, nil, nil, cfg, nil, nil, nil, nil, nil, upstream, nil, nil, nil, nil, channel, nil, nil, nil)
+	billing := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
+	t.Cleanup(billing.Stop)
+	h := NewOpenAIGatewayHandler(gateway, service.NewConcurrencyService(nil), billing,
+		service.NewAPIKeyService(nil, nil, nil, nil, nil, nil, cfg), nil, nil, nil, nil, cfg)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewBufferString(`{"model":"gpt-image-2","prompt":"draw a cat","n":1}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{ID: 99, UserID: 100, GroupID: &groupID, KeyType: service.APIKeyTypeGlobal,
+		Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI, AllowImageGeneration: true}, User: &service.User{ID: 100}})
+	c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: 100})
+	c.Set(tokenProGlobalGroupResolvedContextKey, true)
+	c.Set(service.TokenProNativeImageDriverContextKey, "gpt-6.1-sol")
+	c.Set(service.TokenProTextImageDeliveryContextKey, true)
+	h.Images(c)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Len(t, upstream.requests, 1)
+	require.Equal(t, "https://configured-text.example/v1/images/generations", upstream.requests[0].URL.String())
+	require.Equal(t, "gpt-image-2", gjson.Get(upstream.bodies[0], "model").String())
+	require.NotContains(t, upstream.bodies[0], "gpt-6.1-sol")
+	require.Equal(t, groupID, *c.MustGet(string(middleware2.ContextKeyAPIKey)).(*service.APIKey).GroupID)
+}
+
+type globalImageListedChannelRepo struct {
+	service.ChannelRepository
+	models []string
+}
+
+func (r globalImageListedChannelRepo) ListAll(context.Context) ([]service.Channel, error) {
+	return []service.Channel{{ID: 14, Status: service.StatusActive, GroupIDs: []int64{69}, RestrictModels: true,
+		BillingModelSource: service.BillingModelSourceRequested,
+		ModelPricing:       []service.ChannelModelPricing{{Platform: service.PlatformOpenAI, Models: r.models}}}}, nil
+}
+
+func (globalImageListedChannelRepo) GetGroupPlatforms(context.Context, []int64) (map[int64]string, error) {
+	return map[int64]string{69: service.PlatformOpenAI}, nil
+}
+
+func TestGlobalTextRouteImageGenerationRewritesToWhitelistedModel(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, models, want string
+		status                   int
+	}{
+		{name: "listed model stays", body: `{"model":"gpt-image-2","prompt":"cat","n":1}`, models: "gpt-6-sol,gpt-image-2", want: "gpt-image-2", status: http.StatusOK},
+		{name: "missing model prefers gpt-image-2", body: `{"model":"gpt-image-2.5-flare","prompt":"cat","n":1}`, models: "gpt-image-1.5,gpt-image-2", want: "gpt-image-2", status: http.StatusOK},
+		{name: "empty model uses first image model", body: `{"prompt":"cat","n":1}`, models: "gpt-image-1.5,gpt-image-2.5-flare", want: "gpt-image-1.5", status: http.StatusOK},
+		{name: "no image model", body: `{"model":"gpt-image-2","prompt":"cat","n":1}`, models: "gpt-6-sol", status: http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			groupID := int64(69)
+			account := service.Account{ID: 47, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true,
+				Credentials: map[string]any{"api_key": "fixture", "base_url": "https://configured-text.example/v1"}}
+			upstream := &globalImageParityUpstream{}
+			cfg := &config.Config{RunMode: config.RunModeSimple}
+			channel := service.NewChannelService(globalImageListedChannelRepo{models: strings.Split(tc.models, ",")}, nil, nil, nil, nil)
+			gateway := service.NewOpenAIGatewayService(openAIImagesFailoverAccountRepo{accounts: []service.Account{account}},
+				nil, nil, nil, nil, nil, nil, cfg, nil, nil, nil, nil, nil, upstream, nil, nil, nil, nil, channel, nil, nil, nil)
+			billing := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
+			t.Cleanup(billing.Stop)
+			h := NewOpenAIGatewayHandler(gateway, service.NewConcurrencyService(nil), billing,
+				service.NewAPIKeyService(nil, nil, nil, nil, nil, nil, cfg), nil, nil, nil, nil, cfg)
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewBufferString(tc.body))
+			c.Request.Header.Set("Content-Type", "application/json")
+			c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{ID: 99, UserID: 100, GroupID: &groupID, KeyType: service.APIKeyTypeGlobal,
+				Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI, AllowImageGeneration: true}, User: &service.User{ID: 100}})
+			c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: 100})
+			c.Set(tokenProGlobalGroupResolvedContextKey, true)
+			c.Set(service.TokenProNativeImageDriverContextKey, "gpt-6-sol")
+			h.Images(c)
+			require.Equal(t, tc.status, rec.Code, rec.Body.String())
+			if tc.status != http.StatusOK {
+				require.Contains(t, rec.Body.String(), "当前分组没有可用的生图模型")
+				require.Empty(t, upstream.requests)
+				return
+			}
+			require.Len(t, upstream.requests, 1)
+			require.Equal(t, tc.want, gjson.Get(upstream.bodies[0], "model").String())
+			require.Equal(t, groupID, *c.MustGet(string(middleware2.ContextKeyAPIKey)).(*service.APIKey).GroupID)
+		})
+	}
+}
+
+func TestGroupKeyImageGenerationDoesNotRewriteModel(t *testing.T) {
+	groupID := int64(69)
+	account := service.Account{ID: 47, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true,
+		Credentials: map[string]any{"api_key": "fixture", "base_url": "https://configured-text.example/v1"}}
+	upstream := &globalImageParityUpstream{}
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	channel := service.NewChannelService(globalImageListedChannelRepo{models: []string{"gpt-image-1.5"}}, nil, nil, nil, nil)
+	gateway := service.NewOpenAIGatewayService(openAIImagesFailoverAccountRepo{accounts: []service.Account{account}},
+		nil, nil, nil, nil, nil, nil, cfg, nil, nil, nil, nil, nil, upstream, nil, nil, nil, nil, channel, nil, nil, nil)
+	billing := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
+	t.Cleanup(billing.Stop)
+	h := NewOpenAIGatewayHandler(gateway, service.NewConcurrencyService(nil), billing,
+		service.NewAPIKeyService(nil, nil, nil, nil, nil, nil, cfg), nil, nil, nil, nil, cfg)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewBufferString(`{"model":"gpt-image-2","prompt":"cat","n":1}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{ID: 99, UserID: 100, GroupID: &groupID, KeyType: service.APIKeyTypeGroup,
+		Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI, AllowImageGeneration: true}, User: &service.User{ID: 100}})
+	c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: 100})
+	c.Set(service.TokenProNativeImageDriverContextKey, "gpt-6-sol")
+	h.Images(c)
+	require.GreaterOrEqual(t, rec.Code, 400, rec.Body.String())
+	require.NotContains(t, rec.Body.String(), "gpt-image-1.5")
+	require.Empty(t, upstream.requests)
 }

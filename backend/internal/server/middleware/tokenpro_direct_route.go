@@ -171,7 +171,14 @@ func TokenProDirectRoute(stores ...service.TokenProImageTurnStore) gin.HandlerFu
 			if !matched {
 				return 0, "", false, errors.New("malformed image route")
 			}
-			if (imageMode == "native-v1" || turnMode) && model == "gpt-image-2" && strings.HasPrefix(public, "gpt-") && !service.IsGPTImageGenerationModel(public) {
+			if (imageMode == "native-v1" || turnMode) && strings.HasPrefix(public, "gpt-") && !service.IsGPTImageGenerationModel(public) {
+				// The text group stays selected. The body model is the image
+				// model to forward; an empty model uses the same default as
+				// applyOpenAIImagesDefaults. Whitelist substitution happens
+				// later and only for /v1/images/generations.
+				if model == "" {
+					model = "gpt-image-2"
+				}
 				c.Set(service.TokenProNativeImageDriverContextKey, public)
 				return group, model, true, nil
 			}
