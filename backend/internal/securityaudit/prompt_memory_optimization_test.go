@@ -19,6 +19,10 @@ func memoryTestPromptService(cfg ActiveConfig, repo JobRepository) *PromptServic
 		enqueuer: NewEnqueuer(store, repo, &fakePayloadStore{}, metrics)}
 }
 
+// These allocation and ownership checks exercise the upstream audit engine.
+// Embedding its interface keeps the independent TokenPro content-monitor hook out of their scope.
+type memoryTestAuditEngine struct{ PromptEngine }
+
 func TestAsyncAuditOutOfScopeSkipsLargeBodyCopy(t *testing.T) {
 	cfg := asyncConfig()
 	cfg.AllGroups = false
@@ -29,7 +33,7 @@ func TestAsyncAuditOutOfScopeSkipsLargeBodyCopy(t *testing.T) {
 	runtime.GC()
 	var before, after runtime.MemStats
 	runtime.ReadMemStats(&before)
-	decision := NewCoordinator(nil, svc).Check(context.Background(), req)
+	decision := NewCoordinator(nil, memoryTestAuditEngine{svc}).Check(context.Background(), req)
 	svc.enqueueWG.Wait()
 	runtime.ReadMemStats(&after)
 	require.True(t, decision.AllowNextStage)
@@ -150,7 +154,7 @@ func TestAsyncAuditOwnsCopyBeforeLegacyOrHandlerCanMutateInput(t *testing.T) {
 		*borrowed.GroupID = 2
 		close(resume)
 	}}
-	decision := NewCoordinator(legacy, svc).Check(context.Background(), req)
+	decision := NewCoordinator(legacy, memoryTestAuditEngine{svc}).Check(context.Background(), req)
 	svc.enqueueWG.Wait()
 	require.True(t, decision.AllowNextStage)
 	require.Equal(t, AuditMetricsSnapshot{Enqueued: 1}, svc.metrics.AuditSnapshot())
