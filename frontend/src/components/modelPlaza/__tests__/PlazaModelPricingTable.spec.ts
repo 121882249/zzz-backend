@@ -100,7 +100,7 @@ describe('PlazaModelPricingTable', () => {
     }
     const wrapper = mountTable([model], 0.5)
     try {
-      expect(wrapper.text()).toContain('(12h $1.00)')
+      expect(wrapper.text()).toContain('(12h ¥1.00)')
       expect(wrapper.text()).toContain('(12h $4.00)')
       expect(wrapper.text()).not.toContain('(1h')
     } finally {
@@ -156,9 +156,9 @@ describe('PlazaModelPricingTable', () => {
     const text = wrapper.text()
     expect(text).toContain('¥3.00')
     expect(text).toContain('¥15.00')
-    // 缓存写 / 读(超过 2 位小数原样保留)
+    // 缓存列只展示写入价。
     expect(text).toContain('¥3.75')
-    expect(text).toContain('¥0.30')
+    expect(text).not.toContain('¥0.30')
     // 现金倍率 = ¥3 ÷ ($3 × 6.8)，固定保留四位小数。
     expect(text).toContain('0.1471x')
   })
@@ -506,16 +506,16 @@ describe('PlazaModelPricingTable', () => {
     expect(text).toContain('¥20.00')
     expect(text).toContain('¥75.00')
     expect(text).toContain('¥25.00')
-    expect(text).toContain('¥4.00')
+    expect(text).not.toContain('¥4.00')
     model.pricing!.intervals.unshift({
       ...model.pricing!.intervals[0], min_tokens: 0, max_tokens: 272000,
       tier_label: '<=272K', cache_write_multiplier: null, cache_read_multiplier: null
     })
     const cells = mountTable([model], 1).findAll('tbody td')
     expect(cells[3].text()).toContain('¥12.50')
-    expect(cells[3].text()).toContain('¥2.00')
+    expect(cells[3].text()).not.toContain('¥2.00')
     expect(cells[3].text()).toContain('¥25.00')
-    expect(cells[3].text()).toContain('¥4.00')
+    expect(cells[3].text()).not.toContain('¥4.00')
   })
 
   it('生图独立倍率开启时,按图价格 × 独立倍率,不乘分组倍率;倍率列展示独立倍率', () => {
@@ -715,12 +715,12 @@ describe('PlazaModelPricingTable 长上下文阶梯', () => {
     const cacheCell = cells[3]
     const rows = cacheCell.findAll('.leading-5')
     expect(rows).toHaveLength(2)
-    // 写 6.25 × 0.5 / 读 0.5 × 0.5;高档 12.5 × 0.5 / 1 × 0.5
+    // 只展示各档写入价乘以实付倍率。
     expect(rows[0].text()).toContain('modelPlaza.table.cacheWriteShort')
     expect(rows[0].text()).toContain('¥3.125')
-    expect(rows[0].text()).toContain('¥0.25')
+    expect(rows[0].text()).not.toContain('¥0.25')
     expect(rows[1].text()).toContain('¥6.25')
-    expect(rows[1].text()).toContain('¥0.50')
+    expect(rows[1].text()).not.toContain('¥0.50')
     // 输入列带标签,输出/缓存列只按行对齐不重复标签
     expect(cells[1].text()).toContain('≤272K')
     expect(cells[1].text()).toContain('>272K')
@@ -741,7 +741,7 @@ describe('PlazaModelPricingTable 长上下文阶梯', () => {
     expect(cells[5].text()).toContain('$45.00')
     expect(cells[6].text()).toContain('$6.25')
     expect(cells[6].text()).toContain('$12.50')
-    expect(cells[6].text()).toContain('$1.00')
+    expect(cells[6].text()).not.toContain('$1.00')
     expect(cells[6].text()).not.toContain('(1h')
   })
 
@@ -774,13 +774,30 @@ describe('PlazaModelPricingTable 长上下文阶梯', () => {
     expect(rows.map((r) => r.text().split(/\s+/)[0])).toEqual(['≤100K', '≤200K', '≤1M', '>1M'])
   })
 
-  it('官方无 intervals 字段(旧响应)时官方列保持平价,实付无阶梯时缓存列保持两行', () => {
+  it('实付和官方无阶梯时只展示缓存写入价及其 TTL', () => {
     const wrapper = mountTable([tokenModel()], 1)
     const cells = wrapper.findAll('tbody td')
     expect(cells[3].text()).toContain('modelPlaza.table.cacheWrite')
-    expect(cells[3].text()).toContain('modelPlaza.table.cacheRead')
+    expect(cells[3].text()).not.toContain('modelPlaza.table.cacheRead')
     expect(cells[3].findAll('.leading-5')).toHaveLength(0)
+    expect(cells[6].text()).not.toContain('modelPlaza.table.cacheRead')
+    expect(cells[6].text()).not.toContain('$0.30')
     expect(cells[6].text()).toContain('(1h')
+  })
+
+  it('实付和官方只有缓存读取价时缓存列仅显示占位符', () => {
+    const intervals = ladderIntervals().map((interval) => ({ ...interval, cache_write_price: null }))
+    const model = ladderModel()
+    model.pricing!.cache_write_price = null
+    model.pricing!.intervals = intervals
+    model.official_pricing!.cache_write_price = null
+    model.official_pricing!.intervals = intervals
+
+    const wrapper = mountTable([model], 1)
+    const cells = wrapper.findAll('tbody td')
+    expect(cells[3].text()).toBe('-')
+    expect(cells[6].text()).toBe('-')
+    wrapper.unmount()
   })
 })
 
